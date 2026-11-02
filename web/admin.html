@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quản trị, Học AI</title>
+<meta name="theme-color" content="#0b0d12">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/theme.js"></script>
+<script src="/static/admin.js" defer></script>
+</head>
+<body class="admin-body">
+<main class="admin-page">
+  <header class="admin-head">
+    <h1 class="hero-title small-title">Quản trị</h1>
+    <a class="btn-studio-secondary" href="/">Về app</a>
+  </header>
+  <p class="is-error-text" id="adminError" role="alert" hidden></p>
+
+  <section aria-labelledby="pendingTitle">
+    <h2 class="list-heading" id="pendingTitle">Chờ duyệt ô Hỏi</h2>
+    <div class="lesson-stream" id="pendingList"></div>
+    <p class="dock-note" id="pendingEmpty" hidden>Không có package nào đang chờ.</p>
+  </section>
+
+  <section aria-labelledby="aiTitle">
+    <h2 class="list-heading lib-second" id="aiTitle">Nhà cung cấp AI</h2>
+    <form class="flow-strip admin-form" id="aiForm">
+      <p class="dock-note" id="aiCurrent"></p>
+      <p class="is-warn-text admin-note" id="aiWarn" hidden></p>
+      <label class="auth-label" for="aiProvider"><span>Nhà cung cấp</span></label>
+      <div class="auth-input-box"><select class="auth-input" id="aiProvider"></select></div>
+      <label class="auth-label" for="aiModel"><span>Model</span></label>
+      <div class="auth-input-box"><input class="auth-input" id="aiModel" autocomplete="off" spellcheck="false"></div>
+      <label class="auth-label" for="aiKey"><span>Khóa API</span></label>
+      <div class="auth-input-box"><input class="auth-input" id="aiKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="Để trống nếu giữ khóa cũ"></div>
+      <p class="dock-note admin-note" id="aiResult" role="status"></p>
+      <div class="stream-actions">
+        <button type="submit" class="btn-studio-primary">Lưu</button>
+        <button type="button" class="btn-studio-secondary" id="aiTest">Thử kết nối</button>
+      </div>
+    </form>
+  </section>
+
+  <section aria-labelledby="abuseTitle">
+    <h2 class="list-heading lib-second" id="abuseTitle">Báo vi phạm</h2>
+    <div class="lesson-stream" id="abuseList"></div>
+    <p class="dock-note" id="abuseEmpty" hidden>Chưa có báo cáo nào.</p>
+  </section>
+
+  <section aria-labelledby="packagesTitle">
+    <h2 class="list-heading lib-second" id="packagesTitle">Package</h2>
+    <div class="lesson-stream" id="packageList"></div>
+    <p class="dock-note" id="packagesEmpty" hidden>Chưa có package nào.</p>
+  </section>
+
+  <section aria-labelledby="usersTitle">
+    <h2 class="list-heading lib-second" id="usersTitle">Tài khoản và dung lượng</h2>
+    <div class="lesson-stream" id="userList"></div>
+  </section>
+
+  <section aria-labelledby="logTitle">
+    <h2 class="list-heading lib-second" id="logTitle">Nhật ký</h2>
+    <div class="lesson-stream" id="logList"></div>
+    <p class="dock-note" id="logEmpty" hidden>Chưa có gì.</p>
+  </section>
+</main>
+
+<dialog class="lesson-dialog admin-review" id="reviewDialog" aria-labelledby="reviewTitle">
+  <div class="lesson-dialog-form">
+    <h2 class="list-heading" id="reviewTitle"></h2>
+    <p class="dock-note" id="reviewAuthor"></p>
+    <p class="is-warn-text admin-note" id="reviewZdr" hidden>Nhà cung cấp đang chọn không xác nhận ZDR. Nội dung bài và câu hỏi có thể được lưu ở phía họ.</p>
+    <p class="dock-note admin-note">Chưa có tùy chọn Internet, cần kiểm tra ZDR với khóa thật.</p>
+    <div id="reviewBody" class="admin-review-body"></div>
+    <p class="is-error-text" id="reviewError" role="alert" hidden></p>
+    <div class="lesson-dialog-buttons">
+      <button type="button" class="btn-studio-secondary" id="reviewClose">Đóng</button>
+      <button type="button" class="btn-studio-secondary btn-danger-soft" id="reviewReject">Từ chối</button>
+      <button type="button" class="btn-studio-primary" id="reviewApprove">Duyệt</button>
+    </div>
+  </div>
+</dialog>
+</body>
+</html>

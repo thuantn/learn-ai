@@ -35,7 +35,7 @@ def free_port():
         return s.getsockname()[1]
 
 
-def make_zip(dest, slug, title, tracks=None, cards=CARDS):
+def make_zip(dest, slug, title, tracks=None, cards=CARDS, content=None):
     """Starts from the bridge sample, so the page and its quiz are real."""
     work = pathlib.Path(tempfile.mkdtemp())
     root = work / "p"
@@ -47,6 +47,8 @@ def make_zip(dest, slug, title, tracks=None, cards=CARDS):
     lesson = json.loads(lesson_file.read_text("utf-8"))
     lesson.update(title=title, cards=cards, tracks=tracks or {})
     lesson_file.write_text(json.dumps(lesson), "utf-8")
+    if content:
+        (root / "lessons" / "sample" / "content.md").write_text(content, "utf-8")
     if tracks:
         (root / "lessons" / "sample" / "audio").mkdir(exist_ok=True)
         for t in tracks.values():

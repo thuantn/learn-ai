@@ -35,7 +35,10 @@ async function loadLibrary() {
   }
 }
 
+const ASK_LABEL = { pending: "Ô Hỏi: chờ admin duyệt", approved: "Ô Hỏi: đang bật", rejected: "Ô Hỏi: đã tắt hoặc bị từ chối" };
+
 function renderLibrary(d) {
+  $("libAdmin").hidden = !(state.me && state.me.admin);
   $("libUsed").textContent = `${size(d.used)} / ${size(d.quota)}`;
   $("libMeter").style.width = Math.min(100, d.used / d.quota * 100) + "%";
   const mine = $("libMine");
@@ -47,12 +50,14 @@ function renderLibrary(d) {
     const pills = el("div", "meta-pills");
     [p.topic && `Chủ đề: ${p.topic}`, `${p.lessons.length} bài`, size(p.size_bytes), `${p.people} người được share`, p.link_on && "Link đang bật"]
       .filter(Boolean).forEach(t => pills.append(el("span", "meta-pill", t)));
+    if (ASK_LABEL[p.ask_status]) pills.append(el("span", "meta-pill", ASK_LABEL[p.ask_status]));
     info.append(pills);
     const act = el("div", "stream-actions");
     const learn = actionButton("Học", "start", null, "btn-studio-primary");
     learn.dataset.lesson = p.first_lesson;
     act.append(learn, actionButton("Share", "lib-share", p.id), actionButton(`Góp ý (${p.feedback})`, "lib-feedback", p.id),
       actionButton("Tải bản mới", "lib-upload"), actionButton("Xóa", "lib-delete", p.id, "btn-studio-secondary btn-danger-soft"));
+    if (p.has_content && (p.ask_status === "none" || p.ask_status === "rejected")) act.append(actionButton("Xin bật ô Hỏi", "lib-ask", p.id));
     row.append(info, act);
     mine.append(row);
   });
@@ -283,6 +288,12 @@ Object.assign(ACTIONS, {
   "lib-share": b => openShare(b.dataset.id),
   "lib-feedback": b => openFeedbackList(b.dataset.id),
   "lib-delete": b => deletePackage(b.dataset.id),
+  "lib-ask": async b => {
+    if (!confirm("Xin bật ô Hỏi? Admin sẽ đọc nội dung bài. Khi được duyệt, nội dung bài và câu hỏi của người học được gửi tới nhà cung cấp AI.")) return;
+    await api(`/api/packages/${b.dataset.id}/ask-request`, send("POST", {}));
+    await refresh();
+    go("library", true);
+  },
   "lib-leave": async b => {
     if (!confirm("Bỏ bài này khỏi thư viện? Muốn học lại, bạn cần nhờ tác giả share lại.")) return;
     await api(`/api/packages/${b.dataset.id}/leave`, send("POST", {}));
