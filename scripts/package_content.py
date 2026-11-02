@@ -40,7 +40,7 @@ def read_quiz(html, lesson_id):
     return quiz
 
 
-def build_page(html, lesson_id, target_dir, replace):
+def build_page(html, lesson_id, target_dir, replace, head_tag=None, footer_tag=None):
     html, fonts = FONT_LINK.subn("", html)
     html, libs = CDN_SCRIPT.subn(lambda m: f'<script src="/static/vendor/{m[1]}"{m[2]}></script>', html)
     if not libs:
@@ -61,11 +61,14 @@ def build_page(html, lesson_id, target_dir, replace):
         return f'<script src="{name}"></script>'
 
     html = INLINE_SCRIPT.sub(extract, html)
-    shim = f'<script src="/static/lesson-shim.js" data-lesson="{lesson_id}"></script>\n'
+    if head_tag is None:
+        head_tag = f'<script src="/static/lesson-shim.js" data-lesson="{lesson_id}"></script>\n'
+    if footer_tag is None:
+        footer_tag = '<footer><a href="/">Về app</a>. '
     if "<head>" not in html or "<footer>" not in html:
         raise SystemExit(f"{lesson_id}: page layout changed")
-    html = html.replace("<head>", "<head>\n" + shim, 1)
-    html = html.replace("<footer>", '<footer><a href="/">Về app</a>. ', 1)
+    html = html.replace("<head>", "<head>\n" + head_tag, 1)
+    html = html.replace("<footer>", footer_tag, 1)
     return html, names
 
 
