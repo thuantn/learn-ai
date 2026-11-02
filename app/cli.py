@@ -4,15 +4,15 @@
   python -m app.cli end-sessions NAME    ends all sessions
   python -m app.cli remove-user NAME     deletes the account and its data
   python -m app.cli list-users
-  python -m app.cli import-package PATH OWNER  install or update a package (PATH may be a directory for now)
+  python -m app.cli import-package ZIP OWNER  install or update a package
 """
 import pathlib
 import secrets
+import shutil
 import sys
 import time
 
-from . import auth, catalog, contract, db
-from .contract import errors
+from . import auth, catalog, db, uploads
 
 
 def temp_password():
@@ -36,12 +36,15 @@ def main(argv):
             if not c.execute("SELECT 1 FROM users WHERE name=?", (owner,)).fetchone():
                 print("Không có tài khoản này.")
                 return 1
-            path = pathlib.Path(argv[1])
-            if errors(contract.check_package(path)):
-                print("Package không hợp lệ.")
+            info = uploads.prepare(pathlib.Path(argv[1]), owner)
+            if "dir" not in info:
+                for problem in info["problems"]:
+                    print(problem["path"], problem["message"])
                 return 1
-            result = catalog.install_version(owner, path)
-            print(result["id"])
+            if info["removed"]:
+                print("Id bị xóa so với bản cũ:", ", ".join(info["removed"]))
+            print(catalog.install_version(owner, info["dir"])["id"])
+            shutil.rmtree(info["dir"], ignore_errors=True)
             return 0
         if not name or cmd not in ("add-user", "reset-password", "end-sessions", "remove-user"):
             print(__doc__)

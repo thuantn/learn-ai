@@ -97,7 +97,7 @@ def ctx(tmp_path, monkeypatch):
         "app.db",
         "app.catalog",
         "app.contract",
-        "app.bundle",
+        "app.bundle", "app.uploads",
     ):
         sys.modules.pop(name, None)
     main = importlib.import_module("app.main")
@@ -327,7 +327,7 @@ def test_disabled_without_secret(monkeypatch, tmp_path):
         "app.db",
         "app.catalog",
         "app.contract",
-        "app.bundle",
+        "app.bundle", "app.uploads",
     ):
         sys.modules.pop(name, None)
     main = importlib.import_module("app.main")

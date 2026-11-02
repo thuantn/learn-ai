@@ -5,6 +5,7 @@ import logging
 import mimetypes
 import os
 import pathlib
+import secrets
 import time
 import urllib.error
 import urllib.request
@@ -16,8 +17,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fsrs import Card, Rating, Scheduler
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.requests import ClientDisconnect
 
-from . import auth, catalog, db, sandbox
+from . import auth, bundle, catalog, db, sandbox, uploads
 
 log = logging.getLogger("learn")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -67,9 +69,7 @@ async def lifespan(_):
     db.init()
     if not os.environ.get("LINK_SECRET"):
         raise RuntimeError("LINK_SECRET is required")
-    packages_dir = pathlib.Path(os.environ.get("PACKAGES_DIR", "packages"))
-    packages_dir.mkdir(parents=True, exist_ok=True)
-    (packages_dir / ".staging").mkdir(exist_ok=True)
+    uploads.clear_staging()
     catalog.sweep()
     dest = os.environ.get("BACKUP_DIR")
     task = asyncio.create_task(backup_loop(dest)) if dest else None
@@ -598,6 +598,76 @@ async def put_doc(name: str, request: Request):
             return bad(404, "doc", "Không có tài liệu này.")
         c.execute("INSERT OR REPLACE INTO user_doc VALUES(?,?,?,?)", (user, name, json.dumps(data, ensure_ascii=False), now))
         record_wrong_answers(c, user, lesson, data.get("quiz"), now)
+    return {"ok": True}
+
+
+# ---------- Upload ----------
+
+@app.post("/api/uploads")
+async def upload_package(request: Request):
+    user = request.state.user
+    if "application/zip" not in request.headers.get("content-type", ""):
+        return bad(400, "input", "Cần gửi file zip.")
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > bundle.MAX_ZIP:
+        return bad(413, "too_large", "File zip quá lớn, tối đa 90 MB.")
+    if not uploads.begin(user):
+        return bad(429, "busy", "Đang có file khác được tải lên. Thử lại sau.")
+    zip_path = None
+    try:
+        if await asyncio.to_thread(uploads.disk_low):
+            return bad(507, "disk", "Máy chủ sắp hết dung lượng. Báo quản trị.")
+        zip_path = uploads.staging_dir() / f"{secrets.token_hex(12)}.zip"
+        try:
+            await uploads.receive(request.stream(), zip_path)
+        except uploads.TooLarge:
+            return bad(413, "too_large", "File zip quá lớn, tối đa 90 MB.")
+        except (ClientDisconnect, asyncio.TimeoutError):
+            return bad(400, "interrupted", "Tải lên bị ngắt giữa chừng. Thử lại.")
+        info = await asyncio.to_thread(uploads.prepare, zip_path, user)
+    finally:
+        if zip_path:
+            zip_path.unlink(missing_ok=True)
+        uploads.end(user)
+    if "dir" not in info:
+        return JSONResponse({"code": info["code"], "problems": info["problems"]}, status_code=413 if info["code"] == "quota" else 400)
+    upload_id = uploads.keep(user, info)
+    log.info("upload staged user=%r slug=%r size=%d", user, info["slug"], info["size"])
+    return {"upload_id": upload_id, **{k: info[k] for k in ("title", "slug", "lessons", "is_update", "removed", "warnings", "size")}}
+
+
+@app.post("/api/uploads/{upload_id}/commit")
+async def commit_upload(upload_id: str, request: Request):
+    user = request.state.user
+    stage = uploads.get(upload_id, user)
+    if not stage:
+        return bad(404, "upload", "Bản tải lên đã hết hạn. Tải lại file.")
+    if stage["committing"]:
+        return bad(409, "busy", "Bản này đang được cài.")
+    data = await read_json(request)
+    stage["committing"] = True  # refusals below keep the stage, so the author can send again without uploading again
+    try:
+        if not data or data.get("attest") is not True:
+            return bad(400, "attest", "Cần xác nhận nội dung trước khi đăng.")
+        confirmed = data.get("confirm_removed") or []
+        removed = await asyncio.to_thread(catalog.removed_ids, user, stage["dir"])
+        if not isinstance(confirmed, list) or set(removed) - set(x for x in confirmed if isinstance(x, str)):
+            return JSONResponse({"code": "confirm_removed", "error": "Cần xác nhận phần bị xóa.", "removed": removed}, status_code=409)
+        if await asyncio.to_thread(uploads.over_quota, user, stage["slug"], stage["size"]):
+            return bad(413, "quota", "Vượt hạn mức dung lượng của tài khoản.")
+        result = await asyncio.to_thread(catalog.install_version, user, stage["dir"])
+    finally:
+        stage["committing"] = False
+    await asyncio.to_thread(uploads.drop, upload_id)
+    log.info("package installed user=%r id=%s version=%d", user, result["id"], result["version"])
+    return {"package_id": result["id"], "version": result["version"]}
+
+
+@app.delete("/api/uploads/{upload_id}")
+async def cancel_upload(upload_id: str, request: Request):
+    stage = uploads.get(upload_id, request.state.user)
+    if stage and not stage["committing"]:
+        await asyncio.to_thread(uploads.drop, upload_id)
     return {"ok": True}
 
 
