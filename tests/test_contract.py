@@ -296,3 +296,34 @@ def test_quiz_and_card_ids_unique_across_lesson(good_package):
 
     problems = check_package(root)
     assert "duplicate_id" in {p.code for p in errors(problems)}
+
+
+def _edit_lesson(root, **changes):
+    path = root / "lessons" / "demo" / "lesson.json"
+    lesson = json.loads(path.read_text(encoding="utf-8"))
+    lesson.update(changes)
+    path.write_text(json.dumps(lesson), encoding="utf-8")
+
+
+def _codes(root):
+    return {p.code for p in errors(check_package(root))}
+
+
+def test_long_lesson_title_is_refused(good_package):
+    _edit_lesson(good_package, title="x" * 201)
+    assert "text_too_long" in _codes(good_package)
+
+
+def test_long_track_label_is_refused(good_package):
+    _edit_lesson(good_package, tracks={"short": {"file": "a.mp3", "label": "x" * 201}})
+    assert "text_too_long" in _codes(good_package)
+
+
+def test_content_must_be_utf8(good_package):
+    (good_package / "lessons" / "demo" / "content.md").write_bytes(b"\xff\xfe bad")
+    assert "content_encoding" in _codes(good_package)
+
+
+def test_id_with_trailing_newline_is_refused(good_package):
+    _edit_lesson(good_package, cards=[{"id": f"demo-c{i}\n", "q": "q", "a": "a"} for i in range(5)])
+    assert _codes(good_package)

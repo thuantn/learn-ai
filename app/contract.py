@@ -8,8 +8,8 @@ import re
 from mutagen.mp3 import MP3
 
 
-ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-FILE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\Z")
+FILE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 ALLOWED_EXT = {"html", "js", "css", "json", "svg", "png", "jpg", "webp", "woff2", "mp3", "md"}
 MAX_JSON = 1 * 1024 * 1024
 MAX_PAGE = 5 * 1024 * 1024
@@ -219,6 +219,8 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
     title = lesson.get("title", "")
     if not isinstance(title, str) or not title.strip():
         problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "empty_text", f"Bài {lesson_id} đang trống tiêu đề."))
+    elif _too_long(title, MAX_TITLE):
+        problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "text_too_long", f"Tiêu đề bài quá dài: {len(title)} > {MAX_TITLE}."))
 
     summary = lesson.get("summary", [])
     if not isinstance(summary, list) or not (3 <= len(summary) <= 8):
@@ -312,6 +314,8 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
             label = track.get("label", "")
             if not isinstance(label, str) or not label.strip():
                 problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "track_label", f"Track {key} thiếu nhãn."))
+            elif _too_long(label, MAX_TITLE):
+                problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "text_too_long", f"Nhãn track {key} quá dài."))
             fname = track.get("file", "")
             if _bad_name(fname) or not fname:
                 problems.append(Problem(f"lessons/{lesson_id}/audio/{fname}", "track_missing", f"Không tìm thấy file audio: {fname}."))
@@ -345,6 +349,11 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
     if content_path.is_file():
         if content_path.stat().st_size > MAX_CONTENT:
             problems.append(Problem(f"lessons/{lesson_id}/content.md", "content_size", "File content.md quá lớn."))
+        else:
+            try:
+                content_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                problems.append(Problem(f"lessons/{lesson_id}/content.md", "content_encoding", "File content.md phải là UTF-8."))
     elif profile == "full":
         problems.append(Problem(f"lessons/{lesson_id}/content.md", "full_content", "Mức Đầy đủ cần có file content.md."))
 

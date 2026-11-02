@@ -1,6 +1,7 @@
 """Package catalog: install, query and remove lesson packages."""
 import hashlib
 import json
+import logging
 import os
 import pathlib
 import re
@@ -12,6 +13,7 @@ from fsrs import Card
 
 from . import contract, db
 
+log = logging.getLogger("learn")
 _ID_RE = re.compile(r"^p[0-9a-f]{12}$")
 
 
@@ -273,7 +275,7 @@ def lesson_for(c, user: str, key: str) -> dict | None:
 
 def lessons_for(c, user: str) -> list[dict]:
     rows = c.execute(
-        """SELECT pl.key, pl.package_id, pl.data, p.owner, p.title, p.ask_status
+        """SELECT pl.key, pl.package_id, json_remove(pl.data, '$.content') data, p.owner, p.title, p.ask_status
            FROM package_lessons pl
            JOIN packages p ON p.id = pl.package_id
            WHERE p.owner=? OR EXISTS(
@@ -331,7 +333,8 @@ def delete_package(package_id: str) -> None:
 
 
 def sweep() -> None:
-    """Removes package dirs not in the database and old version dirs."""
+    """Removes versions older than the one in use. Anything else stays: after a database restore, a dir unknown to the
+    database or newer than its version may be the only copy."""
     root = packages_dir()
     if not root.is_dir():
         return
@@ -344,9 +347,9 @@ def sweep() -> None:
         if not _ID_RE.match(child.name):
             continue
         if child.name not in current:
-            shutil.rmtree(child, ignore_errors=True)
+            log.warning("package dir not in database, kept: %s", child.name)
             continue
         keep = current[child.name]
         for sub in child.iterdir():
-            if sub.is_dir() and sub.name.isdigit() and int(sub.name) != keep:
+            if sub.is_dir() and sub.name.isdigit() and int(sub.name) < keep:
                 shutil.rmtree(sub, ignore_errors=True)

@@ -85,7 +85,7 @@ Thêm `AI_API_KEY` vào `.env`, rồi `docker compose up -d`. Dùng khóa riêng
 
 ## Sao lưu và khôi phục
 
-App sao lưu database lúc khởi động và mỗi 24 giờ vào `backups/`, giữ 14 bản. Khôi phục: dừng app, chép bản sao lưu thành `data/learn.db`, xóa `learn.db-wal` và `learn.db-shm` nếu có, rồi khởi động lại.
+App sao lưu database lúc khởi động và mỗi 24 giờ vào `backups/`, giữ 14 bản. Khôi phục: dừng app, chép bản sao lưu thành `data/learn.db`, xóa `learn.db-wal` và `learn.db-shm` nếu có, rồi khởi động lại. Sao lưu không gồm `packages/`: lúc khởi động app chỉ xóa phiên bản cũ hơn bản database đang ghi, thư mục lạ được giữ và ghi log. Package cập nhật sau thời điểm sao lưu sẽ không mở được cho tới khi tác giả tải lên lại.
 
 ## Khi nghi bị lộ
 

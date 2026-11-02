@@ -311,7 +311,7 @@ def test_update_swaps_pointer_and_removes_old_files(ctx):
         assert ctx.catalog.lesson_for(c, "an", key)["title"] == "V2"
 
 
-def test_sweep_removes_only_orphan_package_dirs(ctx):
+def test_sweep_removes_only_older_versions(ctx):
     ctx.cli.main(["add-user", "an"])
     pkg = _make_package(ctx.tmp / "p", slug="demo")
     res = ctx.catalog.install_version("an", pkg)
@@ -329,11 +329,27 @@ def test_sweep_removes_only_orphan_package_dirs(ctx):
     leftover.mkdir(parents=True)
     (leftover / "x.txt").write_text("x", encoding="utf-8")
 
+    older = pkg_dir / res["id"] / "0"
+    older.mkdir(parents=True)
+
     ctx.catalog.sweep()
-    assert not orphan.exists()
+    assert orphan.exists(), "may be the only copy after a database restore"
     assert other.exists()
-    assert not leftover.exists()
+    assert leftover.exists(), "may be the only copy after a database restore"
+    assert not older.exists()
     assert (pkg_dir / res["id"] / str(res["version"])).exists()
+
+
+def test_lesson_lists_leave_out_full_text_but_ask_still_gets_it(ctx):
+    ctx.cli.main(["add-user", "an"])
+    pkg = _make_package(ctx.tmp / "p", slug="demo")
+    lesson_dir = next((pkg / "lessons").iterdir())
+    (lesson_dir / "content.md").write_text("toàn văn", encoding="utf-8")
+    res = ctx.catalog.install_version("an", pkg)
+    with ctx.db.connect() as c:
+        listed = ctx.catalog.lessons_for(c, "an")[0]
+        assert listed["content"] == ""
+        assert ctx.catalog.lesson_for(c, "an", listed["id"])["content"] == "toàn văn"
 
 
 def test_retry_after_crash_with_leftover_version_dir(ctx):

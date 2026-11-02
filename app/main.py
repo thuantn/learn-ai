@@ -73,8 +73,8 @@ async def backup_loop(dest):
 @asynccontextmanager
 async def lifespan(_):
     db.init()
-    if not os.environ.get("LINK_SECRET"):
-        raise RuntimeError("LINK_SECRET is required")
+    if len(os.environ.get("LINK_SECRET", "")) < 32:
+        raise RuntimeError("LINK_SECRET is required, 32+ characters")
     uploads.clear_staging()
     catalog.sweep()
     dest = os.environ.get("BACKUP_DIR")
@@ -638,8 +638,12 @@ async def list_packages(request: Request):
     user = request.state.user
     with db.connect() as c:
         titles, first = defaultdict(list), {}
-        for r in c.execute("SELECT key, package_id, data FROM package_lessons ORDER BY ord"):
-            titles[r["package_id"]].append(json.loads(r["data"])["title"])
+        for r in c.execute(
+            """SELECT key, package_id, json_extract(data, '$.title') title FROM package_lessons
+               WHERE package_id IN (SELECT id FROM packages WHERE owner=?
+                                    UNION SELECT package_id FROM package_access WHERE user=? AND revoked_at IS NULL)
+               ORDER BY ord""", (user, user)):
+            titles[r["package_id"]].append(r["title"])
             first.setdefault(r["package_id"], r["key"])
         mine = [{
             "id": r["id"], "title": r["title"], "topic": r["topic"], "description": r["description"],
@@ -778,7 +782,7 @@ async def send_feedback(lesson_id: str, request: Request):
         if kind not in FEEDBACK_KINDS or not isinstance(text, str) or not 0 < len(text.strip()) <= FEEDBACK_MAX:
             return bad(400, "input", "Góp ý đang trống hoặc quá dài.")
         pools = {"lesson": None, "card": lesson["cards"], "quiz": lesson["quiz"]}
-        if target_type not in pools or (pools[target_type] is not None and target_id not in {x["id"] for x in pools[target_type]}):
+        if not isinstance(target_type, str) or target_type not in pools or (pools[target_type] is not None and target_id not in {x["id"] for x in pools[target_type]}):
             return bad(400, "input", "Dữ liệu không hợp lệ.")
         hour_ago = time.time() - 3600
         if c.execute("SELECT count(*) n FROM feedback WHERE author=? AND created_at>?", (user, hour_ago)).fetchone()["n"] >= FEEDBACK_PER_HOUR:
@@ -852,9 +856,9 @@ async def commit_upload(upload_id: str, request: Request):
         return bad(404, "upload", "Bản tải lên đã hết hạn. Tải lại file.")
     if stage["committing"]:
         return bad(409, "busy", "Bản này đang được cài.")
-    data = await read_json(request)
     stage["committing"] = True  # refusals below keep the stage, so the author can send again without uploading again
     try:
+        data = await read_json(request)
         if not data or data.get("attest") is not True:
             return bad(400, "attest", "Cần xác nhận nội dung trước khi đăng.")
         confirmed = data.get("confirm_removed") or []

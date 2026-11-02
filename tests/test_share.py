@@ -256,3 +256,18 @@ def test_author_removed_keeps_feedback(ctx, capsys):
     ctx.cli.main(["remove-user", "binh"])
     rows = a.get(f"/api/packages/{pid}/feedback").json()["feedback"]
     assert rows[0]["body"] == "x" and rows[0]["author"] is None
+
+
+def test_feedback_refuses_a_list_as_target_type(ctx, capsys):
+    a, b, _, pkg, key = setup_pkg(ctx, capsys)
+    a.post(f"/api/packages/{pkg}/share", json={"email": "binh"})
+    r = b.post(f"/api/lessons/{key}/feedback", json={"kind": "comment", "target_type": ["lesson"], "text": "x"})
+    assert r.status_code == 400
+
+
+def test_library_lists_only_what_the_caller_can_see(ctx, capsys):
+    a, b, _, pkg, key = setup_pkg(ctx, capsys)
+    assert b.get("/api/packages").json()["shared"] == []
+    a.post(f"/api/packages/{pkg}/share", json={"email": "binh"})
+    shared = b.get("/api/packages").json()["shared"]
+    assert [x["id"] for x in shared] == [pkg] and shared[0]["lessons"]
