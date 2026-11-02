@@ -33,7 +33,7 @@ services:
   tunnel:
     <<: *hardening
     image: cloudflare/cloudflared:2026.10.4@sha256:c6c7ae1d5dfdcb094ad344ed68ccffc26635c9c6be80965664c33baf064b0515
-    command: ["tunnel", "--no-autoupdate", "--url", "http://app:8000", "run"]
+    command: ["tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://app:8000", "run"]
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?}
     mem_limit: 128m
