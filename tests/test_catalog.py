@@ -491,5 +491,59 @@ def test_update_resets_ask_when_ai_content_changes(ctx):
     ):
         approve(pid)
         install(**changed)
-        assert status(pid) == "none", changed
+        assert status(pid) == "pending", changed
         install()  # back to the baseline content for the next case
+
+
+def _ask_ctx(ctx):
+    ctx.cli.main(["add-user", "an"])
+
+    def install(n, **kw):
+        return ctx.catalog.install_version("an", _make_package(ctx.tmp / f"v{n}", slug="demo", **kw))["id"]
+
+    def set_status(pid, value):
+        with ctx.db.connect() as c:
+            c.execute("UPDATE packages SET ask_status=? WHERE id=?", (value, pid))
+
+    def status(pid):
+        with ctx.db.connect() as c:
+            return c.execute("SELECT ask_status FROM packages WHERE id=?", (pid,)).fetchone()["ask_status"]
+
+    return install, set_status, status
+
+
+def test_update_ask_status_transitions(ctx):
+    install, set_status, status = _ask_ctx(ctx)
+    pid = install(0, content="# 0\n")
+    for n, (before, after) in enumerate((("approved", "pending"), ("rejected", "none"), ("pending", "pending"), ("none", "none")), 1):
+        set_status(pid, before)
+        install(n, content=f"# {n}\n")
+        assert status(pid) == after, before
+
+
+def test_ask_hash_includes_lesson_title(ctx):
+    install, set_status, status = _ask_ctx(ctx)
+    pid = install(0, content="# x\n")
+    set_status(pid, "approved")
+    pkg = _make_package(ctx.tmp / "renamed", slug="demo", content="# x\n")
+    path = pkg / "lessons" / "demo" / "lesson.json"
+    lesson = json.loads(path.read_text(encoding="utf-8"))
+    lesson["title"] = "Tên khác"
+    path.write_text(json.dumps(lesson), encoding="utf-8")
+    ctx.catalog.install_version("an", pkg)
+    assert status(pid) == "pending"
+
+
+def test_install_does_not_overwrite_admin_decision(ctx, monkeypatch):
+    install, set_status, status = _ask_ctx(ctx)
+    pid = install(0, content="# x\n")
+    set_status(pid, "approved")
+    real = ctx.catalog.shutil.copytree
+
+    def admin_turns_it_off_meanwhile(*a, **kw):
+        set_status(pid, "rejected")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(ctx.catalog.shutil, "copytree", admin_turns_it_off_meanwhile)
+    install(1, content="# x\n")  # same AI content, only a new version of the page
+    assert status(pid) == "rejected"

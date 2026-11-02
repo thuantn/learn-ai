@@ -280,6 +280,7 @@ def test_security_headers(ctx):
         h = c.get("/login").headers
         assert "default-src 'self'" in h["content-security-policy"] and "'unsafe-inline'" not in h["content-security-policy"].split("style-src")[0]
         assert "frame-ancestors 'none'" in h["content-security-policy"]
+        assert "script-src https://testserver/static/;" in h["content-security-policy"]
         assert h["x-content-type-options"] == "nosniff" and "max-age" in h["strict-transport-security"] and h["referrer-policy"] == "same-origin"
         assert c.get("/api/me").headers["cache-control"] == "no-store"
 

@@ -398,3 +398,24 @@ def test_cli_import_zip(ctx, capsys, tmp_path):
     assert z.exists()
     (tmp_path / "bad.zip").write_bytes(b"x")
     assert ctx.cli.main(["import-package", str(tmp_path / "bad.zip"), "an"]) == 1
+
+
+def test_package_count_cap(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    with c:
+        first = upload_and_commit(c, zip_of(_make_package(ctx.tmp / "p0", slug="first")))
+        staged = send(c, zip_of(_make_package(ctx.tmp / "p1", slug="staged")))
+        assert staged.status_code == 200
+        with ctx.db.connect() as conn:
+            for n in range(ctx.main.uploads.MAX_PACKAGES - 1):
+                conn.execute(
+                    "INSERT INTO packages(id, owner, slug, title, topic, description, version, size_bytes, ask_hash, created_at, updated_at) VALUES(?,?,?,?,'','',1,0,'',0,0)",
+                    (f"p{n:012x}", "an", f"s{n}", "x"),
+                )
+        assert commit(c, staged.json()["upload_id"]).status_code == 413
+        c.delete(f"/api/uploads/{staged.json()['upload_id']}")
+        assert send(c, zip_of(_make_package(ctx.tmp / "p2", slug="other"))).status_code == 413
+        update = send(c, zip_of(_make_package(ctx.tmp / "p3", slug="first", title="Mới")))
+        assert update.status_code == 200, update.text
+        assert commit(c, update.json()["upload_id"]).status_code == 200
+        assert first["package_id"]

@@ -102,11 +102,15 @@ def main():
     return 1 if FAILS else 0
 
 
+dialogs = []
+
+
 def new_page(br, errs, width=1280, height=900):
     ctx = br.new_context(viewport={"width": width, "height": height}, reduced_motion="reduce")
     pg = ctx.new_page()
     pg.on("pageerror", lambda e: errs.append("js: " + str(e)[:160]))
-    pg.on("dialog", lambda d: d.accept())
+    pg.on("console", lambda m: errs.append("csp: " + m.text[:160]) if m.type == "error" and "Content Security Policy" in m.text else None)
+    pg.on("dialog", lambda d: (dialogs.append(d.message), d.accept()))
     return pg
 
 
@@ -239,6 +243,7 @@ def run(br, base, temp, good, audio, bad):
     login_first(c, base, "cuong@example.com", temp["cuong@example.com"], link.replace(base, ""))
     c.wait_for_url("**/lesson/**")
     check("link survives login and password change", "/lesson/p" in c.url, c.url)
+    check("joining asked first", any("Thêm bài" in x for x in dialogs), dialogs[:2])
     a.click("[data-act=share-close]")
 
     # Binh learns the shared lesson and sees the author.
@@ -329,7 +334,14 @@ def run(br, base, temp, good, audio, bad):
     a.screenshot(path=str(SHOTS / "share-360.png"))
 
     check("no /api/ask request anywhere", not asks, asks[:2])
-    check("no page errors", not errs, errs[:4])
+    # Cuong, who joined by link, takes the package back out of the library.
+    c.goto(base + "/#library")
+    c.reload()
+    c.wait_for_selector("#libShared .stream-row")
+    c.click("#libShared [data-act=lib-leave]")
+    c.wait_for_selector("#libSharedEmpty:not([hidden])")
+    check("leaving removes it from the library", c.locator("#libShared .stream-row").count() == 0)
+    check("no page errors or CSP blocks", not errs, errs[:4])
 
 
 if __name__ == "__main__":

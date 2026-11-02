@@ -86,7 +86,7 @@ def _read_unpacked(unpacked: pathlib.Path):
             "content": content,
         }
         lessons.append((lesson_id, data))
-        ask_parts.extend([content, lesson.get("summary", []), lesson.get("cards", []), lesson.get("quiz", [])])
+        ask_parts.extend([lesson.get("title", ""), content, lesson.get("summary", []), lesson.get("cards", []), lesson.get("quiz", [])])
     return package, lessons, _hash_ask(ask_parts)
 
 
@@ -119,7 +119,7 @@ def install_version(owner: str, unpacked) -> dict:
 
     with db.connect() as c:
         existing = c.execute(
-            "SELECT id, version, ask_status, ask_hash FROM packages WHERE owner=? AND slug=?", (owner, slug)
+            "SELECT id, version FROM packages WHERE owner=? AND slug=?", (owner, slug)
         ).fetchone()
         package_id = existing["id"] if existing else _new_id(c)
         versions = _dir_versions(packages_dir() / package_id)
@@ -136,13 +136,17 @@ def install_version(owner: str, unpacked) -> dict:
         try:
             c.execute("BEGIN")
             if existing:
-                new_status = existing["ask_status"] if existing["ask_hash"] == ask_hash else "none"
+                # The status comes from the row inside this statement: an admin may have decided while the files copied.
                 c.execute(
                     """UPDATE packages SET
-                        title=?, topic=?, description=?, version=?, size_bytes=?,
-                        updated_at=?, ask_hash=?, ask_status=?
+                        title=?, topic=?, description=?, version=?, size_bytes=?, updated_at=?,
+                        ask_status=CASE WHEN ask_hash=? THEN ask_status
+                                        WHEN ask_status='approved' THEN 'pending'
+                                        WHEN ask_status='rejected' THEN 'none'
+                                        ELSE ask_status END,
+                        ask_hash=?
                        WHERE id=?""",
-                    (title, topic, description, version, size_bytes, now, ask_hash, new_status, package_id),
+                    (title, topic, description, version, size_bytes, now, ask_hash, ask_hash, package_id),
                 )
             else:
                 c.execute(

@@ -327,3 +327,8 @@ def test_content_must_be_utf8(good_package):
 def test_id_with_trailing_newline_is_refused(good_package):
     _edit_lesson(good_package, cards=[{"id": f"demo-c{i}\n", "q": "q", "a": "a"} for i in range(5)])
     assert _codes(good_package)
+
+
+def test_metadata_total_is_capped(good_package, monkeypatch):
+    monkeypatch.setitem(check_package.__globals__, "MAX_META_TOTAL", 100)
+    assert "meta_size" in _codes(good_package)

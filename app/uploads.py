@@ -9,6 +9,7 @@ from . import bundle, catalog, contract, db
 
 STAGE_TTL = 3600
 DEFAULT_QUOTA = 1024 ** 3
+MAX_PACKAGES = 30
 MIN_FREE_BYTES = 2 * 1024 ** 3
 MAX_ACTIVE_TOTAL = 4
 CHUNK_TIMEOUT = 60
@@ -92,6 +93,11 @@ def over_quota(owner: str, slug: str, size: int) -> bool:
     return used + size > limit
 
 
+def too_many(owner: str, slug: str) -> bool:
+    with db.connect() as c:
+        return c.execute("SELECT count(*) n FROM packages WHERE owner=? AND slug<>?", (owner, slug)).fetchone()["n"] >= MAX_PACKAGES
+
+
 def prepare(zip_path, owner: str) -> dict:
     """Unpacks and checks a zip. On success the result has "dir"; otherwise "code" and "problems"."""
     dest = staging_dir() / secrets.token_hex(12)
@@ -107,6 +113,9 @@ def prepare(zip_path, owner: str) -> dict:
     if over_quota(owner, package["slug"], size):
         shutil.rmtree(dest, ignore_errors=True)
         return {"code": "quota", "problems": [{"path": "", "message": "Vượt hạn mức dung lượng của tài khoản."}]}
+    if too_many(owner, package["slug"]):
+        shutil.rmtree(dest, ignore_errors=True)
+        return {"code": "quota", "problems": [{"path": "", "message": f"Mỗi tài khoản có tối đa {MAX_PACKAGES} package."}]}
     with db.connect() as c:
         is_update = c.execute("SELECT 1 FROM packages WHERE owner=? AND slug=?", (owner, package["slug"])).fetchone() is not None
     lessons = [contract.read_json_file(dest / "lessons" / x / "lesson.json")["title"] for x in package["lessons"]]

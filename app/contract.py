@@ -14,6 +14,7 @@ ALLOWED_EXT = {"html", "js", "css", "json", "svg", "png", "jpg", "webp", "woff2"
 MAX_JSON = 1 * 1024 * 1024
 MAX_PAGE = 5 * 1024 * 1024
 MAX_CONTENT = 1 * 1024 * 1024
+MAX_META_TOTAL = 16 * 1024 * 1024
 MAX_TEXT = 4000
 MAX_TITLE = 200
 MAX_TOPIC = 80
@@ -195,6 +196,13 @@ def check_package(root, profile="basic"):
         ext = path.name.rsplit(".", 1)[1]
         if ext not in ALLOWED_EXT:
             problems.append(Problem(rel, "file_type", f"Đuôi file không được chấp nhận: {path.name}. Các đuôi hợp lệ: html, js, css, json, svg, png, jpg, webp, woff2, mp3, md."))
+
+    # lesson.json and content.md are copied into the database, so they stay small however many lessons there are.
+    lessons_root = root / "lessons"
+    if lessons_root.is_dir():
+        meta = sum(f.stat().st_size for d in lessons_root.iterdir() for f in (d / "lesson.json", d / "content.md") if f.is_file())
+        if meta > MAX_META_TOTAL:
+            problems.append(Problem("lessons", "meta_size", "Tổng lesson.json và content.md của package quá lớn."))
 
     return problems
 

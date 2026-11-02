@@ -29,8 +29,9 @@ WEB = pathlib.Path(__file__).resolve().parent.parent / "web"
 VN = timezone(timedelta(hours=7))
 _PUBLIC_ORIGIN = os.environ.get("PUBLIC_ORIGIN") or "'self'"
 _FRAME_SRC = f"{_PUBLIC_ORIGIN}/s/" if _PUBLIC_ORIGIN != "'self'" else "'self'"
+_SCRIPT_SRC = f"{_PUBLIC_ORIGIN}/static/" if _PUBLIC_ORIGIN != "'self'" else "'self'"
 CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; "
+    f"default-src 'self'; script-src {_SCRIPT_SRC}; " "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; "
     "connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; "
     f"frame-src {_FRAME_SRC}"
 )
@@ -747,13 +748,27 @@ async def join_package(request: Request):
         if row["owner"] != user:
             access = c.execute("SELECT revoked_at FROM package_access WHERE package_id=? AND user=?", (package_id, user)).fetchone()
             if access and access["revoked_at"] is not None:
-                return bad(403, "revoked", "Tác giả đã bỏ quyền của bạn với bài này.")
+                return bad(403, "revoked", "Bạn không còn quyền với bài này. Nhờ tác giả share lại.")
+        if (data or {}).get("preview") is True:
+            title = c.execute("SELECT title FROM packages WHERE id=?", (package_id,)).fetchone()["title"]
+            return {"title": title, "author": row["owner"], "mine": row["owner"] == user}
+        if row["owner"] != user:
             c.execute(
                 "INSERT INTO package_access(package_id, user, via, granted_at) VALUES(?,?,'link',?) ON CONFLICT(package_id, user) DO NOTHING",
                 (package_id, user, time.time()),
             )
         first = c.execute("SELECT key FROM package_lessons WHERE package_id=? ORDER BY ord LIMIT 1", (package_id,)).fetchone()
     return {"package_id": package_id, "first_lesson": first["key"] if first else None}
+
+
+@app.post("/api/packages/{package_id}/leave")
+async def leave_package(package_id: str, request: Request):
+    with db.connect() as c:
+        left = c.execute(
+            "UPDATE package_access SET revoked_at=? WHERE package_id=? AND user=? AND revoked_at IS NULL",
+            (time.time(), package_id, request.state.user),
+        ).rowcount
+    return {"ok": True} if left else bad(404, "package", "Không có package này.")
 
 
 @app.delete("/api/packages/{package_id}")
@@ -865,7 +880,7 @@ async def commit_upload(upload_id: str, request: Request):
         removed = await asyncio.to_thread(catalog.removed_ids, user, stage["dir"])
         if not isinstance(confirmed, list) or set(removed) - set(x for x in confirmed if isinstance(x, str)):
             return JSONResponse({"code": "confirm_removed", "error": "Cần xác nhận phần bị xóa.", "removed": removed}, status_code=409)
-        if await asyncio.to_thread(uploads.over_quota, user, stage["slug"], stage["size"]):
+        if await asyncio.to_thread(uploads.over_quota, user, stage["slug"], stage["size"]) or await asyncio.to_thread(uploads.too_many, user, stage["slug"]):
             return bad(413, "quota", "Vượt hạn mức dung lượng của tài khoản.")
         result = await asyncio.to_thread(catalog.install_version, user, stage["dir"])
     finally:

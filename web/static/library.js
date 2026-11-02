@@ -19,7 +19,7 @@ function actionButton(label, act, id, className) {
 }
 function size(bytes) {
   if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(1).replace(".", ",") + " GB";
-  return Math.max(1, Math.round(bytes / 1024 / 1024)) + " MB";
+  return (bytes ? Math.max(1, Math.round(bytes / 1024 / 1024)) : 0) + " MB";
 }
 
 // ---------- Library ----------
@@ -66,7 +66,7 @@ function renderLibrary(d) {
     const learn = actionButton("Học", "start", null, "btn-studio-primary");
     learn.dataset.lesson = p.first_lesson;
     const act = el("div", "stream-actions");
-    act.append(learn);
+    act.append(learn, actionButton("Bỏ khỏi thư viện", "lib-leave", p.id));
     row.append(info, act);
     shared.append(row);
   });
@@ -283,6 +283,12 @@ Object.assign(ACTIONS, {
   "lib-share": b => openShare(b.dataset.id),
   "lib-feedback": b => openFeedbackList(b.dataset.id),
   "lib-delete": b => deletePackage(b.dataset.id),
+  "lib-leave": async b => {
+    if (!confirm("Bỏ bài này khỏi thư viện? Muốn học lại, bạn cần nhờ tác giả share lại.")) return;
+    await api(`/api/packages/${b.dataset.id}/leave`, send("POST", {}));
+    await refresh();
+    go("library", true);
+  },
   "up-close": closeUpload,
   "up-commit": commitUpload,
   "up-again": openUpload,

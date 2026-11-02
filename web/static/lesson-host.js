@@ -14,6 +14,7 @@
   let askOpen = false;
   let dialogOpen = false;
   let linkTimes = [];
+  let askTimes = [];
   let aiEnabled = false;
   let lastQuizId = null;
 
@@ -29,6 +30,13 @@
 
   function setNotice(text) {
     $("lessonNotice").textContent = text;
+  }
+
+  let askNoticeTimer;
+  function showAskNotice() {
+    $("lessonAskNotice").textContent = "Bài này chưa bật ô Hỏi.";
+    clearTimeout(askNoticeTimer);
+    askNoticeTimer = setTimeout(() => { $("lessonAskNotice").textContent = ""; }, 5000);
   }
 
   function setCover(text, actionBtn) {
@@ -197,11 +205,18 @@
           let text = typeof a.text === "string" ? a.text : "";
           if (text.length > 2000) text = text.slice(0, 2000);
           if (!frameInfo.ask) {
+            showAskNotice();
             reply(id, false, { code: "disabled", message: "Ô Hỏi chưa được bật cho bài này." });
             return;
           }
-          openAsk(true);
-          $("askInput").value = text;
+          // A hostile page could reopen the panel for ever, or swap the question just before the learner sends it.
+          const now = Date.now();
+          askTimes = askTimes.filter(t => now - t < 10000);
+          if (askTimes.length < 3) {
+            askTimes.push(now);
+            openAsk(true);
+            if (!$("askInput").value) $("askInput").value = text;
+          }
           reply(id, true, { data: null });
           return;
         }
@@ -337,6 +352,7 @@
       if (window.MathJax && MathJax.typesetPromise) await MathJax.typesetPromise([out]).catch(() => {});
       out.scrollIntoView({ block: "nearest" });
     } catch (e) {
+      if (e.status === 404) { lostAccess(); return; }
       out.textContent = e.message;
       out.classList.add("is-error");
     }

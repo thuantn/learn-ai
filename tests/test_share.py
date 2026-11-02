@@ -271,3 +271,33 @@ def test_library_lists_only_what_the_caller_can_see(ctx, capsys):
     a.post(f"/api/packages/{pkg}/share", json={"email": "binh"})
     shared = b.get("/api/packages").json()["shared"]
     assert [x["id"] for x in shared] == [pkg] and shared[0]["lessons"]
+
+
+def test_leave_removes_from_shared_and_blocks_rejoin(ctx, capsys):
+    a, b, _, pid, key = setup_pkg(ctx, capsys)
+    a.post(f"/api/packages/{pid}/share", json={"email": "binh"})
+    url = a.post(f"/api/packages/{pid}/link").json()["url"]
+    assert b.post(f"/api/packages/{pid}/leave").status_code == 200
+    assert b.get("/api/packages").json()["shared"] == []
+    assert b.get(f"/lesson/{key}").status_code == 404
+    assert b.post("/api/join", json={"token": token_of(url)}).status_code == 403
+    assert a.post(f"/api/packages/{pid}/leave").status_code == 404
+
+
+def test_join_preview_grants_nothing(ctx, capsys):
+    a, b, z, pid, key = setup_pkg(ctx, capsys)
+    url = a.post(f"/api/packages/{pid}/link").json()["url"]
+    r = b.post("/api/join", json={"token": token_of(url), "preview": True})
+    assert r.status_code == 200 and r.json()["title"] == "Demo" and r.json()["author"] == "an"
+    assert "first_lesson" not in r.json()
+    assert b.get("/api/packages").json()["shared"] == []
+    # A bad token, a link that is off, and a revoked person all learn nothing about the package.
+    wrong = z.post("/api/join", json={"token": pid + ".bad", "preview": True})
+    assert wrong.status_code == 404 and "Demo" not in wrong.text
+    z.post("/api/join", json={"token": token_of(url)})
+    a.post(f"/api/packages/{pid}/unshare", json={"email": "cuong"})
+    revoked = z.post("/api/join", json={"token": token_of(url), "preview": True})
+    assert revoked.status_code == 403 and "Demo" not in revoked.text
+    a.delete(f"/api/packages/{pid}/link")
+    off = b.post("/api/join", json={"token": token_of(url), "preview": True})
+    assert off.status_code == 404 and "Demo" not in off.text
