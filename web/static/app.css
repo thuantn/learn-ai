@@ -1599,6 +1599,10 @@ a.stage-tab, a.drawer-nav-item { display: flex; align-items: center; text-decora
     width: 460px;
   }
 
+  .lesson-host .ask-backdrop.open {
+    display: none;
+  }
+
   .lesson-main {
     margin-right: 330px;
   }
