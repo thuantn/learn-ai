@@ -198,6 +198,13 @@ async def change_password_page(request: Request):
     return page("password.html")
 
 
+@app.get("/lesson/{lesson_id}")
+async def lesson_page(lesson_id: str, request: Request):
+    if not known_lesson(lesson_id):
+        return Response(status_code=404)
+    return page("lesson.html")
+
+
 @app.post("/login")
 async def login(request: Request):
     data = await read_json(request)

@@ -7,6 +7,9 @@ import argparse
 import pathlib
 import sys
 
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
 from app.bundle import pack, safe_extract
 from app.contract import check_package, errors
 

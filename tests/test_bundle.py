@@ -222,3 +222,18 @@ def test_cli_exit_codes(good_package, tmp_path):
     )
     assert result.returncode == 0
     assert "warning" in result.stdout
+
+
+def test_cli_runs_from_another_folder(good_package, tmp_path):
+    """learnpkg.py can be run directly from any folder."""
+    import os
+    import subprocess
+    script = ROOT / "scripts" / "learnpkg.py"
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        [sys.executable, str(script), "validate", str(good_package)],
+        capture_output=True, text=True, cwd=str(tmp_path), env=env,
+    )
+    assert result.returncode == 0
+    assert "Package hợp lệ." in result.stdout

@@ -10,7 +10,8 @@
 
   function startCallTimer(item) {
     item.timer = setTimeout(() => {
-      pending.splice(pending.indexOf(item), 1);
+      const at = pending.indexOf(item);
+      if (at >= 0) pending.splice(at, 1);
       inflight.delete(item.id);
       item.reject({ code: "timeout", message: "Không kết nối được với app." });
     }, 10000);

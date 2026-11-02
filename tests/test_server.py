@@ -390,7 +390,7 @@ def test_backup_keeps_newest(ctx, capsys, tmp_path):
 def test_no_html_handlers_in_app_pages():
     """The CSP forbids inline scripts, so an onclick here would silently do nothing."""
     import re
-    for name in ("app.html", "login.html", "password.html"):
+    for name in ("app.html", "login.html", "password.html", "lesson.html"):
         html = (ROOT / "web" / name).read_text(encoding="utf-8")
         assert not re.search(r"\son[a-z]+\s*=", html), name
         assert "<script>" not in html and "https://" not in html, name

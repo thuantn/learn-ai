@@ -304,6 +304,29 @@ def test_app_csp_frames_only_lesson_path(ctx):
         assert f"frame-src {ORIGIN}/s/" in h
 
 
+def test_lesson_page_needs_session(ctx):
+    main, _, _, _ = ctx
+    with client(main) as c:
+        assert c.get("/lesson/demo1").status_code == 303
+        assert c.get("/lesson/demo1").headers["location"] == "/login"
+
+
+def test_lesson_page_unknown_404(ctx, capsys):
+    main, cli, _, _ = ctx
+    c = ready_user(main, cli, capsys, "an")
+    with c:
+        assert c.get("/lesson/khong-co").status_code == 404
+
+
+def test_lesson_host_sandbox_flags(ctx):
+    text = (ROOT / "web" / "static" / "lesson-host.js").read_text(encoding="utf-8")
+    assert 'sandbox="allow-scripts"' in text
+    assert "allow-same-origin" not in text
+    assert "allow-popups" not in text
+    assert "allow-top-navigation" not in text
+    assert "allow-forms" not in text
+
+
 def test_no_access_log_of_token():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "--no-access-log" in dockerfile

@@ -1,0 +1,368 @@
+"use strict";
+(function () {
+  const $ = id => document.getElementById(id);
+  const $$ = sel => [...document.querySelectorAll(sel)];
+
+  const lessonId = (location.pathname.match(/^\/lesson\/([a-z0-9][a-z0-9-]*)$/) || [])[1];
+  let frameInfo = null;
+  let iframe = null;
+  let port = null;
+  let loadCount = 0;
+  let docPending = null;
+  let docTimer = null;
+  let docWritePromise = null;
+  let askOpen = false;
+  let dialogOpen = false;
+  let linkTimes = [];
+  let aiEnabled = false;
+
+  const send = (method, body, extra) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}), ...extra });
+
+  async function api(url, opts) {
+    const r = await fetch(url, opts);
+    if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(d.error || "Có lỗi. Thử lại sau."); e.code = d.code; throw e; }
+    return d;
+  }
+
+  function setNotice(text) {
+    $("lessonNotice").textContent = text;
+  }
+
+  function setCover(text, actionBtn) {
+    $("lessonCoverText").textContent = text;
+    $("lessonReloadBtn").hidden = actionBtn !== "reload";
+    $("lessonExpiredReloadBtn").hidden = actionBtn !== "expired";
+    $("lessonCover").hidden = false;
+    if (iframe) {
+      iframe.remove();
+      iframe = null;
+    }
+    if (port) {
+      try { port.close(); } catch (e) {}
+      port = null;
+    }
+  }
+
+  function showLoading(text) {
+    $("lessonLoading").textContent = text;
+    $("lessonLoading").hidden = false;
+    $("lessonFrameWrap").hidden = true;
+    $("lessonCover").hidden = true;
+  }
+
+  function showFrame() {
+    $("lessonLoading").hidden = true;
+    $("lessonFrameWrap").hidden = false;
+    $("lessonCover").hidden = true;
+  }
+
+  function checkExpired() {
+    if (frameInfo && Date.now() / 1000 > frameInfo.expires) {
+      setCover("Phiên xem bài đã hết hạn. Tải lại để học tiếp, tiến độ đã lưu không mất.", "expired");
+      return true;
+    }
+    return false;
+  }
+
+  async function loadFrame() {
+    showLoading("Đang mở bài…");
+    loadCount = 0;
+    if (iframe) {
+      iframe.remove();
+      iframe = null;
+    }
+    if (port) {
+      try { port.close(); } catch (e) {}
+      port = null;
+    }
+    try {
+      const r = await fetch(`/api/lessons/${lessonId}/frame`, send("POST", {}));
+      if (r.status === 404) {
+        setCover("Bài này chưa sẵn sàng ở chế độ mới.", null);
+        return;
+      }
+      if (r.status === 401) { location.href = "/login"; return; }
+      if (!r.ok) {
+        setCover("Không mở được bài. Thử lại sau.", "reload");
+        return;
+      }
+      frameInfo = await r.json();
+      $("lessonTitle").textContent = frameInfo.title;
+      $("askLessonShort").textContent = frameInfo.title;
+      createIframe(frameInfo.url, frameInfo.title);
+      showFrame();
+    } catch (e) {
+      if (e.message === "login") return;
+      setCover("Không kết nối được. Thử lại sau.", "reload");
+    }
+  }
+
+  function createIframe(url, title) {
+    iframe = document.createElement("iframe");
+    iframe.sandbox="allow-scripts";
+    iframe.allow="";
+    iframe.title = title;
+    iframe.src = url;
+    iframe.className = "lesson-iframe";
+    $("lessonFrameWrap").textContent = "";
+    $("lessonFrameWrap").append(iframe);
+    iframe.addEventListener("load", onIframeLoad);
+  }
+
+  function onIframeLoad() {
+    loadCount++;
+    if (loadCount > 1) {
+      setCover("Trang bài vừa cố chuyển sang địa chỉ khác nên đã bị đóng.", "reload");
+      if (port) { try { port.close(); } catch (e) {} port = null; }
+    }
+  }
+
+  window.addEventListener("message", function (event) {
+    if (!iframe || event.source !== iframe.contentWindow) return;
+    const msg = event.data;
+    if (!msg || msg.type !== "learn-hello") return;
+    if (port) { try { port.close(); } catch (e) {} }
+    const channel = new MessageChannel();
+    port = channel.port1;
+    port.onmessage = onPortMessage;
+    port.start();
+    iframe.contentWindow.postMessage({ type: "learn-port" }, "*", [channel.port2]);
+  });
+
+  function reply(id, ok, rest) {
+    if (!port) return;
+    port.postMessage({ id, ok, ...rest });
+  }
+
+  function isPlainObject(v) {
+    return v !== null && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
+  }
+
+  async function onPortMessage(event) {
+    const msg = event.data;
+    if (msg === null || typeof msg !== "object") return;
+    let raw;
+    try { raw = JSON.stringify(msg); } catch (e) { return; }
+    if (raw.length > 2 * 1024 * 1024) {
+      if (typeof msg.id === "number") reply(msg.id, false, { code: "too_large", message: "Thông điệp quá lớn." });
+      return;
+    }
+    if (typeof msg.id !== "number") return;
+    const { id, op, args } = msg;
+    const a = args || {};
+    try {
+      switch (op) {
+        case "learner.id":
+          reply(id, true, { data: frameInfo.learner });
+          return;
+        case "doc.get": {
+          const d = await api(`/api/doc/${encodeURIComponent(frameInfo.doc)}`, { method: "GET" });
+          reply(id, true, { data: d.data });
+          return;
+        }
+        case "doc.set": {
+          if (!isPlainObject(a.data)) {
+            reply(id, false, { code: "input", message: "Dữ liệu không hợp lệ." });
+            return;
+          }
+          docPending = a.data;
+          reply(id, true, { data: null });
+          scheduleDocWrite();
+          return;
+        }
+        case "quiz.answer": {
+          const d = await api(`/api/lessons/${lessonId}/quiz-answer`, send("POST", { id: a.id, option: a.option }));
+          reply(id, true, { data: d });
+          return;
+        }
+        case "ask.open": {
+          let text = typeof a.text === "string" ? a.text : "";
+          if (text.length > 2000) text = text.slice(0, 2000);
+          openAsk(true);
+          $("askInput").value = text;
+          reply(id, true, { data: null });
+          return;
+        }
+        case "link.open": {
+          openLink(a.url);
+          reply(id, true, { data: null });
+          return;
+        }
+        case "media.error": {
+          checkExpired();
+          reply(id, true, { data: null });
+          return;
+        }
+        default:
+          reply(id, false, { code: "unknown_op", message: "Không hỗ trợ thao tác này." });
+      }
+    } catch (e) {
+      reply(id, false, { code: e.code || "error", message: e.message || "Lỗi." });
+    }
+  }
+
+  function scheduleDocWrite() {
+    if (docTimer) return;
+    docTimer = setTimeout(flushDoc, 2000);
+  }
+
+  async function flushDoc(keepalive) {
+    if (docTimer) { clearTimeout(docTimer); docTimer = null; }
+    if (docPending === null) return;
+    if (docWritePromise) { await docWritePromise; return; }
+    const body = docPending;
+    docPending = null;
+    const opts = send("PUT", body);
+    if (keepalive === true) opts.keepalive = true;
+    const writePromise = fetch(`/api/doc/${encodeURIComponent(frameInfo.doc)}`, opts)
+      .then(async r => {
+        if (!r.ok) throw new Error("save failed");
+        setNotice("");
+      })
+      .catch(() => {
+        docPending = body;
+        setNotice("Chưa lưu được, đang thử lại");
+        scheduleDocWrite();
+      })
+      .finally(() => { docWritePromise = null; });
+    docWritePromise = writePromise;
+    await writePromise;
+  }
+
+  function bodySizeForKeepalive() {
+    return docPending === null ? 0 : JSON.stringify(docPending).length;
+  }
+
+  async function flushDocBeforeLeave(keepalive) {
+    if (docPending === null) return;
+    if (keepalive && bodySizeForKeepalive() > 60 * 1024) return;
+    await flushDoc(keepalive);
+  }
+
+  window.addEventListener("pagehide", () => flushDocBeforeLeave(true));
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) flushDocBeforeLeave(true);
+    else checkExpired();
+  });
+
+  function openLink(raw) {
+    // A hostile page could reopen the modal for ever and lock the learner out of "Về app".
+    const now = Date.now();
+    linkTimes = linkTimes.filter(t => now - t < 10000);
+    if (dialogOpen || linkTimes.length >= 3) return;
+    linkTimes.push(now);
+    let url;
+    try { url = new URL(raw); } catch (e) { return; }
+    const dialog = $("lessonDialog");
+    const textEl = $("lessonDialogText");
+    const okBtn = $("lessonDialogOk");
+    if (url.protocol === "https:") {
+      textEl.textContent = url.href;
+      okBtn.hidden = false;
+      dialogOpen = true;
+      dialog.showModal();
+      dialog.addEventListener("close", function handler() {
+        dialog.removeEventListener("close", handler);
+        dialogOpen = false;
+        if (dialog.returnValue === "ok") window.open(url.href, "_blank", "noopener,noreferrer");
+      }, { once: true });
+    } else {
+      textEl.textContent = url.href + "\n\nĐịa chỉ này không an toàn nên app không mở. Bạn có thể tự chép nếu muốn.";
+      okBtn.hidden = true;
+      dialogOpen = true;
+      dialog.showModal();
+      dialog.addEventListener("close", function handler() {
+        dialog.removeEventListener("close", handler);
+        dialogOpen = false;
+      }, { once: true });
+    }
+  }
+
+  // ---------- Ask panel ----------
+  function askBubble(cls) {
+    const b = document.createElement("div");
+    b.className = "ask-bubble " + cls;
+    $("askThread").append(b);
+    b.scrollIntoView({ block: "nearest" });
+    return b;
+  }
+
+  function openAsk(open) {
+    askOpen = open;
+    if (open) {
+      $("askDock").classList.toggle("mobile-open", true);
+      $("askBackdrop").classList.toggle("open", true);
+      if (!$("askInput").disabled) $("askInput").focus();
+    } else {
+      $("askDock").classList.remove("mobile-open");
+      $("askBackdrop").classList.remove("open");
+    }
+  }
+
+  async function sendAsk(question) {
+    question = question.trim();
+    if (!question || $("askInput").disabled) return;
+    askBubble("is-question").textContent = question;
+    $("askInput").value = "";
+    const out = askBubble("md-answer");
+    out.textContent = "Đang trả lời…";
+    $("askSend").disabled = true;
+    try {
+      const d = await api("/api/ask", send("POST", { lesson: lessonId, question }));
+      out.innerHTML = renderAnswer(d.text);
+      if (window.MathJax && MathJax.typesetPromise) await MathJax.typesetPromise([out]).catch(() => {});
+      out.scrollIntoView({ block: "nearest" });
+    } catch (e) {
+      out.textContent = e.message;
+      out.classList.add("is-error");
+    }
+    $("askSend").disabled = false;
+  }
+
+  $("askForm").addEventListener("submit", e => { e.preventDefault(); sendAsk($("askInput").value); });
+  $("askInput").addEventListener("keydown", e => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendAsk(e.target.value); }
+  });
+
+  document.addEventListener("click", e => {
+    const el = e.target.closest("[data-act]");
+    if (!el) return;
+    const act = el.dataset.act;
+    if (act === "ask-open") { openAsk(true); }
+    else if (act === "ask-close") { openAsk(false); }
+    else if (act === "ask-expand") {
+      const on = !document.body.classList.contains("ask-expanded");
+      document.body.classList.toggle("ask-expanded", on);
+      $("askDock").classList.toggle("mobile-expanded", on);
+      el.setAttribute("aria-expanded", String(on));
+      el.textContent = on ? "Thu gọn" : "Mở rộng";
+    }
+    else if (act === "reload-frame") { loadFrame(); }
+    else if (act === "expired-reload") { flushDocBeforeLeave(false).finally(() => location.reload()); }
+  });
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") openAsk(false);
+  });
+
+  (async function init() {
+    if (!lessonId) {
+      setCover("Đường dẫn không hợp lệ.", null);
+      return;
+    }
+    try {
+      const me = await api("/api/me", { method: "GET" });
+      aiEnabled = !!me.ai;
+      if (!aiEnabled) {
+        $("askInput").disabled = true;
+        $("askInput").placeholder = "Ô Hỏi chưa được bật.";
+        $("askSend").disabled = true;
+      }
+    } catch (e) {
+      if (e.message === "login") return;
+    }
+    await loadFrame();
+  })();
+})();

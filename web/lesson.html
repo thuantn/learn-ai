@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Học AI - Bài học</title>
+<meta name="theme-color" content="#0b0d12">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/theme.js"></script>
+<script src="/static/vendor/marked.min.js" defer></script>
+<script src="/static/vendor/purify.min.js" defer></script>
+<script src="/static/mathjax-config.js"></script>
+<script src="/static/vendor/tex-svg.min.js" defer></script>
+<script src="/static/answer.js" defer></script>
+<script src="/static/lesson-host.js" defer></script>
+</head>
+<body class="lesson-host">
+<header class="lesson-top-bar" id="lessonTopBar">
+  <div class="lesson-top-left">
+    <a href="/" class="btn-studio-secondary lesson-back">Về app</a>
+    <h1 class="lesson-title" id="lessonTitle"></h1>
+    <span class="lesson-security-line">Trang bài không bao giờ hỏi mật khẩu của bạn</span>
+  </div>
+  <div class="lesson-top-right">
+    <span class="lesson-notice" id="lessonNotice"></span>
+    <button type="button" class="btn-studio-primary" id="lessonAskBtn" data-act="ask-open">Hỏi</button>
+  </div>
+</header>
+
+<main class="lesson-main" id="lessonMain">
+  <p class="lesson-loading" id="lessonLoading">Đang mở bài…</p>
+  <div class="lesson-frame-wrap" id="lessonFrameWrap" hidden></div>
+  <div class="lesson-cover" id="lessonCover" hidden>
+    <p class="lesson-cover-text" id="lessonCoverText"></p>
+    <button type="button" class="btn-studio-primary" id="lessonReloadBtn" data-act="reload-frame" hidden>Mở lại</button>
+    <button type="button" class="btn-studio-primary" id="lessonExpiredReloadBtn" data-act="expired-reload" hidden>Tải lại</button>
+  </div>
+</main>
+
+<div class="ask-backdrop" id="askBackdrop" data-act="ask-close"></div>
+<aside class="ask-dock" id="askDock" aria-label="Ô Hỏi">
+  <div>
+    <div class="ask-dock-header">
+      <h2 class="display-font ask-title">Ô Hỏi</h2>
+      <div class="ask-header-controls">
+        <button type="button" class="btn-expand-ask" id="btnExpandAsk" data-act="ask-expand" aria-expanded="false">Mở rộng</button>
+        <button type="button" class="ask-close-mobile" data-act="ask-close" aria-label="Đóng ô hỏi">✕</button>
+      </div>
+    </div>
+    <p class="ask-context">Đang hỏi về: <strong id="askLessonShort">bài này</strong></p>
+    <div class="ask-thread" id="askThread" aria-live="polite"></div>
+  </div>
+  <form id="askForm">
+    <label class="sr-only" for="askInput">Nhập câu hỏi</label>
+    <textarea id="askInput" class="ask-dock-textarea" maxlength="2000" placeholder="Hỏi về bài này"></textarea>
+    <button type="submit" class="btn-studio-primary fc-wide" id="askSend">Gửi câu hỏi</button>
+  </form>
+</aside>
+
+<dialog class="lesson-dialog" id="lessonDialog">
+  <form method="dialog" class="lesson-dialog-form">
+    <p class="lesson-dialog-text" id="lessonDialogText"></p>
+    <div class="lesson-dialog-buttons">
+      <button type="submit" class="btn-studio-secondary" value="cancel">Hủy</button>
+      <button type="submit" class="btn-studio-primary" value="ok" id="lessonDialogOk">Mở</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>

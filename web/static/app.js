@@ -365,14 +365,6 @@ function askBubble(cls) {
   b.scrollIntoView({ block: "nearest" });
   return b;
 }
-// Markdown would eat the backslashes of \( \) so formulas are set aside first, the same way the lesson pages do it.
-function renderAnswer(text) {
-  const keep = [];
-  const src = text.replace(/\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g, m => { keep.push(m); return `@@M${keep.length - 1}@@`; });
-  const escape = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  return DOMPurify.sanitize(marked.parse(src), { FORBID_TAGS: ["img"] }).replace(/@@M(\d+)@@/g, (_, i) => escape(keep[+i] || ""));
-}
-
 async function sendAsk(question) {
   question = question.trim();
   if (!question || $("askInput").disabled) return;
