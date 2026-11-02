@@ -1,0 +1,5 @@
+*
+!app
+!web
+!requirements.txt
+**/__pycache__

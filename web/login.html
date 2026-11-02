@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Đăng nhập Học AI</title>
+<meta name="theme-color" content="#0b0d12">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/theme.js"></script>
+<script src="/static/auth-page.js" defer></script>
+</head>
+<body class="auth-page">
+<main class="auth-console">
+  <div class="status-pill">Học AI</div>
+  <h1 class="hero-title auth-title">Đăng nhập</h1>
+  <div id="alertBox" class="studio-alert" role="alert" aria-live="assertive"></div>
+  <form id="loginForm" novalidate>
+    <div class="auth-field">
+      <label for="loginUser" class="auth-label">Tên đăng nhập</label>
+      <div class="auth-input-box"><input type="text" id="loginUser" class="auth-input" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+    </div>
+    <div class="auth-field">
+      <label for="loginPass" class="auth-label">Mật khẩu</label>
+      <div class="auth-input-box">
+        <input type="password" id="loginPass" class="auth-input" autocomplete="current-password" required>
+        <button type="button" class="btn-pwd-eye" data-eye="loginPass">Hiện</button>
+      </div>
+    </div>
+    <button type="submit" class="btn-studio-primary fc-wide" id="submitBtn">Đăng nhập</button>
+  </form>
+  <p class="admin-note">Cần tài khoản hoặc quên mật khẩu? Hãy liên hệ quản trị.</p>
+</main>
+</body>
+</html>

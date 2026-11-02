@@ -1,0 +1,24 @@
+{
+  "lessons": [
+    {
+      "id": "demo1",
+      "order": 1,
+      "title": "Bài mẫu: Trung bình cộng",
+      "page": "demo1/lesson.html",
+      "doc": "demo1doc",
+      "summary": ["Trung bình cộng bằng tổng các giá trị chia cho số giá trị.", "Một giá trị rất lớn có thể kéo trung bình lên cao."],
+      "cards": [
+        {"id": "demo1-c1", "q": "Trung bình của 2, 4, 6 bằng bao nhiêu?", "a": "4"},
+        {"id": "demo1-c2", "q": "Giá trị rất lớn ảnh hưởng thế nào đến trung bình?", "a": "Kéo trung bình lên cao."}
+      ],
+      "quiz": [
+        {"id": "demo1-q0", "q": "Trung bình của 1 và 3 là gì?", "options": ["1", "2", "3"], "answer": 1, "why": "(1 + 3) / 2 = 2."}
+      ],
+      "tracks": {
+        "short": {"file": "demo1/audio/short.mp3", "duration": 3, "label": "Bản ngắn"},
+        "long": {"file": "demo1/audio/long.mp3", "duration": 5, "label": "Bản dài"}
+      }
+    }
+  ],
+  "files": ["demo1/lesson.html", "demo1/audio/short.mp3", "demo1/audio/long.mp3"]
+}

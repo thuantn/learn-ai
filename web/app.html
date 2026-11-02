@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Học AI</title>
+<meta name="theme-color" content="#0b0d12">
+<link rel="manifest" href="/static/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/theme.js"></script>
+<script src="/static/vendor/marked.min.js" defer></script>
+<script src="/static/vendor/purify.min.js" defer></script>
+<script src="/static/mathjax-config.js"></script>
+<script src="/static/vendor/tex-svg.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="workbench" id="workbenchGrid">
+  <aside class="studio-dock" aria-label="Trình phát podcast">
+    <div>
+      <div class="brand-row">
+        <a href="#home" class="brand-badge" data-act="go" data-to="home"><span class="studio-led"></span><span>Học AI</span></a>
+        <button type="button" class="theme-pill" data-act="theme" data-theme-label>Nền Sáng</button>
+      </div>
+      <div class="dock-now">
+        <div class="dock-kicker" id="dockKicker"></div>
+        <div class="display-font dock-title" id="dockTitle"></div>
+        <div class="dock-note"><span id="dockNote"></span></div>
+      </div>
+      <div class="console-well">
+        <div class="track-switch" role="group" aria-label="Chọn bản podcast">
+          <button type="button" class="track-pill" data-act="track" data-track="short" aria-pressed="false"></button>
+          <button type="button" class="track-pill" data-act="track" data-track="long" aria-pressed="true"></button>
+        </div>
+        <div class="spectrum-bars" id="dockBars" aria-hidden="true"></div>
+        <div class="console-time-row">
+          <span class="console-clock" data-time="now">0:00</span>
+          <span class="console-duration">/ <span data-time="total">0:00</span></span>
+        </div>
+        <label class="sr-only" for="dockScrubber">Tua podcast</label>
+        <input type="range" id="dockScrubber" class="studio-scrubber" data-scrub min="0" max="1" value="0">
+        <div class="deck-buttons">
+          <button type="button" class="btn-deck" data-act="seek" data-by="-15" aria-label="Tua lùi 15 giây">-15s</button>
+          <button type="button" class="btn-deck-play" data-act="play" data-play-label>Phát</button>
+          <button type="button" class="btn-deck" data-act="seek" data-by="15" aria-label="Tua tới 15 giây">+15s</button>
+          <button type="button" class="btn-deck" data-act="speed" data-speed-label aria-label="Đổi tốc độ phát">1x</button>
+        </div>
+      </div>
+    </div>
+    <div class="dock-foot"><span data-due-text></span></div>
+  </aside>
+
+  <div class="stage-pane">
+    <header class="unified-top-bar">
+      <nav class="stage-nav" aria-label="Các màn hình">
+        <button type="button" class="stage-tab" data-act="go" data-to="home" data-nav="home">Trang đầu</button>
+        <button type="button" class="stage-tab" data-act="go" data-to="review" data-nav="review">1. Ôn lại</button>
+        <button type="button" class="stage-tab" data-act="go" data-to="listen" data-nav="listen">2. Nghe</button>
+        <button type="button" class="stage-tab" data-act="go" data-to="flashcard" data-nav="flashcard">3. Flashcard</button>
+        <a class="stage-tab" data-article href="#">Bài đầy đủ</a>
+      </nav>
+      <div class="top-bar-right"><button type="button" class="btn-logout" data-act="logout">Đăng xuất</button></div>
+    </header>
+
+    <main class="stage-body">
+      <section id="screen-home" class="screen" aria-labelledby="home-title">
+        <div class="hero-banner">
+          <div class="status-pill" id="homePill"></div>
+          <h1 id="home-title" class="hero-title"></h1>
+          <p class="hero-note" id="homeNote"></p>
+          <div class="cta-cluster">
+            <button type="button" class="btn-studio-primary" data-act="start">Bắt đầu buổi học</button>
+            <a class="btn-studio-secondary" data-article href="#">Đọc bài đầy đủ</a>
+          </div>
+        </div>
+        <h2 class="list-heading">Danh sách bài học</h2>
+        <div class="lesson-stream" id="lessonList"></div>
+      </section>
+
+      <section id="screen-review" class="screen" aria-labelledby="review-title">
+        <div class="flow-strip" data-flow="1"></div>
+        <h1 id="review-title" class="hero-title small-title">Tóm tắt đọc trong khoảng 2 phút</h1>
+        <p class="lesson-name" data-lesson-title></p>
+        <div class="summary-stack" id="summary"></div>
+        <div class="cta-cluster">
+          <button type="button" class="btn-studio-primary" data-act="go" data-to="listen">Tiếp tục: Nghe podcast</button>
+          <a class="btn-studio-secondary" data-article href="#">Đọc bài đầy đủ</a>
+        </div>
+      </section>
+
+      <section id="screen-listen" class="screen" aria-labelledby="listen-title">
+        <div class="flow-strip" data-flow="2"></div>
+        <div class="hero-banner">
+          <div class="status-pill">Cần có mạng để nghe</div>
+          <h1 id="listen-title" class="hero-title small-title">Nghe podcast</h1>
+          <p class="lesson-name" data-lesson-title></p>
+          <div class="main-tracks" role="group" aria-label="Chọn bản podcast">
+            <button type="button" class="track-pill track-big" data-act="track" data-track="short" aria-pressed="false"></button>
+            <button type="button" class="track-pill track-big" data-act="track" data-track="long" aria-pressed="true"></button>
+          </div>
+          <div class="main-player">
+            <div class="main-clock">
+              <span class="console-clock" data-time="now">0:00</span>
+              <span class="console-duration">Tổng: <span data-time="total">0:00</span></span>
+            </div>
+            <label class="sr-only" for="mainScrubber">Tua podcast</label>
+            <input type="range" id="mainScrubber" class="studio-scrubber" data-scrub min="0" max="1" value="0">
+            <div class="main-buttons">
+              <button type="button" class="btn-studio-secondary" data-act="seek" data-by="-15">Lùi 15 giây</button>
+              <button type="button" class="btn-studio-primary" data-act="play" data-play-label>Phát</button>
+              <button type="button" class="btn-studio-secondary" data-act="seek" data-by="15">Tới 15 giây</button>
+              <button type="button" class="btn-studio-secondary" data-act="speed" data-speed-label aria-label="Đổi tốc độ phát">1x</button>
+            </div>
+            <p class="audio-error" id="audioError" role="alert" hidden>Không tải được audio. Kiểm tra mạng rồi bấm Phát lại.</p>
+            <p class="key-hint">Phím Space để phát hoặc dừng, phím mũi tên để tua 15 giây.</p>
+          </div>
+          <div class="cta-cluster">
+            <button type="button" class="btn-studio-primary" data-act="go" data-to="flashcard">Tiếp tục: Flashcard</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-flashcard" class="screen" aria-labelledby="fc-title">
+        <div class="flow-strip" data-flow="3"></div>
+        <div class="fc-head">
+          <h1 id="fc-title" class="fc-title">Flashcard</h1>
+          <span class="fc-count" id="fcIndex"></span>
+        </div>
+        <div class="card-theater" id="fcCard" aria-live="polite">
+          <div>
+            <span class="status-pill" id="fcBadge"></span>
+            <h2 class="hero-title fc-question" id="fcQuestion"></h2>
+          </div>
+          <div class="fc-answer" id="fcAnswerPane" hidden>
+            <div class="fc-answer-label">Đáp án</div>
+            <p class="fc-answer-text" id="fcAnswer"></p>
+            <div class="grade-row" role="group" aria-label="Chấm thẻ">
+              <button type="button" class="btn-rate" data-act="rate" data-r="1">Quên</button>
+              <button type="button" class="btn-rate" data-act="rate" data-r="2">Khó</button>
+              <button type="button" class="btn-rate" data-act="rate" data-r="3">Được</button>
+              <button type="button" class="btn-rate" data-act="rate" data-r="4">Dễ</button>
+            </div>
+          </div>
+          <div class="fc-reveal" id="fcReveal">
+            <button type="button" class="btn-studio-primary fc-wide" data-act="reveal">Hiện đáp án</button>
+          </div>
+          <p class="key-hint">Phím Space hiện đáp án, phím 1 đến 4 để chấm.</p>
+        </div>
+        <div class="hero-banner fc-empty" id="fcEmpty" hidden>
+          <h2 class="hero-title small-title">Không còn thẻ đến hạn</h2>
+          <p class="hero-note">Các thẻ sẽ quay lại khi đến lịch ôn.</p>
+          <div class="cta-cluster"><button type="button" class="btn-studio-primary" data-act="finish">Kết thúc buổi học</button></div>
+        </div>
+      </section>
+
+      <section id="screen-finish" class="screen" aria-labelledby="finish-title">
+        <div class="hero-banner finish-banner">
+          <div class="status-pill">Đã xong</div>
+          <h1 id="finish-title" class="hero-title">Kết thúc buổi học</h1>
+          <p class="hero-note" id="finishNote"></p>
+          <div class="cta-cluster finish-cta">
+            <button type="button" class="btn-studio-primary" data-act="go" data-to="home">Về trang đầu</button>
+            <a class="btn-studio-secondary" data-article href="#">Đọc bài đầy đủ</a>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="ask-backdrop" id="askBackdrop" data-act="ask-close"></div>
+  <aside class="ask-dock" id="askDock" aria-label="Ô Hỏi">
+    <div>
+      <div class="ask-dock-header">
+        <h2 class="display-font ask-title">Ô Hỏi</h2>
+        <div class="ask-header-controls">
+          <button type="button" class="btn-expand-ask" id="btnExpandAsk" data-act="ask-expand" aria-expanded="false">Mở rộng</button>
+          <button type="button" class="ask-close-mobile" data-act="ask-close" aria-label="Đóng ô hỏi">✕</button>
+        </div>
+      </div>
+      <p class="ask-context">Đang hỏi về: <strong data-lesson-short></strong></p>
+      <div class="ask-prompt-chips" id="askChips" role="group" aria-label="Gợi ý câu hỏi"></div>
+      <div class="ask-thread" id="askThread" aria-live="polite"></div>
+    </div>
+    <form id="askForm">
+      <label class="sr-only" for="askInput">Nhập câu hỏi</label>
+      <textarea id="askInput" class="ask-dock-textarea" maxlength="2000" placeholder="Hỏi về bài này"></textarea>
+      <button type="submit" class="btn-studio-primary fc-wide" id="askSend">Gửi câu hỏi</button>
+    </form>
+  </aside>
+</div>
+
+<div class="nav-backdrop" id="navBackdrop" data-act="nav-close"></div>
+<aside class="mobile-nav-drawer" id="navDrawer" aria-label="Menu">
+  <div>
+    <div class="drawer-top-bar">
+      <a href="#home" class="brand-badge" data-act="go" data-to="home"><span class="studio-led"></span><span>Học AI</span></a>
+      <button type="button" class="drawer-close-btn" data-act="nav-close" aria-label="Đóng menu">✕</button>
+    </div>
+    <nav class="drawer-nav-list" aria-label="Các màn hình">
+      <button type="button" class="drawer-nav-item" data-act="go" data-to="home" data-nav="home"><span>Trang đầu</span></button>
+      <button type="button" class="drawer-nav-item" data-act="go" data-to="review" data-nav="review"><span>1. Ôn lại</span></button>
+      <button type="button" class="drawer-nav-item" data-act="go" data-to="listen" data-nav="listen"><span>2. Nghe</span></button>
+      <button type="button" class="drawer-nav-item" data-act="go" data-to="flashcard" data-nav="flashcard"><span>3. Flashcard</span><span class="nav-sub" data-due-short></span></button>
+      <a class="drawer-nav-item" data-article href="#"><span>Bài đầy đủ</span></a>
+    </nav>
+  </div>
+  <div class="drawer-footer">
+    <button type="button" class="drawer-action-btn" data-act="theme" data-theme-label>Nền Sáng</button>
+    <button type="button" class="drawer-action-btn logout" data-act="logout">Đăng xuất</button>
+  </div>
+</aside>
+
+<div class="mobile-floating-capsule" role="region" aria-label="Menu, trình phát và nút Hỏi">
+  <button type="button" class="capsule-menu-btn" data-act="nav-open" aria-label="Mở menu">☰</button>
+  <div class="capsule-audio-cluster">
+    <button type="button" class="capsule-track-jump" data-act="go" data-to="listen" aria-label="Mở màn hình Nghe">
+      <span class="studio-led"></span><span class="capsule-label" id="miniLabel"></span>
+    </button>
+    <button type="button" class="capsule-skip-btn" data-act="seek" data-by="-15" aria-label="Tua lùi 15 giây">-15s</button>
+    <button type="button" class="capsule-play-btn" data-act="play" data-play-label>Phát</button>
+    <button type="button" class="capsule-skip-btn" data-act="seek" data-by="15" aria-label="Tua tới 15 giây">+15s</button>
+  </div>
+  <button type="button" class="capsule-ask-btn" data-act="ask-open" aria-label="Mở ô hỏi">Hỏi</button>
+</div>
+</body>
+</html>

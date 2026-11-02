@@ -1,0 +1,47 @@
+name: learn-ai
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+services:
+  app:
+    <<: *hardening
+    build:
+      context: .
+      network: host
+    image: learn-ai:local
+    user: "${APP_UID:?}:${APP_GID:?}"
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      CONTENT_DIR: /content
+      BACKUP_DIR: /backups
+      TRUSTED_PROXY: tunnel
+    volumes:
+      - ./data:/data
+      - ./backups:/backups
+      - ./content:/content:ro
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    networks: [learn]
+  tunnel:
+    <<: *hardening
+    image: cloudflare/cloudflared:2026.10.4@sha256:c6c7ae1d5dfdcb094ad344ed68ccffc26635c9c6be80965664c33baf064b0515
+    command: ["tunnel", "--no-autoupdate", "--url", "http://app:8000", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?}
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    depends_on: [app]
+    networks: [learn]
+networks:
+  learn:
+    driver_opts:
+      com.docker.network.driver.mtu: "${MTU:-1500}"

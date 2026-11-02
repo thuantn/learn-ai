@@ -1,0 +1,4 @@
+fastapi
+fsrs
+argon2-cffi
+uvicorn
