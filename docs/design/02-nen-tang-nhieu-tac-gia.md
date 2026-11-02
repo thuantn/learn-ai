@@ -64,7 +64,7 @@ lessons/<lesson-id>/
 - `tracks`: có thể rỗng, tối đa `short` và `long`, mỗi bản `file`, `label`.
 
 Quy tắc máy kiểm tra:
-- Tên tệp và id chỉ gồm chữ thường, số, dấu gạch; id không trùng trong package.
+- Id chỉ gồm chữ thường, số, dấu gạch ngang, không trùng trong package. Tên tệp thêm được dấu chấm và gạch dưới.
 - `slug` và mọi id giữ nguyên qua các phiên bản. Id cũ biến mất thì server báo tên từng id và tác giả phải xác nhận trước khi nhận bản mới.
 - Chỉ nhận đuôi file trong danh sách: html, js, css, json, svg, png, jpg, webp, woff2, mp3.
 - Trang bài không có thuộc tính `on*` hay script inline, không tải tài nguyên từ ngoài; dùng thư viện app cấp sẵn ở `/static/vendor/`. Đây là cảnh báo để trang không bị hỏng dưới CSP, không phải lớp bảo mật; an toàn nằm ở mục 5.
@@ -85,7 +85,7 @@ Bộ kiểm tra là một module Python dùng thư viện chuẩn, cộng `mutag
 - File `.html` của tác giả chỉ được trả khi request có `Sec-Fetch-Dest: iframe`, thiếu header này cũng từ chối, nên không mở trực tiếp trong tab được. Mọi file khác của tác giả, kể cả `.svg`, có CSP `sandbox` không kèm `allow-scripts`, và `nosniff`.
 - CSP của trang do server gắn bằng response header, tác giả không bỏ được: `connect-src 'none'`, `form-action 'none'`, script, ảnh, font và media chỉ từ origin ghi tường minh của app, không dùng `'self'`. Font và `/static/vendor/` cần header CORS vì trang có origin mờ.
 - File của trang đi qua đường dẫn `/s/<token>/...`, để đường dẫn tương đối trong bài vẫn chạy, vì request từ iframe không mang cookie `SameSite=Strict`. Token ký, gắn với người dùng và bài, cấp mới mỗi lần mở bài, hết hạn sau vài giờ. Mỗi request đều kiểm tra lại quyền trong database, nên người bị thu hồi mất quyền ngay. File bài có `Cache-Control: no-store` hoặc `private`.
-- Trang app đặt `frame-src` chỉ cho phép địa chỉ của bài, để thử chặn iframe tự điều hướng ra ngoài. Hai reviewer không thống nhất việc này có hiệu lực với điều hướng do chính iframe tạo không, nên bước 2 phải thử thật trên từng trình duyệt. Dù kết quả thế nào, nếu iframe tải lại ngoài dự kiến, app vẫn gỡ khung và báo cho người học. Nếu không chặn được, ghi vào rủi ro còn lại. Đặt thêm `webrtc 'block'` ở trình duyệt có hỗ trợ.
+- Trang app đặt `frame-src` chỉ cho phép địa chỉ của bài, để thử chặn iframe tự điều hướng ra ngoài. Hai reviewer không thống nhất việc này có hiệu lực với điều hướng do chính iframe tạo không, nên bước 2 phải thử thật trên từng trình duyệt. Dù kết quả thế nào, nếu iframe tải lại ngoài dự kiến, app vẫn gỡ khung và báo cho người học. Nếu không chặn được, ghi vào rủi ro còn lại.
 - Các link ngoài trong bài không tự mở được. Cầu nối báo cho app, và app hỏi người học trước khi mở, có hiện rõ địa chỉ; chỉ nhận `https`.
 - Thanh điều hướng "Về app" và ô Hỏi của app nằm ngoài iframe. App luôn hiện tên tác giả và dòng nhắc rằng trang bài không bao giờ hỏi mật khẩu.
 
