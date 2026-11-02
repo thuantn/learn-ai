@@ -50,4 +50,4 @@ Set `MTU` in `.env` if the host network is below 1500.
 
 Passwords are hashed with Argon2id, sessions are random tokens stored as SHA-256 in `__Host-` cookies, login is rate limited by IP, account and pair, and the CSP allows only same-origin scripts. `cf-connecting-ip` is trusted only from the tunnel container. AI answers go through DOMPurify. Report problems through a private GitHub security advisory.
 
-Third-party files: see `THIRD_PARTY.md`.
+More in `docs/`: design, lesson format, operations and how credentials are handled. Third-party files: see `THIRD_PARTY.md`.
