@@ -1,6 +1,6 @@
 # Định dạng bài học
 
-Contract v1 là định dạng duy nhất server nhận. Bản đầy đủ và lý do ở `design/02-nen-tang-nhieu-tac-gia.md`, mục 4. Máy kiểm tra bằng `app/contract.py`.
+Contract v1 là định dạng duy nhất server nhận. Máy kiểm tra bằng `app/contract.py`.
 
 ## Một package
 
@@ -14,7 +14,12 @@ lessons/<lesson-id>/
 ```
 
 - `package.json`: `contract_version`, `slug`, `title`, `topic`, `description`, `lessons` là danh sách `lesson-id` theo thứ tự.
-- `lesson.json`: `title`, `summary`, `cards`, `quiz`, `tracks`.
+- `lesson.json`:
+  - `title`, tối đa 200 ký tự.
+  - `summary`: 3–8 ý, văn bản thuần.
+  - `cards`: 5–30 thẻ, mỗi thẻ `id`, `q`, `a`.
+  - `quiz`: có thể rỗng, mỗi câu `id`, `q`, `options`, `answer` (vị trí đáp án đúng, tính từ 0), `why`.
+  - `tracks`: có thể rỗng, tối đa `short` và `long`, mỗi bản `file` (trong `audio/`) và `label`.
 - Id giữ nguyên qua các phiên bản, vì tiến độ gắn theo id. Sửa nội dung thẻ không đổi id. Id biến mất thì tác giả phải xác nhận lúc tải lên.
 - Trong package chỉ dùng id trần. Server tự thêm tiền tố `p<12 hex>.` vào id trong các bảng tiến độ.
 - Bài không có `tracks` thì buổi học bỏ bước Nghe.
@@ -23,7 +28,7 @@ lessons/<lesson-id>/
 
 ```
 python scripts/learnpkg.py validate DIR [--profile full]
-python scripts/learnpkg.py pack DIR OUT.zip
+python scripts/learnpkg.py pack DIR OUT.zip [--profile full]
 ```
 
 Tải zip lên ở màn hình Thư viện. Server chạy lại đúng bộ kiểm tra này, rồi hiện cho tác giả xem thay đổi trước khi nhận.
@@ -34,26 +39,22 @@ Zip tối đa 90 MB. Mỗi tài khoản có hạn mức 1 GB tính trên dung l�
 
 ## Trang bài
 
-Trang là mã không tin cậy, chạy trong iframe sandbox không có origin. Trang không gọi được API của app, chỉ nói chuyện qua cầu nối `MessagePort`: `doc.get`, `doc.set`, `learner.id`, `quiz.answer`, `ask.open`, `link.open`, `media.error`. Xem `design/02a-ket-qua-sandbox.md`.
+Trang là mã không tin cậy, chạy trong iframe sandbox không có origin. Trang không có cookie, `localStorage`, mạng hay form. Script inline và thuộc tính `on*` không chạy; mọi script để trong file riêng ở `page/`. Thư viện chỉ dùng được bản app cấp ở `/static/` (`lesson-bridge.js`, `lesson-fonts.css`, `vendor/`), không tải từ ngoài.
 
-## Chuyển bài cũ
+Trang nói chuyện với app qua `window.LearnBridge`, có sẵn khi nạp `/static/lesson-bridge.js`:
 
-`scripts/convert_legacy.py CONFIG.json OUT_DIR [--allow-draft]` chuyển thư mục bài kiểu cũ thành package. File cấu hình nằm ngoài repo:
+| Gọi | Kết quả |
+|---|---|
+| `call("doc.get")` | Dữ liệu đã lưu của người này trong bài này, hoặc `null` |
+| `call("doc.set", {data})` | Lưu một object |
+| `call("quiz.answer", {id, option})` | `{correct}`. Server chấm theo `lesson.json`; câu sai thành thẻ ôn |
+| `askApp(text)` | Mở ô Hỏi của app với câu điền sẵn, người học tự bấm gửi |
+| `call("learner.id")` | Mã riêng của người học trong package, không phải email |
+| `call("link.open", {url})` | App hỏi người học trước khi mở; chỉ nhận `https` |
 
-```json
-{
-  "source": "đường dẫn tới thư mục chứa các bài",
-  "replace": [["chuỗi cũ", "chuỗi mới"]],
-  "package": {"slug": "...", "title": "...", "topic": "...", "description": "..."},
-  "lessons": [{
-    "id": "bai03", "order": 3, "title": "Tên bài",
-    "folder": "Bai03-Ten", "page": "bai03_ten.html", "doc": "lesson3", "audio_dir": "podcast",
-    "tracks": {"long": {"file": "b.mp3", "label": "Bản dài"}}
-  }]
-}
-```
+`id` truyền vào `quiz.answer` là `id` của câu trong `lesson.json`. Đáp án đúng chỉ nằm trong `lesson.json`, trang không cần biết; phần giải thích `why` có thể nằm trong trang. Khung bài mẫu trong skill dùng sẵn các lệnh này.
 
-`replace` dùng để bỏ tên riêng khỏi trang trước khi đăng.
+Link `<a href>` ra ngoài tự đi qua `link.open`. Câu kiểm tra nhanh không cần ghi nhận có thể tự chấm trong trang; người học đọc mã nguồn sẽ thấy đáp án nên đừng dùng cách này cho quiz cuối bài. Công thức dùng `/static/vendor/tex-svg.min.js` (MathJax) cùng `/static/mathjax-config.js`.
 
 ## Khung nội dung đầy đủ
 

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tên bài</title>
+<script src="/static/lesson-bridge.js"></script>
+<link rel="stylesheet" href="/static/lesson-fonts.css">
+<link rel="stylesheet" href="bai.css">
+</head>
+<body>
+<main>
+  <h1>Tên bài</h1>
+  <p class="lead">Một câu nói người học sẽ làm được gì sau bài này.</p>
+
+  <section>
+    <h2>Phần 1</h2>
+    <p>Nội dung phần 1.</p>
+    <button type="button" class="ask" data-ask="Giải thích thêm phần 1 giúp tôi.">Hỏi về phần này</button>
+  </section>
+
+  <section class="quiz" data-quiz="bai-mau-q1">
+    <h2>Kiểm tra nhanh</h2>
+    <p>Câu kiểm tra?</p>
+    <button type="button" data-option="0">Lựa chọn A</button>
+    <button type="button" data-option="1">Lựa chọn B</button>
+    <p class="result" role="status"></p>
+    <p class="why" hidden>Vì sao B đúng.</p>
+  </section>
+</main>
+<script src="bai.js"></script>
+</body>
+</html>

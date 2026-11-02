@@ -1,7 +1,7 @@
 """CLI for lesson package validation and packing.
 
   python scripts/learnpkg.py validate DIR [--profile full]
-  python scripts/learnpkg.py pack DIR OUT.zip
+  python scripts/learnpkg.py pack DIR OUT.zip [--profile full]
 """
 import argparse
 import pathlib
@@ -20,6 +20,8 @@ def _print_problems(problems):
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -29,7 +31,8 @@ def main(argv=None):
 
     pkg = sub.add_parser("pack", help="Đóng gói thành zip.")
     pkg.add_argument("dir", help="Thư mục package")
-    pkg.add_argument("out", help="Đường dẫn file zip đầu ra")
+    pkg.add_argument("out", help="Đường dẫn file zip đầu ra, nằm ngoài thư mục package")
+    pkg.add_argument("--profile", default="basic", help="basic hoặc full")
 
     args = ap.parse_args(argv)
     if args.cmd == "validate":
@@ -41,6 +44,10 @@ def main(argv=None):
         return 0
 
     if args.cmd == "pack":
+        problems = check_package(pathlib.Path(args.dir), args.profile)
+        _print_problems(problems)
+        if errors(problems):
+            return 1
         try:
             pack(pathlib.Path(args.dir), pathlib.Path(args.out))
         except ValueError as exc:

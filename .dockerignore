@@ -2,6 +2,9 @@
 !app
 !web
 !requirements.txt
+!skills
+!scripts/learnpkg.py
+!docs/lesson-format.md
 **/__pycache__
 packages
 content

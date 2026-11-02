@@ -247,7 +247,11 @@
   async function flushDoc(keepalive) {
     if (docTimer) { clearTimeout(docTimer); docTimer = null; }
     if (docPending === null) return;
-    if (docWritePromise) { await docWritePromise; return; }
+    if (docWritePromise) {
+      await docWritePromise;
+      if (docPending !== null) scheduleDocWrite();
+      return;
+    }
     const body = docPending;
     docPending = null;
     const opts = send("PUT", body);

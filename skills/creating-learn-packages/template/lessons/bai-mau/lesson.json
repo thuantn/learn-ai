@@ -1,0 +1,15 @@
+{
+  "title": "Tên bài",
+  "summary": ["Ý chính thứ nhất.", "Ý chính thứ hai.", "Ý chính thứ ba."],
+  "cards": [
+    {"id": "bai-mau-c01", "q": "Câu hỏi thẻ 1?", "a": "Đáp án thẻ 1."},
+    {"id": "bai-mau-c02", "q": "Câu hỏi thẻ 2?", "a": "Đáp án thẻ 2."},
+    {"id": "bai-mau-c03", "q": "Câu hỏi thẻ 3?", "a": "Đáp án thẻ 3."},
+    {"id": "bai-mau-c04", "q": "Câu hỏi thẻ 4?", "a": "Đáp án thẻ 4."},
+    {"id": "bai-mau-c05", "q": "Câu hỏi thẻ 5?", "a": "Đáp án thẻ 5."}
+  ],
+  "quiz": [
+    {"id": "bai-mau-q1", "q": "Câu kiểm tra?", "options": ["Lựa chọn A", "Lựa chọn B"], "answer": 1, "why": "Vì sao B đúng."}
+  ],
+  "tracks": {}
+}

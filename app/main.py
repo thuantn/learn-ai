@@ -1,6 +1,7 @@
 """Learning app: login, lessons, podcast position, flashcards, Ask box."""
 import asyncio
 import hmac
+import io
 import json
 import logging
 import mimetypes
@@ -9,6 +10,7 @@ import pathlib
 import secrets
 import time
 import urllib.error
+import zipfile
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -243,6 +245,29 @@ async def change_password(request: Request):
     resp = JSONResponse({"ok": True})
     set_session_cookie(resp, token)
     return resp
+
+
+_SKILL = "skills/creating-learn-packages"
+TOOLKIT_FILES = (
+    "app/__init__.py", "app/bundle.py", "app/contract.py", "scripts/learnpkg.py", "docs/lesson-format.md",
+    f"{_SKILL}/SKILL.md", f"{_SKILL}/template/package.json", f"{_SKILL}/template/lessons/bai-mau/lesson.json",
+    f"{_SKILL}/template/lessons/bai-mau/content.md", f"{_SKILL}/template/lessons/bai-mau/page/index.html",
+    f"{_SKILL}/template/lessons/bai-mau/page/bai.css", f"{_SKILL}/template/lessons/bai-mau/page/bai.js",
+)
+
+
+def toolkit_zip():
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name in TOOLKIT_FILES:
+            z.write(WEB.parent / name, name)
+    return out.getvalue()
+
+
+@app.get("/api/toolkit.zip")
+async def toolkit():
+    data = await asyncio.to_thread(toolkit_zip)
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="learn-ai-toolkit.zip"'})
 
 
 @app.get("/api/me")

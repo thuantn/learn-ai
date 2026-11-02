@@ -1,0 +1,8 @@
+{
+  "contract_version": "v1",
+  "slug": "bai-mau",
+  "title": "Tên gói bài",
+  "topic": "Chủ đề",
+  "description": "Một hai câu nói gói bài này dạy gì, cho ai.",
+  "lessons": ["bai-mau"]
+}

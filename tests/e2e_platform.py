@@ -336,6 +336,26 @@ def run(br, base, temp, good, audio, bad):
     a.screenshot(path=str(SHOTS / "share-360.png"))
 
     check("no /api/ask request anywhere", not asks, asks[:2])
+    # Data set while a slow write is in flight still reaches the server, with nothing else happening.
+    c.goto(base + "/#library")
+    c.reload()
+    c.wait_for_selector("#libShared .stream-row")
+    slow_key = c.locator("#libShared [data-act=start]").first.get_attribute("data-lesson")
+    c.goto(f"{base}/lesson/{slow_key}", wait_until="networkidle")
+    frame = next(f for f in c.frames if "/s/" in f.url)
+    held = []
+    c.route("**/api/doc/**", lambda r: held.append(r) if r.request.method == "PUT" and not held else r.continue_())
+    frame.evaluate("LearnBridge.call('doc.set', {data: {step: 1}})")
+    c.wait_for_timeout(2500)
+    check("first write is in flight", len(held) == 1, len(held))
+    frame.evaluate("LearnBridge.call('doc.set', {data: {step: 2}})")
+    c.wait_for_timeout(2500)  # the timer for step 2 fires while step 1 is still being written
+    held[0].continue_()
+    c.wait_for_timeout(3000)
+    saved = c.evaluate("async key => (await (await fetch('/api/doc/' + encodeURIComponent(key))).json()).data", slow_key)
+    check("save made during a slow write is not stranded", saved == {"step": 2}, saved)
+    c.unroute("**/api/doc/**")
+
     # Cuong, who joined by link, takes the package back out of the library.
     c.goto(base + "/#library")
     c.reload()

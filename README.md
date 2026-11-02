@@ -23,7 +23,9 @@ export DATA_DIR=./data PACKAGES_DIR=./packages LINK_SECRET=local-only-secret-loc
 
 A package is a zip holding `package.json` and `lessons/<id>/`; the format is in `docs/lesson-format.md`. Check one with `scripts/learnpkg.py validate DIR [--profile full]`, zip it with `scripts/learnpkg.py pack DIR OUT.zip`, then upload it from the Library screen. The server runs the same check on every upload. `scripts/convert_legacy.py` turns an old lesson folder into a package.
 
-`tests/e2e_platform.py` runs upload, share, revoke and feedback in a real browser. `tests/e2e_browser.py PACKAGE_DIR` and `tests/e2e_sandbox.py PACKAGE_DIR` run the study session and the sandbox against an unpacked package (need `playwright`).
+An author can download a toolkit from the upload dialog: the `skills/creating-learn-packages` Claude skill, a lesson template and the checker.
+
+`tests/e2e_platform.py` runs upload, share, revoke and feedback in a real browser, `tests/e2e_admin.py` the admin page and Ask approval against a fake provider. `tests/e2e_browser.py PACKAGE_DIR` and `tests/e2e_sandbox.py PACKAGE_DIR` run the study session and the sandbox against an unpacked package (need `playwright`).
 
 ## Deploy
 
@@ -36,7 +38,8 @@ PUBLIC_ORIGIN=https://your.host
 ALLOWED_HOSTS=your.host
 TUNNEL_TOKEN=
 LINK_SECRET=        # required, random 32+ byte string. Signs sandbox URLs and share links; changing it kills every share link.
-AI_API_KEY=         # optional; the Ask box says it is off without it. Use a key with a spending cap.
+KEY_ENCRYPTION_KEY= # base64url of 32 random bytes. Encrypts the AI key saved on the admin page.
+AI_API_KEY=         # optional default until a key is saved on the admin page. Use a key with a spending cap.
 ```
 
 Make `./data`, `./backups` and `./packages` owned by that user, then:
@@ -46,7 +49,7 @@ docker compose up -d --build
 docker compose exec app python -m app.cli add-user you@example.com
 ```
 
-Other commands in `app/cli.py`: `import-package`, `reset-password`, `end-sessions`, `remove-user`, `list-users`. The database is backed up daily to `./backups`, keeping 14 copies.
+Give yourself the admin page with `set-admin you@example.com on`. Other commands in `app/cli.py`: `set-quota`, `import-package`, `reset-password`, `end-sessions`, `remove-user`, `list-users`. The database is backed up daily to `./backups`, keeping 14 copies.
 
 Set `MTU` in `.env` if the host network is below 1500.
 

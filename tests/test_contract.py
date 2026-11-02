@@ -152,9 +152,9 @@ def test_bom_and_crlf_json_is_accepted(good_package):
 
 
 def test_full_profile_requires_more(good_package):
-    """The full profile requires quiz, both tracks, content.md and section headings."""
+    """The full profile requires quiz, content.md and section headings. Audio stays optional."""
     codes = {p.code for p in check_package(good_package, "full")}
-    assert {"full_quiz", "full_tracks", "full_content", "full_sections"} <= codes
+    assert {"full_quiz", "full_content", "full_sections"} <= codes and "full_tracks" not in codes
 
 
 def test_audio_seconds_reads_mp3():
@@ -332,3 +332,20 @@ def test_id_with_trailing_newline_is_refused(good_package):
 def test_metadata_total_is_capped(good_package, monkeypatch):
     monkeypatch.setitem(check_package.__globals__, "MAX_META_TOTAL", 100)
     assert "meta_size" in _codes(good_package)
+
+
+def test_form_in_page_warns(good_package):
+    page = good_package / "lessons" / "demo" / "page" / "index.html"
+    page.write_text("<!doctype html><html><body><form><button>Gửi</button></form></body></html>", encoding="utf-8")
+    assert "page_form" in {p.code for p in check_package(good_package)}
+
+
+def test_page_quiz_id_missing_from_json_warns(good_package):
+    page = good_package / "lessons" / "demo" / "page" / "index.html"
+    page.write_text('<!doctype html><html><body><section data-quiz="demo-q9"></section></body></html>', encoding="utf-8")
+    assert "page_quiz_id" in {p.code for p in check_package(good_package)}
+
+
+def test_leftover_template_text_warns(good_package):
+    _edit_lesson(good_package, title="Tên bài")
+    assert "template_left" in {p.code for p in check_package(good_package)}

@@ -55,9 +55,12 @@ class PageChecker(HTMLParser):
     def __init__(self):
         super().__init__()
         self.problems = []
+        self.quiz_ids = set()
 
     def handle_starttag(self, tag, attrs):
         attr_dict = dict(attrs)
+        if attr_dict.get("data-quiz"):
+            self.quiz_ids.add(attr_dict["data-quiz"])
         for name, _ in attrs:
             if name.lower().startswith("on"):
                 self.problems.append(Problem(
@@ -65,6 +68,11 @@ class PageChecker(HTMLParser):
                     "Trang có sự kiện inline, sẽ không chạy dưới CSP.", "warning"
                 ))
                 break
+        if tag == "form":
+            self.problems.append(Problem(
+                "page/index.html", "page_form",
+                "Trang có <form>, sandbox không cho gửi form nên nút sẽ không chạy. Dùng nút type=\"button\".", "warning"
+            ))
         if tag == "script":
             if "src" not in attr_dict:
                 self.problems.append(Problem(
@@ -230,6 +238,10 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
     elif _too_long(title, MAX_TITLE):
         problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "text_too_long", f"Tiêu đề bài quá dài: {len(title)} > {MAX_TITLE}."))
 
+    cards_for_check = lesson.get("cards")
+    if title == "Tên bài" or (isinstance(cards_for_check, list) and any(isinstance(x, dict) and str(x.get("q", "")).startswith("Câu hỏi thẻ") for x in cards_for_check)):
+        problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "template_left", "lesson.json vẫn còn nội dung của khung mẫu.", "warning"))
+
     summary = lesson.get("summary", [])
     if not isinstance(summary, list) or not (3 <= len(summary) <= 8):
         problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "summary_count", "Tóm tắt cần 3–8 ý."))
@@ -313,8 +325,6 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
         for key in tracks:
             if key not in ("short", "long"):
                 problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "track_key", f"Track không hợp lệ: {key}. Chỉ chấp nhận short hoặc long."))
-        if profile == "full" and not ("short" in tracks and "long" in tracks):
-            problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "full_tracks", "Mức Đầy đủ cần có cả track short và long."))
         for key, track in tracks.items():
             if not isinstance(track, dict):
                 problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "tracks_format", f"Track {key} không phải đối tượng."))
@@ -346,6 +356,9 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
                 checker = PageChecker()
                 checker.feed(html)
                 problems.extend(checker.problems)
+                known = {q.get("id") for q in lesson.get("quiz", []) if isinstance(q, dict)} if isinstance(lesson.get("quiz"), list) else set()
+                for qid in sorted(checker.quiz_ids - known):
+                    problems.append(Problem(f"lessons/{lesson_id}/page/index.html", "page_quiz_id", f"Trang có câu {qid} nhưng lesson.json không có, server sẽ không chấm được.", "warning"))
                 if profile == "full" and ("Khởi động" not in html or "Đi sâu" not in html):
                     problems.append(Problem(f"lessons/{lesson_id}/page/index.html", "full_sections", "Mức Đầy đủ cần có chuỗi 'Khởi động' và 'Đi sâu' trong trang."))
             except Exception as exc:

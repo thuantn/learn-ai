@@ -5,6 +5,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 COPY app app
 COPY web web
+COPY skills skills
+COPY scripts/learnpkg.py scripts/learnpkg.py
+COPY docs/lesson-format.md docs/lesson-format.md
 USER 10001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD ["python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]

@@ -1,0 +1,10 @@
+:root { color-scheme: light dark; --line: #8884; --good: #0d9488; --bad: #e11d48; }
+body { margin: 0; font-family: 'Be Vietnam Pro', system-ui, sans-serif; line-height: 1.6; }
+main { max-width: 720px; margin: 0 auto; padding: 1.25rem 1rem 4rem; }
+.lead { font-size: 1.15rem; }
+section { margin-top: 2rem; }
+button { min-height: 44px; padding: 0.5rem 1rem; margin: 0.25rem 0.25rem 0.25rem 0; border: 1px solid var(--line); border-radius: 10px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.result.is-good { color: var(--good); }
+.result.is-bad { color: var(--bad); }
+pre, table { display: block; max-width: 100%; overflow-x: auto; }
+img { max-width: 100%; height: auto; }
