@@ -156,6 +156,15 @@ Header CSP `sandbox`, `Sec-Fetch-Dest`, font và audio có tua (`Range`, `206`) 
 
 Builder phải kiểm tra thực tế: tìm kiếm web của OpenRouter có dùng cùng ZDR được không, giá mỗi lượt, và phần nào của prompt bị gửi tới bộ tìm kiếm. [Chủ dự án] Điều kiện để bật Internet là giữ được ZDR. Không giữ được thì chưa làm công tắc Internet và báo chủ dự án, không tự nới. [Đề xuất] Có ZDR rồi vẫn ưu tiên chỉ gửi câu hỏi cho bộ tìm kiếm, nếu nhà cung cấp cho phép chọn. Chưa có khóa thì ô Hỏi vẫn báo chưa bật như hiện nay, và phần kiểm tra này chờ có khóa.
 
+**Nhà cung cấp AI.** [Đề xuất] Admin chọn nhà cung cấp và nhập khóa ở trang `/admin`:
+- Chọn từ danh sách có sẵn trong code, ví dụ OpenRouter, OpenCode, đều theo chuẩn OpenAI-compatible. Mỗi mục ghi địa chỉ API cố định và khả năng ZDR. Admin không nhập được địa chỉ tùy ý, để tài khoản admin bị chiếm cũng không chuyển được câu hỏi sang máy chủ lạ hoặc gọi vào mạng nội bộ. Nhà cung cấp mới được thêm bằng code.
+- Khóa chỉ ghi, không đọc lại: sau khi lưu, màn hình chỉ hiện 4 ký tự cuối. Khóa được mã hóa trong database bằng khóa chủ nằm trong `.env`, không xuất hiện trong log hay bản sao lưu dạng rõ.
+- Có nút thử kết nối, gọi một câu ngắn, và báo model có chạy được theo yêu cầu ZDR không.
+- Mỗi lúc chỉ một nhà cung cấp hoạt động. Không tự chuyển sang nhà cung cấp khác khi lỗi, vì có thể làm mất ZDR.
+- Nhà cung cấp không xác nhận được ZDR thì hiện cảnh báo ở màn hình duyệt, và không cho bật Internet.
+- `AI_API_KEY` trong `.env` vẫn dùng được làm mặc định. Đây là cách đang chạy trước khi có trang `/admin`.
+- Mọi lần đổi khóa hoặc nhà cung cấp đều ghi log: ai, lúc nào, không ghi giá trị khóa.
+
 ## 10. Skill
 
 Tên dự kiến `creating-learn-packages`, để trong repo cùng bộ kiểm tra. [Đề xuất] App có nút tải "Bộ công cụ tác giả" ở màn hình Tải lên, gồm skill, bộ kiểm tra và khung mẫu, để đồng nghiệp lấy được dù repo vẫn private. Tác giả cần Python và Claude Code; ai không dùng Claude vẫn tạo được bài theo contract. Khung bài đầy đủ nằm ở `docs/lesson-format.md`.
@@ -181,7 +190,7 @@ Các màn hình mới cho người dùng là Thư viện, Tải lên, Share, Gó
 
 Phần của tác giả (bài của tôi, share, xem góp ý) nằm trong Thư viện, không tách trang.
 
-[Đề xuất] Trang quản lý `/admin` riêng, chỉ admin mở được, gồm: duyệt ô Hỏi và công tắc Internet, báo cáo vi phạm, gỡ package, dung lượng đã dùng. Claude tự làm trang này, không cần bản mẫu Gemini, dùng cùng màu, font, nút và nền sáng tối của giao diện hiện có, nhưng bố cục gọn hơn: bảng và danh sách thay cho thẻ lớn, trên điện thoại bảng chuyển thành từng dòng. Chủ dự án xem ảnh chụp trước khi xong.
+[Đề xuất] Trang quản lý `/admin` riêng, chỉ admin mở được, gồm: duyệt ô Hỏi và công tắc Internet, nhà cung cấp AI và khóa, báo cáo vi phạm, gỡ package, dung lượng đã dùng. Claude tự làm trang này, không cần bản mẫu Gemini, dùng cùng màu, font, nút và nền sáng tối của giao diện hiện có, nhưng bố cục gọn hơn: bảng và danh sách thay cho thẻ lớn, trên điện thoại bảng chuyển thành từng dòng. Chủ dự án xem ảnh chụp trước khi xong.
 
 ## 12. Dữ liệu
 
