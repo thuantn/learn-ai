@@ -3,3 +3,7 @@
 !web
 !requirements.txt
 **/__pycache__
+packages
+content
+data
+backups

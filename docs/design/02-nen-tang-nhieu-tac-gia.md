@@ -1,6 +1,6 @@
 # learn-ai thành nền tảng tạo và chia sẻ bài học: thiết kế
 
-Trạng thái: **bản nháp, chờ chủ dự án duyệt, chưa xây.** Đã qua phản biện của một reviewer mới và hai model khác. Xây trên app hiện có, mô tả tại `01-app-ban-dau.md`.
+Trạng thái: **đang xây.** Phần 1 (contract, sandbox) và phần 2 (thư viện, tải lên, share, góp ý) đã xong; phần 3 (trang quản trị, duyệt ô Hỏi, skill) chưa làm. Đã qua phản biện của một reviewer mới và hai model khác.
 
 Trong tài liệu, **[Chủ dự án]** là điều người dùng đã quyết định. **[Đề xuất]** là quyết định của người viết, chủ dự án có thể đổi.
 
@@ -127,7 +127,7 @@ Header CSP `sandbox`, `Sec-Fetch-Dest`, font và audio có tua (`Range`, `206`) 
 - Link chỉ mở được sau khi đăng nhập. Mọi tài khoản có link đều vào được, mở rồi thì package thêm vào mục "Được share" của họ. Chủ sở hữu tắt link hoặc tạo link mới được, và link cũ hết tác dụng.
 - Chủ sở hữu thấy danh sách người có quyền và bỏ được từng người. Người bị bỏ không vào được nữa, dữ liệu tiến độ vẫn giữ.
 - Người được share không share tiếp được.
-- Token của link là chuỗi ngẫu nhiên 256 bit, lưu dạng băm, giới hạn tốc độ thử.
+- Token của link là HMAC-SHA256 của id package và một nonce ngẫu nhiên, ký bằng `LINK_SECRET`, có giới hạn tốc độ thử. Khi xây, chúng tôi đổi so với bản đầu (chuỗi ngẫu nhiên lưu dạng băm): server phải tính lại được link để chủ sở hữu copy lại bất cứ lúc nào. Database chỉ giữ nonce. Đổi `LINK_SECRET` thì mọi link cũ hết tác dụng.
 
 ## 8. Góp ý
 

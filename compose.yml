@@ -18,15 +18,13 @@ services:
     env_file: .env
     environment:
       DATA_DIR: /data
-      CONTENT_DIR: /content
       PACKAGES_DIR: /packages
       BACKUP_DIR: /backups
       TRUSTED_PROXY: tunnel
     volumes:
       - ./data:/data
       - ./backups:/backups
-      - ./content:/content:ro
-      - ./packages:/packages:ro
+      - ./packages:/packages
     tmpfs: [/tmp]
     mem_limit: 512m
     cpus: 1.0

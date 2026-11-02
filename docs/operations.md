@@ -12,7 +12,7 @@ Không credential nào nằm trong repo, image hay log.
 | Mật khẩu tạm | Lệnh `add-user` in ra một lần | Người quản trị tự đưa cho người dùng; app không gửi email |
 | Token tunnel | `.env` quyền 600 trên VM | SFTP qua SSH từ máy quản trị |
 | Khóa AI (`AI_API_KEY`) | `.env` trên VM | Server gọi nhà cung cấp AI; không xuống trình duyệt |
-| Khóa liên kết bài (`LINK_SECRET`) | `.env` trên VM | Ký URL `/s/<token>/...` cho trang bài trong sandbox; không xuống trình duyệt |
+| Khóa liên kết bài (`LINK_SECRET`) | `.env` trên VM | Ký URL `/s/<token>/...` của trang bài và link share; không xuống trình duyệt. Bắt buộc, thiếu thì app không khởi động. Đổi khóa thì mọi link share cũ hết tác dụng |
 | Khóa SSH của user deploy | Máy quản trị, ngoài repo và ngoài thư mục đồng bộ đám mây | Không rồi máy |
 | Mật khẩu admin VM | Máy quản trị | Chỉ dùng cho SSH và stdin của `sudo` lúc tạo user |
 
@@ -31,8 +31,8 @@ Quy tắc:
    cloudflared tunnel token learn-ai
    ```
 2. Trên VM, tạo user riêng trong nhóm `docker`, khóa mật khẩu, chỉ cho đăng nhập bằng khóa SSH.
-3. Chép code từ `git archive HEAD`, nội dung đã đóng gói vào `~/learn-ai/content`, và package bài học đã kiểm tra vào `~/learn-ai/packages`. Tạo `data/` và `backups/` thuộc user đó.
-4. Tạo `.env` quyền 600 theo `README.md`. Thêm `LINK_SECRET` ngẫu nhiên 32 byte trở lên để ký URL sandbox.
+3. Chép code từ `git archive HEAD`. Tạo `data/`, `backups/` và `packages/` thuộc user đó.
+4. Tạo `.env` quyền 600 theo `README.md`. `LINK_SECRET` ngẫu nhiên 32 byte trở lên là bắt buộc.
 5. Chạy:
    ```
    docker compose up -d --build
@@ -43,8 +43,11 @@ Quy tắc:
 ## Cập nhật
 
 - **Code:** chép bản mới, `docker compose up -d --build`.
-- **Nội dung:** chép thư mục đóng gói mới vào `content/`, rồi `docker compose restart app`. App chỉ đọc `manifest.json` lúc khởi động, nên không restart thì bài mới không hiện.
-- **Package sandbox:** chép package đã kiểm tra vào `packages/`, rồi `docker compose restart app`. App đọc `packages/package.json` lúc tạo URL sandbox.
+- **Bài học:** tác giả tự tải zip lên ở màn hình Thư viện, không cần deploy. Quản trị có thể chạy `import-package <zip> <email chủ sở hữu>`.
+
+Package nằm ở `packages/<id>/<version>/`, thông tin và quyền nằm trong database. Thư mục tạm `packages/.staging` được dọn lúc khởi động.
+
+Mỗi lần nâng cấp có migration, app chép database thành `backups/premigrate-v<n>-<thời gian>.db` trước. Không chép được thì dừng, không migrate. Sao lưu chỉ gồm database, không gồm `packages/`; mất thư mục này thì tác giả phải tải zip lên lại.
 
 ## Tài khoản
 
@@ -52,7 +55,8 @@ Quy tắc:
 python -m app.cli add-user <email>        tạo tài khoản, in mật khẩu tạm
 python -m app.cli reset-password <email>  cấp mật khẩu tạm mới, xóa mọi phiên
 python -m app.cli end-sessions <email>    xóa mọi phiên
-python -m app.cli remove-user <email>     xóa tài khoản và dữ liệu
+python -m app.cli remove-user <email>     xóa tài khoản, dữ liệu và package của người đó
+python -m app.cli import-package <zip> <email>  cài package cho chủ sở hữu
 python -m app.cli list-users
 ```
 
@@ -70,7 +74,8 @@ Thêm `AI_API_KEY` vào `.env`, rồi `docker compose up -d`. Dùng khóa riêng
 - Audio trả `206`, tua được.
 - Trang bài hiện công thức và báo đã lưu vào tài khoản.
 - `docker port` của app không có gì. App khác trên VM vẫn healthy. Đo `docker stats`.
-- `tests/e2e_browser.py` chạy trên máy với nội dung thật. Chỉ dùng tài khoản thử trên bản thật và xóa sau đó.
+- Hai tài khoản thử trên bản thật: tải lên, share, học, thu hồi, góp ý. Xóa tài khoản xong, kiểm tra thư mục package biến mất.
+- `tests/e2e_browser.py PACKAGE_DIR` chạy trên máy với bài thật.
 
 ## Lỗi đã gặp
 
