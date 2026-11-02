@@ -70,8 +70,15 @@ def main(argv):
             c.execute("DELETE FROM sessions WHERE user=?", (name,))
             print("Đã kết thúc mọi phiên.")
         else:
+            owned = [r["id"] for r in c.execute("SELECT id FROM packages WHERE owner=?", (name,))]
+            for package_id in owned:
+                catalog.purge_rows(c, package_id)
             c.execute("DELETE FROM users WHERE name=?", (name,))
             print("Đã xóa tài khoản và dữ liệu.")
+    # After the commit above, so a failed delete keeps the files.
+    if cmd == "remove-user":
+        for package_id in owned:
+            shutil.rmtree(catalog.packages_dir() / package_id, ignore_errors=True)
     return 0
 
 

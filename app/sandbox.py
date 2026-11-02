@@ -83,6 +83,11 @@ def learner_code(user_id: int, package_id: str, secret: bytes | None = None) -> 
     return hmac.new(secret, f"learner|{package_id}|{user_id}".encode(), hashlib.sha256).hexdigest()
 
 
+def join_signature(package_id: str, nonce: str) -> str:
+    """Signs a share link. The database alone cannot rebuild it, and a new nonce kills the old link."""
+    return _b64url_encode(hmac.new(_secret(), f"join|{package_id}|{nonce}".encode(), hashlib.sha256).digest())
+
+
 def _sandbox_origin() -> str:
     return os.environ.get("PUBLIC_ORIGIN") or "'self'"
 

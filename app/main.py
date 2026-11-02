@@ -1,5 +1,6 @@
 """Learning app: login, lessons, podcast position, flashcards, Ask box."""
 import asyncio
+import hmac
 import json
 import logging
 import mimetypes
@@ -45,6 +46,9 @@ HEADERS = {
 JSON_LIMIT, DOC_LIMIT = 16 * 1024, 2 * 1024 * 1024
 ASK_INPUT_MAX, QUESTION_MAX = 24000, 2000
 ASK_PER_MINUTE = 6
+SHARE_PER_MINUTE, JOIN_PER_MINUTE = 30, 10
+FEEDBACK_MAX, FEEDBACK_PER_HOUR = 2000, 20
+FEEDBACK_KINDS = ("comment", "wrong", "abuse")
 HASHING = asyncio.Semaphore(2)  # each Argon2 call uses about 19 MB
 PUBLIC_PATHS = {"/login", "/healthz", "/favicon.ico"}
 PASSWORD_PATHS = {"/change-password", "/api/change-password", "/logout"}
@@ -53,6 +57,8 @@ limiter = auth.LoginLimiter()
 proxy = auth.ProxyIp(os.environ.get("TRUSTED_PROXY", ""))
 scheduler = Scheduler(enable_fuzzing=False)
 ask_recent = defaultdict(list)
+share_recent = defaultdict(list)
+join_recent = defaultdict(list)
 
 
 async def backup_loop(dest):
@@ -599,6 +605,203 @@ async def put_doc(name: str, request: Request):
         c.execute("INSERT OR REPLACE INTO user_doc VALUES(?,?,?,?)", (user, name, json.dumps(data, ensure_ascii=False), now))
         record_wrong_answers(c, user, lesson, data.get("quiz"), now)
     return {"ok": True}
+
+
+# ---------- Library and sharing ----------
+
+def recent_limit(store, user, limit, per=60):
+    """In-memory counter per person, kept simple because there is one worker."""
+    now = time.time()
+    recent = store[user]
+    recent[:] = [t for t in recent if now - t < per]
+    if len(recent) >= limit:
+        return False
+    recent.append(now)
+    return True
+
+
+def owned_package(c, package_id, user):
+    row = c.execute("SELECT * FROM packages WHERE id=?", (package_id,)).fetchone()
+    return row if row and row["owner"] == user else None
+
+
+def join_url(row):
+    return f"/#join={row['id']}.{sandbox.join_signature(row['id'], row['link_nonce'])}" if row["link_nonce"] else None
+
+
+@app.get("/api/packages")
+async def list_packages(request: Request):
+    user = request.state.user
+    with db.connect() as c:
+        titles = defaultdict(list)
+        for r in c.execute("SELECT package_id, data FROM package_lessons ORDER BY ord"):
+            titles[r["package_id"]].append(json.loads(r["data"])["title"])
+        mine = [{
+            "id": r["id"], "title": r["title"], "topic": r["topic"], "description": r["description"],
+            "version": r["version"], "size_bytes": r["size_bytes"], "lessons": titles[r["id"]],
+            "people": c.execute("SELECT count(*) n FROM package_access WHERE package_id=? AND revoked_at IS NULL", (r["id"],)).fetchone()["n"],
+            "link_on": bool(r["link_nonce"]),
+            "feedback": c.execute("SELECT count(*) n FROM feedback WHERE package_id=?", (r["id"],)).fetchone()["n"],
+        } for r in c.execute("SELECT * FROM packages WHERE owner=? ORDER BY updated_at DESC", (user,)).fetchall()]
+        shared = [{
+            "id": r["id"], "title": r["title"], "topic": r["topic"], "description": r["description"],
+            "author": r["owner"], "lessons": titles[r["id"]],
+        } for r in c.execute(
+            """SELECT p.* FROM packages p JOIN package_access a ON a.package_id=p.id
+               WHERE a.user=? AND a.revoked_at IS NULL ORDER BY a.granted_at DESC""", (user,)).fetchall()]
+        row = c.execute("SELECT quota_bytes FROM users WHERE name=?", (user,)).fetchone()
+    quota = row["quota_bytes"] if row and row["quota_bytes"] is not None else uploads.DEFAULT_QUOTA
+    return {"mine": mine, "shared": shared, "used": sum(x["size_bytes"] for x in mine), "quota": quota}
+
+
+@app.get("/api/packages/{package_id}/people")
+async def package_people(package_id: str, request: Request):
+    with db.connect() as c:
+        if not owned_package(c, package_id, request.state.user):
+            return bad(404, "package", "Không có package này.")
+        rows = c.execute("SELECT user, via, granted_at FROM package_access WHERE package_id=? AND revoked_at IS NULL ORDER BY granted_at", (package_id,)).fetchall()
+    return {"people": [{"email": r["user"], "via": r["via"], "granted_at": r["granted_at"]} for r in rows]}
+
+
+@app.post("/api/packages/{package_id}/share")
+async def share_package(package_id: str, request: Request):
+    user = request.state.user
+    data = await read_json(request)
+    email = str((data or {}).get("email", "")).strip().lower()[:254]
+    with db.connect() as c:
+        if not owned_package(c, package_id, user):
+            return bad(404, "package", "Không có package này.")
+        if not recent_limit(share_recent, user, SHARE_PER_MINUTE):
+            return bad(429, "rate_limited", "Thử lại sau ít phút.")
+        if email == user:
+            return bad(400, "self", "Đây là tài khoản của bạn.")
+        if not email or not c.execute("SELECT 1 FROM users WHERE name=?", (email,)).fetchone():
+            return bad(404, "no_account", "Email này chưa có tài khoản trong app.")
+        c.execute(
+            """INSERT INTO package_access(package_id, user, via, granted_at, revoked_at) VALUES(?,?,'email',?,NULL)
+               ON CONFLICT(package_id, user) DO UPDATE SET revoked_at=NULL, via='email', granted_at=excluded.granted_at""",
+            (package_id, email, time.time()),
+        )
+    return {"ok": True}
+
+
+@app.post("/api/packages/{package_id}/unshare")
+async def unshare_package(package_id: str, request: Request):
+    data = await read_json(request)
+    email = str((data or {}).get("email", "")).strip().lower()[:254]
+    with db.connect() as c:
+        if not owned_package(c, package_id, request.state.user):
+            return bad(404, "package", "Không có package này.")
+        c.execute("UPDATE package_access SET revoked_at=? WHERE package_id=? AND user=?", (time.time(), package_id, email))
+    return {"ok": True}
+
+
+@app.get("/api/packages/{package_id}/link")
+async def get_link(package_id: str, request: Request):
+    with db.connect() as c:
+        row = owned_package(c, package_id, request.state.user)
+    if not row:
+        return bad(404, "package", "Không có package này.")
+    return {"url": join_url(row)}
+
+
+@app.post("/api/packages/{package_id}/link")
+async def new_link(package_id: str, request: Request):
+    with db.connect() as c:
+        if not owned_package(c, package_id, request.state.user):
+            return bad(404, "package", "Không có package này.")
+        c.execute("UPDATE packages SET link_nonce=? WHERE id=?", (secrets.token_urlsafe(32), package_id))
+        row = owned_package(c, package_id, request.state.user)
+    return {"url": join_url(row)}
+
+
+@app.delete("/api/packages/{package_id}/link")
+async def link_off(package_id: str, request: Request):
+    with db.connect() as c:
+        if not owned_package(c, package_id, request.state.user):
+            return bad(404, "package", "Không có package này.")
+        c.execute("UPDATE packages SET link_nonce=NULL WHERE id=?", (package_id,))
+    return {"ok": True}
+
+
+@app.post("/api/join")
+async def join_package(request: Request):
+    user = request.state.user
+    if not recent_limit(join_recent, user, JOIN_PER_MINUTE):
+        return bad(429, "rate_limited", "Thử lại sau ít phút.")
+    data = await read_json(request)
+    package_id, _, signature = str((data or {}).get("token", "")).partition(".")
+    with db.connect() as c:
+        row = c.execute("SELECT id, owner, link_nonce FROM packages WHERE id=?", (package_id,)).fetchone()
+        if not row or not row["link_nonce"] or not hmac.compare_digest(signature.encode(), sandbox.join_signature(package_id, row["link_nonce"]).encode()):
+            return bad(404, "link", "Link không còn hiệu lực.")
+        if row["owner"] != user:
+            access = c.execute("SELECT revoked_at FROM package_access WHERE package_id=? AND user=?", (package_id, user)).fetchone()
+            if access and access["revoked_at"] is not None:
+                return bad(403, "revoked", "Tác giả đã bỏ quyền của bạn với bài này.")
+            c.execute(
+                "INSERT INTO package_access(package_id, user, via, granted_at) VALUES(?,?,'link',?) ON CONFLICT(package_id, user) DO NOTHING",
+                (package_id, user, time.time()),
+            )
+        first = c.execute("SELECT key FROM package_lessons WHERE package_id=? ORDER BY ord LIMIT 1", (package_id,)).fetchone()
+    return {"package_id": package_id, "first_lesson": first["key"] if first else None}
+
+
+@app.delete("/api/packages/{package_id}")
+async def delete_package(package_id: str, request: Request):
+    user = request.state.user
+    with db.connect() as c:
+        if not owned_package(c, package_id, user):
+            return bad(404, "package", "Không có package này.")
+    await asyncio.to_thread(catalog.delete_package, package_id)
+    log.info("package deleted user=%r id=%s", user, package_id)
+    return {"ok": True}
+
+
+# ---------- Feedback ----------
+
+@app.post("/api/lessons/{lesson_id}/feedback")
+async def send_feedback(lesson_id: str, request: Request):
+    user = request.state.user
+    data = await read_json(request) or {}
+    with db.connect() as c:
+        lesson = catalog.lesson_for(c, user, lesson_id)
+        if not lesson:
+            return bad(404, "lesson", "Không có bài này.")
+        kind, target_type, target_id = data.get("kind"), data.get("target_type"), str(data.get("target_id") or "")
+        text = data.get("text")
+        if kind not in FEEDBACK_KINDS or not isinstance(text, str) or not 0 < len(text.strip()) <= FEEDBACK_MAX:
+            return bad(400, "input", "Góp ý đang trống hoặc quá dài.")
+        pools = {"lesson": None, "card": lesson["cards"], "quiz": lesson["quiz"]}
+        if target_type not in pools or (pools[target_type] is not None and target_id not in {x["id"] for x in pools[target_type]}):
+            return bad(400, "input", "Dữ liệu không hợp lệ.")
+        hour_ago = time.time() - 3600
+        if c.execute("SELECT count(*) n FROM feedback WHERE author=? AND created_at>?", (user, hour_ago)).fetchone()["n"] >= FEEDBACK_PER_HOUR:
+            return bad(429, "rate_limited", "Bạn đã gửi nhiều góp ý. Thử lại sau.")
+        c.execute(
+            "INSERT INTO feedback(package_id, lesson, target_type, target_id, kind, author, body, created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (lesson["package_id"], lesson_id, target_type, "" if target_type == "lesson" else target_id, kind, user, text.strip(), time.time()),
+        )
+    return {"ok": True}
+
+
+@app.get("/api/packages/{package_id}/feedback")
+async def package_feedback(package_id: str, request: Request):
+    with db.connect() as c:
+        if not owned_package(c, package_id, request.state.user):
+            return bad(404, "package", "Không có package này.")
+        lessons = {r["key"]: json.loads(r["data"]) for r in c.execute("SELECT key, data FROM package_lessons WHERE package_id=?", (package_id,))}
+        rows = c.execute("SELECT * FROM feedback WHERE package_id=? ORDER BY created_at DESC, id DESC LIMIT 200", (package_id,)).fetchall()
+    out = []
+    for r in rows:
+        lesson = lessons.get(r["lesson"]) or {}
+        pool = {"card": lesson.get("cards", []), "quiz": lesson.get("quiz", [])}.get(r["target_type"], [])
+        out.append({
+            "id": r["id"], "lesson_title": lesson.get("title"), "target_type": r["target_type"], "target_id": r["target_id"],
+            "target_text": next((x["q"] for x in pool if x["id"] == r["target_id"]), None),
+            "kind": r["kind"], "author": r["author"], "body": r["body"], "created_at": r["created_at"],
+        })
+    return {"feedback": out}
 
 
 # ---------- Upload ----------
