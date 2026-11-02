@@ -35,7 +35,7 @@ def ctx(tmp_path, monkeypatch):
         "app.catalog",
         "app.sandbox",
         "app.contract",
-        "app.bundle", "app.uploads",
+        "app.bundle", "app.uploads", "app.ai",
     ):
         sys.modules.pop(name, None)
     main = importlib.import_module("app.main")
@@ -392,7 +392,7 @@ def test_ask_server_controls_prompt_and_limits(ctx, capsys, monkeypatch):
     monkeypatch.setenv("AI_API_KEY", "khoa-bi-mat")
     monkeypatch.setenv("AI_DAILY_LIMIT", "1")
     sent = []
-    monkeypatch.setattr(main, "call_ai", lambda m: (sent.append(m), "**được**")[1])
+    monkeypatch.setattr(main.ai, "call", lambda m: (sent.append(m), "**được**")[1])
     c = ready_user(main, cli, capsys)
     key = install_sample(main, "an", tmp)
     pkg_id = key.split(".")[0]
@@ -428,7 +428,7 @@ def test_ask_sends_zdr_and_reports_failure_without_retry(ctx, capsys, monkeypatc
         seen.append(json.loads(req.data))
         raise main.urllib.error.HTTPError(req.full_url, 404, "No endpoints", {}, None)
 
-    monkeypatch.setattr(main.urllib.request, "urlopen", fake)
+    monkeypatch.setattr(main.ai, "_open", fake)
     with c:
         r = c.post("/api/ask", json={"lesson": key, "question": "x"})
         assert r.status_code == 502 and "khoa-bi-mat" not in r.text

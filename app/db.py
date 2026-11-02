@@ -57,6 +57,14 @@ CREATE TABLE feedback(
   author TEXT REFERENCES users(name) ON DELETE SET NULL, body TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE INDEX feedback_pkg ON feedback(package_id, created_at);
 """,
+    """
+CREATE TABLE ai_settings(
+  id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL, model TEXT NOT NULL,
+  key_blob BLOB NOT NULL, key_last4 TEXT NOT NULL, updated_by TEXT NOT NULL, updated_at REAL NOT NULL);
+CREATE TABLE admin_log(
+  id INTEGER PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '', at REAL NOT NULL);
+""",
 ]
 
 log = logging.getLogger("learn")
@@ -84,6 +92,10 @@ def _backup_premigrate(dest_dir, version):
     dst.close()
     src.close()
     return target
+
+
+def admin_log(c, actor, action, target, detail=""):
+    c.execute("INSERT INTO admin_log(actor, action, target, detail, at) VALUES(?,?,?,?,?)", (actor, action, target, detail, time.time()))
 
 
 def init():

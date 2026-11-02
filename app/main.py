@@ -9,7 +9,6 @@ import pathlib
 import secrets
 import time
 import urllib.error
-import urllib.request
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -20,7 +19,7 @@ from fsrs import Card, Rating, Scheduler
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import ClientDisconnect
 
-from . import auth, bundle, catalog, db, sandbox, uploads
+from . import ai, auth, bundle, catalog, db, sandbox, uploads
 
 log = logging.getLogger("learn")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -282,6 +281,7 @@ async def me(request: Request):
 async def lessons(request: Request):
     user = request.state.user
     now = time.time()
+    ai_on = ai.current() is not None
     with db.connect() as c:
         lessons = catalog.lessons_for(c, user)
         progress = {r["lesson"]: r for r in c.execute("SELECT * FROM lesson_progress WHERE user=?", (user,))}
@@ -329,7 +329,7 @@ async def lessons(request: Request):
             "package_title": x["package_title"],
             "author": x["author"],
             "mine": x["mine"],
-            "ask": bool(os.environ.get("AI_API_KEY")) and x["ask_status"] == "approved",
+            "ask": ai_on and x["ask_status"] == "approved",
         })
     return {"lessons": out, "due_total": sum(due.values()), "next_due": next_due}
 
@@ -397,7 +397,7 @@ async def lesson_frame(lesson_id: str, request: Request):
         "learner": learner,
         "author": lesson["author"],
         "package_title": lesson["package_title"],
-        "ask": bool(os.environ.get("AI_API_KEY")) and lesson["ask_status"] == "approved",
+        "ask": lesson["ask_status"] == "approved" and ai.current() is not None,
     })
 
 
@@ -912,19 +912,6 @@ def lesson_context(lesson):
     )
 
 
-def call_ai(messages):
-    body = {"model": os.environ.get("AI_MODEL", "deepseek/deepseek-v4.1-flash"), "messages": messages, "max_tokens": 1500}
-    if os.environ.get("AI_ZDR", "1") == "1":
-        body["provider"] = {"zdr": True}
-    base = os.environ.get("AI_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
-    req = urllib.request.Request(
-        base + "/chat/completions", data=json.dumps(body).encode(),
-        headers={"Authorization": "Bearer " + os.environ["AI_API_KEY"], "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=90) as r:
-        return json.loads(r.read())["choices"][0]["message"]["content"]
-
-
 def take_quota(user):
     now = time.time()
     recent = ask_recent[user]
@@ -943,7 +930,7 @@ def take_quota(user):
 
 @app.post("/api/ask")
 async def ask(request: Request):
-    if not os.environ.get("AI_API_KEY"):
+    if ai.current() is None:
         return bad(503, "disabled", "Ô Hỏi chưa được bật.")
     data = await read_json(request, ASK_INPUT_MAX * 4)
     user = request.state.user
@@ -964,7 +951,7 @@ async def ask(request: Request):
     if not await asyncio.to_thread(take_quota, user):
         return bad(429, "rate_limited", "Đã hết lượt hỏi. Thử lại sau.")
     try:
-        text = await asyncio.to_thread(call_ai, messages)
+        text = await asyncio.to_thread(ai.call, messages)
     except urllib.error.HTTPError as e:
         log.warning("ai http %s", e.code)
         return bad(502, "ai", "Dịch vụ AI đang lỗi. Thử lại sau.")
