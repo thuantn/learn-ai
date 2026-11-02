@@ -1,0 +1,336 @@
+"""Real-browser checks for the library, upload, share and feedback. Own temporary server and data.
+  python tests/e2e_platform.py [--browser chrome|webkit]
+"""
+import argparse
+import json
+import os
+import pathlib
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import urllib.request
+import zipfile
+
+from playwright.sync_api import sync_playwright
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NEW_PW = "ngựa vàng chạy qua cầu mây"
+FAILS = []
+SHOTS = pathlib.Path(tempfile.gettempdir()) / "learn-ai-platform-shots"
+XSS = "<img src=x onerror=window.__xss=1>"
+CARDS = [{"id": f"c{i}", "q": f"Thẻ {i}?", "a": f"Đáp {i}"} for i in range(5)]
+
+
+def check(name, ok, info=""):
+    print("OK  " if ok else "FAIL", name, "" if ok else str(info)[:200], flush=True)
+    if not ok:
+        FAILS.append(name)
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def make_zip(dest, slug, title, tracks=None, cards=CARDS):
+    """Starts from the bridge sample, so the page and its quiz are real."""
+    work = pathlib.Path(tempfile.mkdtemp())
+    root = work / "p"
+    shutil.copytree(ROOT / "sample" / "package", root)
+    pkg = json.loads((root / "package.json").read_text("utf-8"))
+    pkg.update(slug=slug, title=title)
+    (root / "package.json").write_text(json.dumps(pkg), "utf-8")
+    lesson_file = root / "lessons" / "sample" / "lesson.json"
+    lesson = json.loads(lesson_file.read_text("utf-8"))
+    lesson.update(title=title, cards=cards, tracks=tracks or {})
+    lesson_file.write_text(json.dumps(lesson), "utf-8")
+    if tracks:
+        (root / "lessons" / "sample" / "audio").mkdir(exist_ok=True)
+        for t in tracks.values():
+            shutil.copy(ROOT / "tests" / "fixtures" / "tone.mp3", root / "lessons" / "sample" / "audio" / t["file"])
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(root.rglob("*")):
+            if f.is_file():
+                z.write(f, f.relative_to(root).as_posix())
+    return dest
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--browser", choices=["chrome", "webkit"], default="chrome")
+    args = parser.parse_args()
+    SHOTS.mkdir(exist_ok=True)
+    work = pathlib.Path(tempfile.mkdtemp(prefix="learn-platform-"))
+    port = free_port()
+    base = f"http://127.0.0.1:{port}"
+    env = dict(os.environ, DATA_DIR=str(work / "data"), PACKAGES_DIR=str(work / "packages"), COOKIE_SECURE="0",
+               PUBLIC_ORIGIN=base, LINK_SECRET="e2e-secret-e2e-secret-e2e-secret-e2e", PYTHONUTF8="1")
+    env.pop("AI_API_KEY", None)
+
+    def add_user(name):
+        out = subprocess.run([sys.executable, "-m", "app.cli", "add-user", name], cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8")
+        return out.stdout.rsplit(": ", 1)[1].strip()
+
+    temp = {n: add_user(n) for n in ("an@example.com", "binh@example.com", "cuong@example.com")}
+    srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port), "--log-level", "warning"], cwd=ROOT, env=env)
+    try:
+        for _ in range(60):
+            try:
+                urllib.request.urlopen(base + "/healthz", timeout=1)
+                break
+            except OSError:
+                import time
+                time.sleep(0.25)
+        good = make_zip(work / "good.zip", "bai-mau", f"Bài {XSS}")
+        audio = make_zip(work / "audio.zip", "co-audio", "Bài có audio", tracks={"short": {"file": "s.mp3", "label": "Ngắn"}})
+        bad = work / "bad.zip"
+        with zipfile.ZipFile(bad, "w") as z:
+            z.writestr("../evil.txt", "x")
+        with sync_playwright() as p:
+            br = p.webkit.launch() if args.browser == "webkit" else p.chromium.launch(channel="chrome")
+            run(br, base, temp, good, audio, bad)
+            br.close()
+    finally:
+        srv.terminate()
+        srv.wait(timeout=10)
+        shutil.rmtree(work, ignore_errors=True)
+    print("FAILS:", len(FAILS), FAILS[:10], flush=True)
+    print("shots:", SHOTS)
+    return 1 if FAILS else 0
+
+
+def new_page(br, errs, width=1280, height=900):
+    ctx = br.new_context(viewport={"width": width, "height": height}, reduced_motion="reduce")
+    pg = ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("js: " + str(e)[:160]))
+    pg.on("dialog", lambda d: d.accept())
+    return pg
+
+
+def login_first(pg, base, name, temp, path="/"):
+    pg.goto(base + path)
+    pg.wait_for_url("**/login*")
+    pg.fill("#loginUser", name)
+    pg.fill("#loginPass", temp)
+    pg.click("#submitBtn")
+    pg.wait_for_url("**/change-password*")
+    pg.fill("#pass1", NEW_PW)
+    pg.fill("#pass2", NEW_PW)
+    pg.click("#submitBtn")
+
+
+def upload(pg, path):
+    pg.locator("#screen-library [data-act=lib-upload]").first.click()
+    pg.set_input_files("#upFile", str(path))
+
+
+def run(br, base, temp, good, audio, bad):
+    errs = []
+    a = new_page(br, errs)
+    login_first(a, base, "an@example.com", temp["an@example.com"])
+    a.wait_for_url(base + "/**")
+
+    # A new account has nothing yet.
+    a.wait_for_selector("#screen-home.active")
+    check("new account sees guidance", a.locator("#homeEmptyCta").is_visible() and "Chưa có" in a.locator("#home-title").inner_text())
+    check("no start button yet", not a.locator("#homeCta").is_visible())
+    check("no lesson tabs yet", not a.locator(".stage-tab[data-nav=review]").is_visible() and not a.locator(".stage-tab[data-article]").is_visible())
+    a.screenshot(path=str(SHOTS / "empty.png"))
+    for screen in ("review", "listen", "flashcard"):
+        a.goto(f"{base}/#{screen}")
+        a.wait_for_timeout(200)
+        check(f"empty account: {screen} goes home", a.locator("#screen-home.active").count() == 1)
+    check("empty account: screens do not crash", not errs, errs[:3])
+
+    # A bad zip shows problems.
+    a.goto(base + "/#library")
+    a.wait_for_selector("#screen-library.active")
+    upload(a, bad)
+    a.wait_for_selector("#upError:not([hidden])")
+    check("bad zip lists problems", a.locator("#upProblems li").count() > 0, a.locator("#upError").inner_text())
+    a.screenshot(path=str(SHOTS / "upload-error.png"))
+    a.click("#upError [data-act=up-close]")
+
+    # A good zip needs the checkbox.
+    upload(a, good)
+    a.wait_for_selector("#upConfirm:not([hidden])")
+    check("confirm is locked until the box is ticked", a.locator("#upCommit").is_disabled())
+    box = a.locator("#uploadDialog").bounding_box()
+    check("dialog is centred", abs(box["x"] + box["width"] / 2 - 640) < 2, box)
+    check("title shown as text", XSS in a.locator("#upTitle").inner_text())
+    a.screenshot(path=str(SHOTS / "upload-confirm.png"))
+    a.check("#upAttest")
+    a.click("#upCommit")
+    a.wait_for_selector("#libMine .stream-row")
+    check("package appears in library", "Bài <img" in a.locator("#libMine").inner_text())
+    a.screenshot(path=str(SHOTS / "library.png"))
+    a.goto(base + "/#home")
+    a.wait_for_selector("#lessonList .stream-row")
+    check("package appears on home", a.locator("#lessonList .stream-row").count() == 1)
+    check("package title did not run as HTML", a.evaluate("window.__xss") is None)
+
+    # No audio: the session has no Listen step, and no Ask box without approval.
+    check("no audio hides Listen", not a.locator(".stage-tab[data-nav=listen]").is_visible())
+    check("no Ask without approval", not a.locator("#askDock").is_visible() and not a.locator(".capsule-ask-btn").is_visible())
+    asks = []
+    a.on("request", lambda r: asks.append(r.url) if "/api/ask" in r.url else None)
+    a.locator("#homeCta [data-act=start]").click()
+    a.wait_for_selector("#screen-review.active")
+    check("next step says Flashcard", "Flashcard" in a.locator("#screen-review [data-next-listen]").inner_text())
+    a.locator("#screen-review [data-next-listen]").click()
+    a.wait_for_selector("#screen-flashcard.active")
+    check("skips to flashcard", a.evaluate("location.hash") == "#flashcard")
+
+    # Report a wrong card.
+    a.wait_for_selector("#fcCard:not([hidden])")
+    a.click("[data-act=fb-card]")
+    a.wait_for_selector("#feedbackDialog[open]")
+    check("reporter is told the author sees the email", "email" in a.locator("#feedbackDialog").inner_text())
+    a.fill("#fbText", "Thẻ này sai.")
+    a.click("#fbSend")
+    a.wait_for_selector("#feedbackDialog:not([open])", state="attached")
+
+    # A package with one track plays.
+    a.goto(base + "/#library")
+    a.wait_for_selector("#libMine .stream-row")
+    upload(a, audio)
+    a.wait_for_selector("#upConfirm:not([hidden])")
+    a.check("#upAttest")
+    a.click("#upCommit")
+    a.locator("#libMine .stream-row", has_text="Bài có audio").wait_for()
+    a.locator("#libMine .stream-row", has_text="Bài có audio").locator("[data-act=start]").click()
+    a.wait_for_selector("#screen-review.active")
+    a.locator("#screen-review [data-next-listen]").click()
+    a.wait_for_selector("#screen-listen.active")
+    check("single track shown", a.locator(".track-big:visible").count() == 1)
+    played = a.evaluate("""async () => {
+        const url = state.lesson.tracks.short.url;
+        const r = await fetch(url, {headers: {Range: 'bytes=0-9'}});
+        return {status: r.status, url};
+    }""")
+    check("audio serves a range", played["status"] == 206 and played["url"].startswith("/audio/"), played)
+
+    # Share by email.
+    b = new_page(br, errs)
+    login_first(b, base, "binh@example.com", temp["binh@example.com"])
+    b.wait_for_url(base + "/**")
+    a.goto(base + "/#library")
+    row = a.locator("#libMine .stream-row", has_text="Bài <img")
+    row.locator("[data-act=lib-share]").click()
+    a.wait_for_selector("#shareDialog[open]")
+    a.fill("#shareEmail", "khong-co@example.com")
+    a.click("#shareForm button[type=submit]")
+    a.wait_for_selector("#shareError:not([hidden])")
+    check("unknown email reported", "chưa có tài khoản" in a.locator("#shareError").inner_text())
+    a.fill("#shareEmail", "BINH@example.com")
+    a.click("#shareForm button[type=submit]")
+    a.wait_for_selector("#sharePeople .share-person")
+    check("person listed", "binh@example.com" in a.locator("#sharePeople").inner_text())
+
+    # A link opened by someone not logged in, with a temporary password.
+    a.click("#shareLinkOff [data-act=share-new]")
+    a.wait_for_selector("#shareLinkOn:not([hidden])")
+    a.screenshot(path=str(SHOTS / "share.png"))
+    link = a.input_value("#shareLink")
+    c = new_page(br, errs)
+    login_first(c, base, "cuong@example.com", temp["cuong@example.com"], link.replace(base, ""))
+    c.wait_for_url("**/lesson/**")
+    check("link survives login and password change", "/lesson/p" in c.url, c.url)
+    a.click("[data-act=share-close]")
+
+    # Binh learns the shared lesson and sees the author.
+    b.goto(base + "/#library")
+    b.wait_for_selector("#libShared .stream-row")
+    check("shared list shows author", "an@example.com" in b.locator("#libShared").inner_text())
+    href = b.evaluate("(document.querySelector('#libShared [data-act=start]').dataset.lesson)")
+    b.goto(f"{base}/lesson/{href}")
+    b.wait_for_selector("iframe.lesson-iframe")
+    b.wait_for_timeout(1000)
+    check("lesson bar shows author", "an@example.com" in b.locator("#lessonTitle").inner_text())
+    check("lesson title did not run as HTML", b.evaluate("window.__xss") is None)
+    check("no Ask button on lesson page", not b.locator("#lessonAskBtn").is_visible())
+    check("no Ask dock on lesson page", not b.locator("#askDock").is_visible())
+    width = b.locator("iframe.lesson-iframe").bounding_box()["width"]
+    check("lesson uses the full width without Ask", width >= 1270, width)
+    b.screenshot(path=str(SHOTS / "lesson-no-ask.png"))
+    # Report the quiz question just answered; the button appears only after an answer.
+    check("no report button before answering", not b.locator("#lessonQuizWrongBtn").is_visible())
+    next(f for f in b.frames if "/s/" in f.url).click("#send")
+    b.wait_for_selector("#lessonQuizWrongBtn:not([hidden])")
+    b.click("#lessonQuizWrongBtn")
+    b.wait_for_selector("#feedbackDialog[open]")
+    b.fill("#fbText", "Câu này sai đáp án.")
+    b.click("#fbSend")
+    b.wait_for_selector("#feedbackDialog:not([open])", state="attached")
+    b.click("#lessonFeedbackBtn")
+    b.wait_for_selector("#feedbackDialog[open]")
+    b.fill("#fbText", XSS)
+    b.click("#fbSend")
+    b.wait_for_selector("#feedbackDialog:not([open])", state="attached")
+
+    # A reads feedback; the HTML stays text.
+    a.goto(base + "/#library")
+    row = a.locator("#libMine .stream-row", has_text="Bài <img")
+    row.locator("[data-act=lib-feedback]").click()
+    a.wait_for_selector("#fbList .fb-card")
+    text = a.locator("#fbList").inner_text()
+    check("author reads feedback with email", "binh@example.com" in text and "Thẻ này sai." in text and "Câu này sai đáp án." in text, text)
+    check("feedback HTML stays text", XSS in text and a.evaluate("window.__xss") is None, text)
+    a.screenshot(path=str(SHOTS / "feedback.png"))
+    a.click("[data-act=fb-list-close]")
+
+    # Revoke while the page is open.
+    row.locator("[data-act=lib-share]").click()
+    a.wait_for_selector("#sharePeople .share-person")
+    a.locator("#sharePeople .share-person", has_text="binh@example.com").locator("[data-act=share-remove]").click()
+    a.wait_for_timeout(500)
+    a.click("[data-act=share-close]")
+    # The next thing the learner does in the open page tells them.
+    frame = next(f for f in b.frames if "/s/" in f.url)
+    frame.click("#send")
+    b.wait_for_selector("#lessonCover:not([hidden])")
+    check("revoked while open: told, frame removed", "không còn quyền" in b.locator("#lessonCoverText").inner_text() and b.locator("iframe.lesson-iframe").count() == 0, b.locator("#lessonCover").inner_text())
+    b.goto(f"{base}/lesson/{href}")
+    check("revoked: reload is refused", b.locator("iframe.lesson-iframe").count() == 0 and "Không mở được" in b.locator("h1").inner_text())
+    b.goto(base + "/#library")
+    b.wait_for_timeout(600)
+    check("revoked: not in shared list", b.locator("#libShared .stream-row").count() == 0)
+
+    # Delete.
+    a.goto(base + "/#library")
+    a.wait_for_selector("#libMine .stream-row")
+    a.locator("#libMine .stream-row", has_text="Bài có audio").locator("[data-act=lib-delete]").click()
+    a.wait_for_timeout(800)
+    check("delete removes the row", a.locator("#libMine .stream-row").count() == 1)
+
+    # Layout.
+    for width, height in ((360, 740), (390, 844), (1024, 768), (1440, 900)):
+        for screen in ("home", "library"):
+            a.set_viewport_size({"width": width, "height": height})
+            a.goto(f"{base}/#{screen}")
+            a.wait_for_timeout(500)
+            over = a.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+            check(f"{screen} {width}px no horizontal scroll", over <= 0, over)
+            small = a.evaluate("""() => [...document.querySelectorAll('.screen.active button, .screen.active a')]
+                .filter(e => e.offsetParent && e.getBoundingClientRect().height < 40).map(e => e.textContent.trim()).slice(0, 4)""")
+            check(f"{screen} {width}px touch targets", not small, small)
+            a.screenshot(path=str(SHOTS / f"{screen}-{width}.png"))
+    a.set_viewport_size({"width": 360, "height": 740})
+    a.goto(base + "/#library")
+    a.wait_for_selector("#libMine .stream-row")
+    a.locator("#libMine [data-act=lib-share]").first.click()
+    a.wait_for_selector("#shareDialog[open]")
+    a.wait_for_timeout(300)
+    box = a.locator("#shareDialog").bounding_box()
+    check("share dialog fits at 360", box["x"] > 0 and box["x"] + box["width"] < 360, box)
+    a.screenshot(path=str(SHOTS / "share-360.png"))
+
+    check("no /api/ask request anywhere", not asks, asks[:2])
+    check("no page errors", not errs, errs[:4])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

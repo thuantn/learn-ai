@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const $$ = sel => [...document.querySelectorAll(sel)];
 const SPEEDS = [1, 1.25, 1.5, 2, 0.75];
-const SCREENS = ["home", "review", "listen", "flashcard", "finish"];
+const SCREENS = ["home", "library", "review", "listen", "flashcard", "finish"];
 const state = { me: null, lessons: [], lesson: null, track: "long", due: 0, nextDue: null, cards: [], idx: 0, reviewed: 0 };
 function currentTrack() { return state.lesson && state.lesson.tracks[state.track]; }
 const audio = new Audio();
@@ -12,8 +12,8 @@ let lastSaved = 0, pendingSeek = null;
 async function api(url, opts) {
   const r = await fetch(url, opts);
   if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
-  if (r.status === 403) { location.href = "/change-password"; throw new Error("password"); }
   const d = await r.json().catch(() => ({}));
+  if (r.status === 403 && d.code === "must_change") { location.href = "/change-password"; throw new Error("password"); }
   if (!r.ok) { const e = new Error(d.error || "Có lỗi. Thử lại sau."); e.code = d.code; throw e; }
   return d;
 }
@@ -34,6 +34,8 @@ function statusText(l) {
 // ---------- Screens ----------
 function go(id, replace) {
   if (!SCREENS.includes(id)) id = "home";
+  if (!state.lesson && ["review", "listen", "flashcard", "finish"].includes(id)) id = "home";
+  if (id === "listen" && !hasAudio()) id = "flashcard";
   $$(".screen").forEach(s => s.classList.toggle("active", s.id === "screen-" + id));
   $$("[data-nav]").forEach(t => t.dataset.nav === id ? t.setAttribute("aria-current", "page") : t.removeAttribute("aria-current"));
   const hash = "#" + id;
@@ -42,8 +44,10 @@ function go(id, replace) {
   window.scrollTo(0, 0);
   if (id === "flashcard") loadCards();
   if (id === "listen") loadTrack();
+  if (id === "library") loadLibrary();
 }
-window.addEventListener("hashchange", () => go(location.hash.slice(1), true));
+window.addEventListener("hashchange", () => { if (!joinFromLink()) go(location.hash.slice(1), true); });
+const hasAudio = () => !!state.lesson && Object.keys(state.lesson.tracks).length > 0;
 
 function closeNav() {
   $("navDrawer").classList.remove("open");
@@ -68,6 +72,7 @@ function renderFlow() {
     names.forEach((n, i) => {
       const s = document.createElement("span");
       s.className = "flow-step-item" + (i + 1 === at ? " active" : "");
+      s.dataset.step = i + 1;
       s.textContent = `${i + 1}. ${n}`;
       steps.append(s);
     });
@@ -83,10 +88,17 @@ function renderFlow() {
 
 function renderLesson() {
   const l = state.lesson;
+  document.body.classList.toggle("no-lesson", !l);
+  document.body.classList.toggle("no-audio", !hasAudio());
+  document.body.classList.toggle("no-ask", !(l && l.ask));
+  $("homeCta").hidden = !l;
+  $("homeEmptyCta").hidden = !!l;
+  $("homeListHeading").hidden = !l;
+  $$("[data-next-listen]").forEach(b => { b.textContent = hasAudio() ? "Tiếp tục: Nghe podcast" : "Tiếp tục: Flashcard"; });
   if (!l) {
-    $("homePill").textContent = "Chưa có bài nào";
-    $("home-title").textContent = "Học AI";
-    $("homeNote").textContent = "Dùng nút Tải lên để thêm bài của bạn.";
+    $("homePill").textContent = "Tài khoản mới";
+    $("home-title").textContent = "Chưa có bài học nào";
+    $("homeNote").textContent = "Tải lên bài của bạn, hoặc nhờ đồng nghiệp share bài để bắt đầu học.";
     $("summary").textContent = "";
     $("askChips").textContent = "";
     $("dockKicker").textContent = "";
@@ -98,7 +110,7 @@ function renderLesson() {
   $$("[data-article]").forEach(a => { a.href = l.page; });
   $("homePill").textContent = statusText(l);
   $("home-title").textContent = `${lessonNo(l)}: ${l.title}`;
-  $("dockKicker").textContent = `Podcast, ${lessonNo(l)}`;
+  $("dockKicker").textContent = hasAudio() ? `Podcast, ${lessonNo(l)}` : lessonNo(l);
   $("dockTitle").textContent = l.title;
   const t = l.tracks;
   const at = currentTrack();
@@ -160,7 +172,7 @@ function renderList() {
     h.textContent = `${lessonNo(l)}: ${l.title}`;
     const p = document.createElement("p");
     p.className = "stream-status " + (l.status === "done" ? "is-done" : "");
-    p.textContent = statusText(l);
+    p.textContent = l.mine ? statusText(l) : `${statusText(l)}. Tác giả: ${l.author}`;
     text.append(h, p);
     info.append(idx, text);
     const act = document.createElement("div");
@@ -211,7 +223,7 @@ function renderTime() {
   if (!t) {
     $$('[data-time="now"]').forEach(e => { e.textContent = "0:00"; });
     $$('[data-time="total"]').forEach(e => { e.textContent = "0:00"; });
-    $("dockNote").textContent = "Cần có mạng để nghe";
+    $("dockNote").textContent = "";
     $("miniLabel").textContent = "";
     renderBars(0);
     return;
@@ -382,7 +394,7 @@ async function rateCard(r) {
   $$(".btn-rate").forEach(b => { b.disabled = false; });
 }
 async function finish() {
-  await api(`/api/lessons/${state.lesson.id}/finish`, send("POST")).catch(() => {});
+  if (state.lesson) await api(`/api/lessons/${state.lesson.id}/finish`, send("POST")).catch(() => {});
   await refresh();
   const parts = [];
   if (state.reviewed) parts.push(`Bạn đã ôn ${state.reviewed} thẻ.`);
@@ -477,6 +489,10 @@ const ACTIONS = {
   rate: el => rateCard(+el.dataset.r),
   theme: toggleTheme,
   logout: logout,
+  "fb-card": () => {
+    const c = state.cards[state.idx];
+    if (c) openFeedback({ lesson: c.lesson, targetType: c.target_type, targetId: c.target_id, kind: "wrong", label: c.q });
+  },
   "nav-open": () => { openAsk(false); $("navDrawer").classList.add("open"); $("navBackdrop").classList.add("open"); },
   "nav-close": closeNav,
   "ask-open": () => openAsk(true),
@@ -535,6 +551,11 @@ async function refresh() {
   state.due = d.due_total;
   state.nextDue = d.next_due;
   const again = d.lessons.find(x => x.id === current);
+  if (current && !again) {  // deleted, or access was taken away
+    audio.pause();
+    audio.removeAttribute("src");
+    pendingSeek = null;
+  }
   state.lesson = again || d.lessons.find(x => x.status === "in_progress") || d.lessons.find(x => x.status === "new") || d.lessons[0] || null;
   if (state.lesson && !again) state.track = state.lesson.track in state.lesson.tracks ? state.lesson.track : (Object.keys(state.lesson.tracks)[0] || null);
   if (again && heard && audio.src && state.track && again.tracks[state.track]) {
@@ -547,11 +568,28 @@ async function refresh() {
   $("askSend").disabled = !askOn;
   $("askInput").placeholder = askOn ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
 }
-(async function init() {
+// A share link arrives as #join=<token>: the fragment stays out of server logs and survives the login redirects.
+function joinFromLink() {
+  const m = location.hash.match(/^#join=([\w.-]+)$/);
+  if (!m) return false;
+  history.replaceState(null, "", "#home");
+  api("/api/join", send("POST", { token: m[1] })).then(d => {
+    if (d.first_lesson) location.replace("/lesson/" + d.first_lesson);
+  }).catch(e => {
+    if (e.message === "login" || e.message === "password") return;
+    $("homeAlert").textContent = e.message;
+    $("homeAlert").hidden = false;
+    go("home", true);
+  });
+  return true;
+}
+// After DOMContentLoaded, so library.js has run and its screen can open straight away.
+document.addEventListener("DOMContentLoaded", () => (async function init() {
   state.me = await api("/api/me");
   renderFlow();
   renderSpeed();
   renderThemeLabel();
+  joinFromLink();
   await refresh();
   go(location.hash.slice(1) || "home", true);
-})().catch(err => { if (err.message !== "login" && err.message !== "password") console.error(err); });
+})().catch(err => { if (err.message !== "login" && err.message !== "password") console.error(err); }));

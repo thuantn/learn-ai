@@ -9,12 +9,14 @@ import os
 import pathlib
 import re
 import secrets
+import sqlite3
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import zipfile
 import urllib.request
 
 from playwright.sync_api import sync_playwright
@@ -92,13 +94,12 @@ def watch(pg, errs):
     pg.on("console", lambda m: errs.append(f"console: {m.text[:50]} @ {m.location} on {pg.url}") if m.type == "error" and "401" not in m.text and "Load failed" not in m.text and "purify.min.js" not in m.location.get("url", "") else None)  # Load failed: WebKit reports fetches cut short by leaving a page
 
 
-def make_env(data_dir, packages_dir, content_dir, extras=None):
+def make_env(data_dir, packages_dir, extras=None):
     env = dict(
         os.environ,
         PYTHONUTF8="1",
         PYTHONDONTWRITEBYTECODE="1",
         DATA_DIR=str(data_dir),
-        CONTENT_DIR=str(content_dir),
         PACKAGES_DIR=str(packages_dir),
         COOKIE_SECURE="0",
         PUBLIC_ORIGIN=BASE,
@@ -184,55 +185,27 @@ def prepare_evil_packages():
     return pkg
 
 
-def prepare_evil_content():
-    dest = pathlib.Path(tempfile.mkdtemp(prefix="learn-evil-content-"))
-    manifest = {
-        "lessons": [
-            {
-                "id": "evil",
-                "order": 1,
-                "title": "Evil attack page",
-                "page": "evil/page/index.html",
-                "doc": "evildoc",
-                "summary": ["Kiểm tra cookie bị cách ly.", "Kiểm tra mạng ngoài bị chặn.", "Kiểm tra cầu nối chỉ nhận thao tác hợp lệ."],
-                "cards": [
-                    {"id": "evil-c1", "q": "A", "a": "1"},
-                    {"id": "evil-c2", "q": "B", "a": "2"},
-                    {"id": "evil-c3", "q": "C", "a": "3"},
-                    {"id": "evil-c4", "q": "D", "a": "4"},
-                    {"id": "evil-c5", "q": "E", "a": "5"},
-                ],
-                "quiz": [],
-                "tracks": {},
-            },
-            {
-                "id": "evilnav",
-                "order": 2,
-                "title": "Evil navigation page",
-                "page": "evilnav/page/index.html",
-                "doc": "evilnavdoc",
-                "summary": ["Trang thử tự điều hướng.", "Theo dõi khung bị đóng.", "Ghi kết quả cho chủ dự án."],
-                "cards": [
-                    {"id": "evilnav-c1", "q": "A", "a": "1"},
-                    {"id": "evilnav-c2", "q": "B", "a": "2"},
-                    {"id": "evilnav-c3", "q": "C", "a": "3"},
-                    {"id": "evilnav-c4", "q": "D", "a": "4"},
-                    {"id": "evilnav-c5", "q": "E", "a": "5"},
-                ],
-                "quiz": [],
-                "tracks": {},
-            },
-        ],
-        "files": [],
-    }
-    (dest / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
-    return dest
+def install(env, package_dir, data_dir):
+    """Zips a package and installs it for the test user through the real path. The Ask box is approved for it."""
+    work = pathlib.Path(tempfile.mkdtemp(prefix="learn-zip-"))
+    archive = work / "package.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(pathlib.Path(package_dir).rglob("*")):
+            if f.is_file():
+                z.write(f, f.relative_to(package_dir).as_posix())
+    out = subprocess.run([sys.executable, "-m", "app.cli", "import-package", str(archive), USER], cwd=ROOT, env=env, capture_output=True, encoding="utf-8")
+    if out.returncode:
+        raise RuntimeError(out.stdout + out.stderr)
+    package_id = out.stdout.strip().splitlines()[-1]
+    with sqlite3.connect(pathlib.Path(data_dir) / "learn.db") as c:
+        c.execute("UPDATE packages SET ask_status='approved' WHERE id=?", (package_id,))
+    shutil.rmtree(work, ignore_errors=True)
+    return package_id
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("packages_dir", type=pathlib.Path)
-    parser.add_argument("content_dir", type=pathlib.Path)
+    parser.add_argument("package_dir", type=pathlib.Path, help="the real converted lessons, as an unpacked package")
     parser.add_argument("--browser", choices=["chrome", "webkit", "firefox"], default="chrome")
     args = parser.parse_args()
 
@@ -250,10 +223,11 @@ def main():
 
             # ---------- Phase EVIL ----------
             evil_pkg = prepare_evil_packages()
-            evil_content = prepare_evil_content()
             data_dir = tempfile.mkdtemp(prefix="learn-evil-data-")
-            env = make_env(data_dir, evil_pkg, evil_content)
+            env = make_env(data_dir, pathlib.Path(data_dir) / "packages")
             temp_pw = add_user(env)
+            evil_id = install(env, evil_pkg, data_dir)
+            evil_key, evilnav_key = f"{evil_id}.evil", f"{evil_id}.evilnav"
             app_proc = start_app(env)
 
             ctx = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
@@ -272,22 +246,22 @@ def main():
             page.on("request", on_request)
             login(page, temp_pw)
 
-            page.goto(BASE + "/lesson/evil", wait_until="networkidle")
+            page.goto(f"{BASE}/lesson/{evil_key}", wait_until="networkidle")
             frame = wait_frame(page)
             wait_js(page, "document.querySelector('#lessonTopBar') !== null")
 
             # Wait for attack results saved to evildoc.
-            wait_js(page, """async () => {
-                const r = await fetch('/api/doc/evildoc', {method:'GET'});
+            wait_js(page, f"""async () => {{
+                const r = await fetch('/api/doc/{evil_key}', {{method:'GET'}});
                 const j = await r.json();
                 return !!(j.data && j.data.results);
-            }""", seconds=10)
+            }}""", seconds=10)
 
-            results = page.evaluate("""async () => {
-                const r = await fetch('/api/doc/evildoc', {method:'GET'});
+            results = page.evaluate(f"""async () => {{
+                const r = await fetch('/api/doc/{evil_key}', {{method:'GET'}});
                 const j = await r.json();
                 return j.data.results;
-            }""")
+            }}""")
 
             must_blocked = {
                 "cookie": lambda v: v == "" or str(v).startswith("err:"),
@@ -355,11 +329,11 @@ def main():
             page.wait_for_timeout(200)
 
             # Direct /s/ access.
-            token_url = page.evaluate("""async () => {
-                const r = await fetch('/api/lessons/evil/frame', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+            token_url = page.evaluate("""async (key) => {
+                const r = await fetch('/api/lessons/' + key + '/frame', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
                 const j = await r.json();
                 return j.url;
-            }""")
+            }""", evil_key)
             direct = ctx.new_page()
             try:  # Chrome reports an empty 403 as a navigation error
                 status = direct.goto(BASE + token_url, wait_until="domcontentloaded").status
@@ -383,7 +357,7 @@ def main():
             record("RTCPeerConnection result", results.get("rtc"))
 
             # Self-navigation variant.
-            page.goto(BASE + "/lesson/evilnav", wait_until="networkidle")
+            page.goto(f"{BASE}/lesson/{evilnav_key}", wait_until="networkidle")
             page.wait_for_timeout(2200)
             nav_reached = any(r.startswith("/nav") for r in OUTSIDE_REQUESTS)
             cover_visible = page.locator("#lessonCover").is_visible()
@@ -407,14 +381,15 @@ def main():
 
             # ---------- Expired token ----------
             data_dir_exp = tempfile.mkdtemp(prefix="learn-exp-data-")
-            env_exp = make_env(data_dir_exp, evil_pkg, evil_content, {"LINK_TTL_SECONDS": "3"})
+            env_exp = make_env(data_dir_exp, pathlib.Path(data_dir_exp) / "packages", {"LINK_TTL_SECONDS": "3"})
             temp_pw_exp = add_user(env_exp)
+            evil_exp = install(env_exp, evil_pkg, data_dir_exp)
             app_proc = start_app(env_exp)
 
             ctx_exp = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
             page_exp = ctx_exp.new_page()
             login(page_exp, temp_pw_exp)
-            page_exp.goto(BASE + "/lesson/evil", wait_until="networkidle")
+            page_exp.goto(f"{BASE}/lesson/{evil_exp}.evil", wait_until="networkidle")
             frame_exp = wait_frame(page_exp)
             time.sleep(5.1)
             frame_exp.evaluate("""() => {
@@ -431,16 +406,13 @@ def main():
             app_proc = None
 
             # ---------- Phase REAL ----------
-            real_manifest = json.loads((args.content_dir / "manifest.json").read_text(encoding="utf-8"))
-            by_id = {x["id"]: x for x in real_manifest.get("lessons", [])}
-            bai01 = by_id.get("bai01")
-            bai02 = by_id.get("bai02")
-            check("manifest has bai01", bai01 is not None, list(by_id.keys()))
-            check("manifest has bai02", bai02 is not None)
+            read_lesson = lambda lid: json.loads((args.package_dir / "lessons" / lid / "lesson.json").read_text(encoding="utf-8-sig")) | {"id": lid}
+            bai01, bai02 = read_lesson("bai01"), read_lesson("bai02")
 
             data_dir_real = tempfile.mkdtemp(prefix="learn-real-data-")
-            env_real = make_env(data_dir_real, args.packages_dir, args.content_dir)
+            env_real = make_env(data_dir_real, pathlib.Path(data_dir_real) / "packages")
             temp_pw_real = add_user(env_real)
+            real_id = install(env_real, args.package_dir, data_dir_real)
             app_proc = start_app(env_real)
 
             ctx_real = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
@@ -453,7 +425,7 @@ def main():
                 if lesson is None:
                     continue
                 lid = lesson["id"]
-                page_real.goto(BASE + f"/lesson/{lid}", wait_until="networkidle")
+                page_real.goto(f"{BASE}/lesson/{real_id}.{lid}", wait_until="networkidle")
                 frame_real = wait_frame(page_real)
                 wait_js(page_real, "document.querySelector('#lessonTopBar') !== null")
 

@@ -162,8 +162,8 @@ async def read_json(request, limit=JSON_LIMIT):
     return data if isinstance(data, dict) else None
 
 
-def page(name):
-    return FileResponse(WEB / name, media_type="text/html; charset=utf-8")
+def page(name, status=200):
+    return FileResponse(WEB / name, media_type="text/html; charset=utf-8", status_code=status)
 
 
 def set_session_cookie(resp, token):
@@ -202,7 +202,7 @@ async def change_password_page(request: Request):
 async def lesson_page(lesson_id: str, request: Request):
     with db.connect() as c:
         if not catalog.lesson_for(c, request.state.user, lesson_id):
-            return Response(status_code=404)
+            return page("no-lesson.html", 404)
     return page("lesson.html")
 
 
@@ -320,7 +320,7 @@ async def lessons(request: Request):
             "page": x["page"],
             "summary": x["summary"],
             "status": p["status"] if p else "new",
-            "track": p["track"] if p else next(iter(tracks), "long"),
+            "track": p["track"] if p else default_track(tracks),
             "due": due.get(x["id"], 0),
             "tracks": tracks,
             "suggest": [card["q"] for card in x["cards"][:3]],
@@ -343,11 +343,15 @@ async def start_lesson(lesson_id: str, request: Request):
             return bad(404, "lesson", "Không có bài này.")
         c.execute(
             "INSERT INTO lesson_progress VALUES(?,?,'in_progress',?,?) ON CONFLICT(user, lesson) DO NOTHING",
-            (user, lesson_id, next(iter(lesson["tracks"]), "long"), now),
+            (user, lesson_id, default_track(lesson["tracks"]), now),
         )
         for card in lesson["cards"]:
             add_card(c, user, card["id"], lesson_id, lesson["package_id"], now)
     return {"ok": True}
+
+
+def default_track(tracks):
+    return "long" if "long" in tracks else next(iter(tracks), "long")
 
 
 def add_card(c, user, bare_id, lesson_key, package_id, now):
@@ -633,19 +637,20 @@ def join_url(row):
 async def list_packages(request: Request):
     user = request.state.user
     with db.connect() as c:
-        titles = defaultdict(list)
-        for r in c.execute("SELECT package_id, data FROM package_lessons ORDER BY ord"):
+        titles, first = defaultdict(list), {}
+        for r in c.execute("SELECT key, package_id, data FROM package_lessons ORDER BY ord"):
             titles[r["package_id"]].append(json.loads(r["data"])["title"])
+            first.setdefault(r["package_id"], r["key"])
         mine = [{
             "id": r["id"], "title": r["title"], "topic": r["topic"], "description": r["description"],
-            "version": r["version"], "size_bytes": r["size_bytes"], "lessons": titles[r["id"]],
+            "version": r["version"], "size_bytes": r["size_bytes"], "lessons": titles[r["id"]], "first_lesson": first.get(r["id"]),
             "people": c.execute("SELECT count(*) n FROM package_access WHERE package_id=? AND revoked_at IS NULL", (r["id"],)).fetchone()["n"],
             "link_on": bool(r["link_nonce"]),
             "feedback": c.execute("SELECT count(*) n FROM feedback WHERE package_id=?", (r["id"],)).fetchone()["n"],
         } for r in c.execute("SELECT * FROM packages WHERE owner=? ORDER BY updated_at DESC", (user,)).fetchall()]
         shared = [{
             "id": r["id"], "title": r["title"], "topic": r["topic"], "description": r["description"],
-            "author": r["owner"], "lessons": titles[r["id"]],
+            "author": r["owner"], "lessons": titles[r["id"]], "first_lesson": first.get(r["id"]),
         } for r in c.execute(
             """SELECT p.* FROM packages p JOIN package_access a ON a.package_id=p.id
                WHERE a.user=? AND a.revoked_at IS NULL ORDER BY a.granted_at DESC""", (user,)).fetchall()]

@@ -14,7 +14,9 @@
 <script src="/static/mathjax-config.js"></script>
 <script src="/static/vendor/tex-svg.min.js" defer></script>
 <script src="/static/answer.js" defer></script>
+<script src="/static/feedback.js" defer></script>
 <script src="/static/app.js" defer></script>
+<script src="/static/library.js" defer></script>
 </head>
 <body>
 <div class="workbench" id="workbenchGrid">
@@ -56,6 +58,7 @@
     <header class="unified-top-bar">
       <nav class="stage-nav" aria-label="Các màn hình">
         <button type="button" class="stage-tab" data-act="go" data-to="home" data-nav="home">Trang đầu</button>
+        <button type="button" class="stage-tab" data-act="go" data-to="library" data-nav="library">Thư viện</button>
         <button type="button" class="stage-tab" data-act="go" data-to="review" data-nav="review">1. Ôn lại</button>
         <button type="button" class="stage-tab" data-act="go" data-to="listen" data-nav="listen">2. Nghe</button>
         <button type="button" class="stage-tab" data-act="go" data-to="flashcard" data-nav="flashcard">3. Flashcard</button>
@@ -70,13 +73,35 @@
           <div class="status-pill" id="homePill"></div>
           <h1 id="home-title" class="hero-title"></h1>
           <p class="hero-note" id="homeNote"></p>
-          <div class="cta-cluster">
+          <p class="studio-alert error" id="homeAlert" role="alert" hidden></p>
+          <div class="cta-cluster" id="homeCta">
             <button type="button" class="btn-studio-primary" data-act="start">Bắt đầu buổi học</button>
             <a class="btn-studio-secondary" data-article href="#">Đọc bài đầy đủ</a>
           </div>
+          <div class="cta-cluster" id="homeEmptyCta" hidden>
+            <button type="button" class="btn-studio-primary" data-act="lib-upload">Tải lên bài học</button>
+            <button type="button" class="btn-studio-secondary" data-act="go" data-to="library">Mở Thư viện</button>
+          </div>
         </div>
-        <h2 class="list-heading">Danh sách bài học</h2>
+        <h2 class="list-heading" id="homeListHeading">Danh sách bài học</h2>
         <div class="lesson-stream" id="lessonList"></div>
+      </section>
+
+      <section id="screen-library" class="screen" aria-labelledby="library-title">
+        <h1 id="library-title" class="hero-title small-title">Thư viện</h1>
+        <div class="flow-strip lib-top">
+          <div class="lib-used">
+            <div class="auth-label"><span>Dung lượng đã dùng</span><strong id="libUsed"></strong></div>
+            <div class="meter-track"><div class="meter-fill" id="libMeter"></div></div>
+          </div>
+          <button type="button" class="btn-studio-primary" data-act="lib-upload">Tải lên</button>
+        </div>
+        <h2 class="list-heading">Bài của tôi</h2>
+        <div class="lesson-stream" id="libMine"></div>
+        <p class="dock-note" id="libMineEmpty" hidden>Bạn chưa tải lên bài nào.</p>
+        <h2 class="list-heading lib-second">Được share</h2>
+        <div class="lesson-stream" id="libShared"></div>
+        <p class="dock-note" id="libSharedEmpty" hidden>Chưa có ai share bài cho bạn.</p>
       </section>
 
       <section id="screen-review" class="screen" aria-labelledby="review-title">
@@ -85,7 +110,7 @@
         <p class="lesson-name" data-lesson-title></p>
         <div class="summary-stack" id="summary"></div>
         <div class="cta-cluster">
-          <button type="button" class="btn-studio-primary" data-act="go" data-to="listen">Tiếp tục: Nghe podcast</button>
+          <button type="button" class="btn-studio-primary" data-act="go" data-to="listen" data-next-listen>Tiếp tục: Nghe podcast</button>
           <a class="btn-studio-secondary" data-article href="#">Đọc bài đầy đủ</a>
         </div>
       </section>
@@ -147,6 +172,7 @@
             <button type="button" class="btn-studio-primary fc-wide" data-act="reveal">Hiện đáp án</button>
           </div>
           <p class="key-hint">Phím Space hiện đáp án, phím 1 đến 4 để chấm.</p>
+          <button type="button" class="btn-link-quiet" data-act="fb-card">Báo sai thẻ này</button>
         </div>
         <div class="hero-banner fc-empty" id="fcEmpty" hidden>
           <h2 class="hero-title small-title">Không còn thẻ đến hạn</h2>
@@ -192,6 +218,103 @@
 </div>
 
 <div class="nav-backdrop" id="navBackdrop" data-act="nav-close"></div>
+
+<dialog class="lesson-dialog" id="uploadDialog" aria-labelledby="upHeading">
+  <div class="lesson-dialog-form">
+    <h2 class="fc-title" id="upHeading">Tải lên bài học</h2>
+    <div class="lesson-dialog-form" id="upPick">
+      <p class="dock-note">Chọn file zip đã đóng gói theo khung bài học, tối đa 90 MB. Tải lại cùng một bài sẽ thành bản mới, tiến độ của người học vẫn giữ.</p>
+      <label class="btn-studio-secondary file-pick">Chọn file zip<input type="file" id="upFile" accept=".zip,application/zip"></label>
+      <p class="studio-alert error" id="upPickError" role="alert" hidden></p>
+      <div class="lesson-dialog-buttons"><button type="button" class="btn-studio-secondary" data-act="up-close">Hủy</button></div>
+    </div>
+    <div class="lesson-dialog-form" id="upBusy" hidden>
+      <p class="dock-note" id="upBusyName"></p>
+      <div>
+        <div class="auth-label"><span id="upBusyText"></span><strong id="upPercent"></strong></div>
+        <div class="meter-track"><div class="meter-fill" id="upMeter"></div></div>
+      </div>
+      <div class="lesson-dialog-buttons"><button type="button" class="btn-studio-secondary" data-act="up-close">Hủy tải lên</button></div>
+    </div>
+    <div class="lesson-dialog-form" id="upError" hidden>
+      <p class="dock-note">Bài đang chạy không bị ảnh hưởng. Sửa các lỗi sau rồi tải lại:</p>
+      <ul class="studio-alert error up-list" id="upProblems" role="alert"></ul>
+      <div class="lesson-dialog-buttons">
+        <button type="button" class="btn-studio-secondary" data-act="up-close">Đóng</button>
+        <button type="button" class="btn-studio-primary" data-act="up-again">Chọn file khác</button>
+      </div>
+    </div>
+    <div class="lesson-dialog-form" id="upConfirm" hidden>
+      <div class="console-well">
+        <div class="dock-title" id="upTitle"></div>
+        <div class="dock-note" id="upMeta"></div>
+        <ul class="up-list" id="upLessons"></ul>
+        <div id="upRemovedBox" hidden>
+          <div class="auth-label"><span class="is-warn-text">Phần bị xóa so với bản đang chạy</span></div>
+          <ul class="up-list is-warn-text" id="upRemoved"></ul>
+        </div>
+        <div id="upWarningsBox" hidden>
+          <div class="auth-label"><span>Lưu ý</span></div>
+          <ul class="up-list" id="upWarnings"></ul>
+        </div>
+      </div>
+      <label class="check-row">
+        <input type="checkbox" id="upAttest">
+        <span>Nội dung không chứa dữ liệu khách hàng hay thông tin mật, và tôi có quyền dùng nội dung này.</span>
+      </label>
+      <p class="studio-alert error" id="upConfirmError" role="alert" hidden></p>
+      <div class="lesson-dialog-buttons">
+        <button type="button" class="btn-studio-secondary" data-act="up-close">Hủy</button>
+        <button type="button" class="btn-studio-primary" id="upCommit" data-act="up-commit" disabled>Xác nhận đăng</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="lesson-dialog" id="shareDialog" aria-labelledby="shareTitle">
+  <div class="lesson-dialog-form">
+    <h2 class="fc-title" id="shareTitle"></h2>
+    <form id="shareForm">
+      <label class="auth-label" for="shareEmail"><span>Thêm người học bằng email</span></label>
+      <div class="share-add">
+        <div class="auth-input-box"><input id="shareEmail" type="text" inputmode="email" autocomplete="off" class="auth-input" placeholder="ten@congty.vn" required></div>
+        <button type="submit" class="btn-studio-primary">Thêm</button>
+      </div>
+      <p class="studio-alert error" id="shareError" role="alert" hidden></p>
+    </form>
+    <div>
+      <div class="auth-label"><span id="sharePeopleLabel"></span></div>
+      <div class="lesson-stream" id="sharePeople"></div>
+    </div>
+    <div class="console-well">
+      <div class="auth-label"><span>Link share, chỉ mở được sau khi đăng nhập</span></div>
+      <div id="shareLinkOn" hidden>
+        <input class="auth-input share-link" id="shareLink" readonly aria-label="Link share">
+        <div class="stream-actions">
+          <button type="button" class="btn-studio-primary" data-act="share-copy">Copy link</button>
+          <button type="button" class="btn-studio-secondary" data-act="share-new">Tạo link mới</button>
+          <button type="button" class="btn-studio-secondary btn-danger-soft" data-act="share-off">Tắt link</button>
+        </div>
+        <p class="dock-note" id="shareCopied" role="status"></p>
+      </div>
+      <div id="shareLinkOff" hidden>
+        <button type="button" class="btn-studio-primary" data-act="share-new">Bật link</button>
+      </div>
+    </div>
+    <div class="lesson-dialog-buttons"><button type="button" class="btn-studio-secondary" data-act="share-close">Đóng</button></div>
+  </div>
+</dialog>
+
+<dialog class="lesson-dialog" id="feedbackListDialog" aria-labelledby="fbListTitle">
+  <div class="lesson-dialog-form">
+    <div>
+      <p class="dock-note">Góp ý nhận được</p>
+      <h2 class="fc-title" id="fbListTitle"></h2>
+    </div>
+    <div class="fb-list" id="fbList"></div>
+    <div class="lesson-dialog-buttons"><button type="button" class="btn-studio-secondary" data-act="fb-list-close">Đóng</button></div>
+  </div>
+</dialog>
 <aside class="mobile-nav-drawer" id="navDrawer" aria-label="Menu">
   <div>
     <div class="drawer-top-bar">
@@ -200,6 +323,7 @@
     </div>
     <nav class="drawer-nav-list" aria-label="Các màn hình">
       <button type="button" class="drawer-nav-item" data-act="go" data-to="home" data-nav="home"><span>Trang đầu</span></button>
+      <button type="button" class="drawer-nav-item" data-act="go" data-to="library" data-nav="library"><span>Thư viện</span></button>
       <button type="button" class="drawer-nav-item" data-act="go" data-to="review" data-nav="review"><span>1. Ôn lại</span></button>
       <button type="button" class="drawer-nav-item" data-act="go" data-to="listen" data-nav="listen"><span>2. Nghe</span></button>
       <button type="button" class="drawer-nav-item" data-act="go" data-to="flashcard" data-nav="flashcard"><span>3. Flashcard</span><span class="nav-sub" data-due-short></span></button>

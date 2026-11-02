@@ -1,0 +1,299 @@
+"use strict";
+// Library, upload, share and the author's feedback list. Text from packages only ever goes in with textContent.
+const MAX_ZIP = 90 * 1024 * 1024;
+let upload = { xhr: null, id: null, removed: [] };
+let sharing = null;
+
+function el(tag, className, text) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function actionButton(label, act, id, className) {
+  const b = el("button", className || "btn-studio-secondary", label);
+  b.type = "button";
+  b.dataset.act = act;
+  if (id) b.dataset.id = id;
+  return b;
+}
+function size(bytes) {
+  if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(1).replace(".", ",") + " GB";
+  return Math.max(1, Math.round(bytes / 1024 / 1024)) + " MB";
+}
+
+// ---------- Library ----------
+async function loadLibrary() {
+  const box = $("libMine");
+  try {
+    const d = await api("/api/packages");
+    state.library = d;
+    renderLibrary(d);
+  } catch (e) {
+    if (e.message === "login" || e.message === "password") return;
+    box.textContent = e.message;
+  }
+}
+
+function renderLibrary(d) {
+  $("libUsed").textContent = `${size(d.used)} / ${size(d.quota)}`;
+  $("libMeter").style.width = Math.min(100, d.used / d.quota * 100) + "%";
+  const mine = $("libMine");
+  mine.textContent = "";
+  d.mine.forEach(p => {
+    const row = el("article", "stream-row");
+    const info = el("div", "lib-info");
+    info.append(el("h3", "stream-title", p.title));
+    const pills = el("div", "meta-pills");
+    [p.topic && `Chủ đề: ${p.topic}`, `${p.lessons.length} bài`, size(p.size_bytes), `${p.people} người được share`, p.link_on && "Link đang bật"]
+      .filter(Boolean).forEach(t => pills.append(el("span", "meta-pill", t)));
+    info.append(pills);
+    const act = el("div", "stream-actions");
+    const learn = actionButton("Học", "start", null, "btn-studio-primary");
+    learn.dataset.lesson = p.first_lesson;
+    act.append(learn, actionButton("Share", "lib-share", p.id), actionButton(`Góp ý (${p.feedback})`, "lib-feedback", p.id),
+      actionButton("Tải bản mới", "lib-upload"), actionButton("Xóa", "lib-delete", p.id, "btn-studio-secondary btn-danger-soft"));
+    row.append(info, act);
+    mine.append(row);
+  });
+  $("libMineEmpty").hidden = d.mine.length > 0;
+  const shared = $("libShared");
+  shared.textContent = "";
+  d.shared.forEach(p => {
+    const row = el("article", "stream-row");
+    const info = el("div", "lib-info");
+    info.append(el("h3", "stream-title", p.title), el("p", "stream-status", `Tác giả: ${p.author}, ${p.lessons.length} bài`));
+    const learn = actionButton("Học", "start", null, "btn-studio-primary");
+    learn.dataset.lesson = p.first_lesson;
+    const act = el("div", "stream-actions");
+    act.append(learn);
+    row.append(info, act);
+    shared.append(row);
+  });
+  $("libSharedEmpty").hidden = d.shared.length > 0;
+}
+
+async function deletePackage(id) {
+  const p = state.library.mine.find(x => x.id === id);
+  if (!p || !confirm(`Xóa "${p.title}"? Người học mất quyền ngay và tiến độ của mọi người với bài này bị xóa.`)) return;
+  await api(`/api/packages/${id}`, { method: "DELETE" });
+  await refresh();
+  await loadLibrary();
+}
+
+// ---------- Upload ----------
+function uploadStep(step) {
+  ["upPick", "upBusy", "upError", "upConfirm"].forEach(id => { $(id).hidden = id !== step; });
+}
+function openUpload() {
+  $("upFile").value = "";
+  $("upPickError").hidden = true;
+  uploadStep("upPick");
+  $("uploadDialog").showModal();
+}
+function showUploadProblems(problems) {
+  const list = $("upProblems");
+  list.textContent = "";
+  problems.forEach(p => {
+    const li = el("li");
+    if (p.path) li.append(el("strong", "", p.path), document.createTextNode(": "));
+    li.append(document.createTextNode(p.message));
+    list.append(li);
+  });
+  uploadStep("upError");
+}
+function sendFile(file) {
+  if (!file) return;
+  if (file.size > MAX_ZIP) {
+    $("upPickError").textContent = "File zip quá lớn, tối đa 90 MB.";
+    $("upPickError").hidden = false;
+    return;
+  }
+  uploadStep("upBusy");
+  $("upBusyName").textContent = file.name;
+  $("upBusyText").textContent = "Đang tải lên";
+  $("upPercent").textContent = "0%";
+  $("upMeter").style.width = "0%";
+  const xhr = new XMLHttpRequest();
+  upload.xhr = xhr;
+  xhr.open("POST", "/api/uploads");
+  xhr.setRequestHeader("Content-Type", "application/zip");
+  xhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return;
+    const percent = Math.round(e.loaded / e.total * 100);
+    $("upPercent").textContent = percent + "%";
+    $("upMeter").style.width = percent + "%";
+    if (percent === 100) $("upBusyText").textContent = "Đang kiểm tra bài";
+  };
+  xhr.onload = () => {
+    upload.xhr = null;
+    let d = {};
+    try { d = JSON.parse(xhr.responseText); } catch (e) { /* no JSON from the proxy */ }
+    if (xhr.status === 200) return showConfirm(d);
+    if (d.problems) return showUploadProblems(d.problems);
+    showUploadProblems([{ path: "", message: d.error || "Tải lên chưa được. Thử lại sau." }]);
+  };
+  xhr.onerror = () => {
+    upload.xhr = null;
+    showUploadProblems([{ path: "", message: "Mất kết nối giữa chừng. Bài đang chạy không bị ảnh hưởng, hãy thử lại." }]);
+  };
+  xhr.send(file);
+}
+function showConfirm(d) {
+  upload.id = d.upload_id;
+  upload.removed = d.removed;
+  $("upTitle").textContent = d.title;
+  $("upMeta").textContent = `${d.is_update ? "Bản mới của bài đã có" : "Bài mới"}, ${d.lessons.length} bài, ${size(d.size)}`;
+  const fill = (id, items) => {
+    const box = $(id);
+    box.textContent = "";
+    items.forEach(t => box.append(el("li", "", t)));
+  };
+  fill("upLessons", d.lessons);
+  fill("upRemoved", d.removed);
+  $("upRemovedBox").hidden = d.removed.length === 0;
+  fill("upWarnings", d.warnings.map(w => w.message));
+  $("upWarningsBox").hidden = d.warnings.length === 0;
+  $("upAttest").checked = false;
+  $("upCommit").disabled = true;
+  $("upConfirmError").hidden = true;
+  uploadStep("upConfirm");
+}
+async function commitUpload() {
+  $("upCommit").disabled = true;
+  try {
+    await api(`/api/uploads/${upload.id}/commit`, send("POST", { attest: $("upAttest").checked, confirm_removed: upload.removed }));
+    upload.id = null;
+    $("uploadDialog").close();
+    await refresh();
+    await loadLibrary();
+  } catch (e) {
+    $("upConfirmError").textContent = e.message;
+    $("upConfirmError").hidden = false;
+    $("upCommit").disabled = !$("upAttest").checked;
+  }
+}
+function closeUpload() {
+  if (upload.xhr) upload.xhr.abort();
+  upload.xhr = null;
+  if (upload.id) fetch(`/api/uploads/${upload.id}`, { method: "DELETE" }).catch(() => {});
+  upload.id = null;
+  $("uploadDialog").close();
+}
+
+// ---------- Share ----------
+async function openShare(id) {
+  sharing = id;
+  const p = state.library.mine.find(x => x.id === id);
+  $("shareTitle").textContent = p.title;
+  $("shareEmail").value = "";
+  $("shareError").hidden = true;
+  $("shareCopied").textContent = "";
+  $("shareDialog").showModal();
+  await Promise.all([renderPeople(), renderLink()]);
+}
+async function renderPeople() {
+  const d = await api(`/api/packages/${sharing}/people`);
+  const box = $("sharePeople");
+  box.textContent = "";
+  d.people.forEach(person => {
+    const row = el("div", "stream-row share-person");
+    row.append(el("span", "share-email", person.email));
+    const b = actionButton("Bỏ", "share-remove");
+    b.dataset.email = person.email;
+    row.append(b);
+    box.append(row);
+  });
+  $("sharePeopleLabel").textContent = `Người đang được share (${d.people.length})`;
+}
+async function renderLink() {
+  const d = await api(`/api/packages/${sharing}/link`);
+  showLink(d.url);
+}
+function showLink(url) {
+  $("shareLink").value = url ? location.origin + url : "";
+  $("shareLinkOn").hidden = !url;
+  $("shareLinkOff").hidden = !!url;
+}
+async function addPerson(e) {
+  e.preventDefault();
+  $("shareError").hidden = true;
+  try {
+    await api(`/api/packages/${sharing}/share`, send("POST", { email: $("shareEmail").value }));
+    $("shareEmail").value = "";
+    await renderPeople();
+  } catch (err) {
+    $("shareError").textContent = err.message;
+    $("shareError").hidden = false;
+  }
+}
+async function removePerson(button) {
+  await api(`/api/packages/${sharing}/unshare`, send("POST", { email: button.dataset.email }));
+  await renderPeople();
+}
+async function newLink() {
+  if ($("shareLink").value && !confirm("Link cũ sẽ hết tác dụng. Tạo link mới?")) return;
+  showLink((await api(`/api/packages/${sharing}/link`, send("POST"))).url);
+  $("shareCopied").textContent = "";
+}
+async function linkOff() {
+  await api(`/api/packages/${sharing}/link`, { method: "DELETE" });
+  showLink(null);
+  $("shareCopied").textContent = "";
+}
+async function copyLink() {
+  try {
+    await navigator.clipboard.writeText($("shareLink").value);
+    $("shareCopied").textContent = "Đã copy link.";
+  } catch (e) {
+    $("shareLink").select();
+    $("shareCopied").textContent = "Không copy tự động được. Hãy tự chép link đang chọn.";
+  }
+}
+async function closeShare() {
+  $("shareDialog").close();
+  await loadLibrary();
+}
+
+// ---------- Feedback the author received ----------
+const KIND_LABEL = { comment: "Góp ý", wrong: "Báo sai", abuse: "Báo vi phạm" };
+async function openFeedbackList(id) {
+  const p = state.library.mine.find(x => x.id === id);
+  $("fbListTitle").textContent = p.title;
+  const box = $("fbList");
+  box.textContent = "Đang tải...";
+  $("feedbackListDialog").showModal();
+  const d = await api(`/api/packages/${id}/feedback`);
+  box.textContent = d.feedback.length ? "" : "Chưa có góp ý nào.";
+  d.feedback.forEach(f => {
+    const card = el("article", "fb-card");
+    const pills = el("div", "meta-pills");
+    pills.append(el("span", "meta-pill" + (f.kind === "comment" ? "" : " is-warn"), KIND_LABEL[f.kind] || f.kind));
+    if (f.lesson_title) pills.append(el("span", "meta-pill", f.lesson_title));
+    if (f.target_text) pills.append(el("span", "meta-pill", f.target_text));
+    else if (f.target_id) pills.append(el("span", "meta-pill", `${f.target_id} (đã xóa khỏi bài)`));
+    const when = new Date(f.created_at * 1000).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" });
+    card.append(pills, el("p", "fb-body", f.body), el("p", "dock-note", `${f.author || "Tài khoản đã xóa"}, ${when}`));
+    box.append(card);
+  });
+}
+
+Object.assign(ACTIONS, {
+  "lib-upload": openUpload,
+  "lib-share": b => openShare(b.dataset.id),
+  "lib-feedback": b => openFeedbackList(b.dataset.id),
+  "lib-delete": b => deletePackage(b.dataset.id),
+  "up-close": closeUpload,
+  "up-commit": commitUpload,
+  "up-again": openUpload,
+  "share-close": closeShare,
+  "share-remove": removePerson,
+  "share-copy": copyLink,
+  "share-new": newLink,
+  "share-off": linkOff,
+  "fb-list-close": () => $("feedbackListDialog").close(),
+});
+$("upFile").addEventListener("change", e => sendFile(e.target.files[0]));
+$("upAttest").addEventListener("change", e => { $("upCommit").disabled = !e.target.checked; });
+$("shareForm").addEventListener("submit", addPerson);
+$("uploadDialog").addEventListener("cancel", e => { e.preventDefault(); closeUpload(); });

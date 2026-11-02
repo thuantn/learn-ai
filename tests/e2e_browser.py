@@ -1,23 +1,25 @@
 """Whole-app check in real Chrome against a local server and a stub AI. Not run in CI, because it needs real lesson content.
 
-  python tests/e2e_browser.py CONTENT_DIR
+  python tests/e2e_browser.py PACKAGE_DIR
 """
 import http.server
 import json
 import os
 import pathlib
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import urllib.request
+import zipfile
 
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-CONTENT = pathlib.Path(sys.argv[1]).resolve()
+PACKAGE = pathlib.Path(sys.argv[1]).resolve()
 PORT, AI_PORT = 8790, 8791
 BASE = f"http://127.0.0.1:{PORT}"
 SHOTS = pathlib.Path(tempfile.gettempdir()) / "learn-ai-shots"
@@ -48,10 +50,19 @@ class FakeAI(http.server.BaseHTTPRequestHandler):
 
 threading.Thread(target=http.server.ThreadingHTTPServer(("127.0.0.1", AI_PORT), FakeAI).serve_forever, daemon=True).start()
 data = tempfile.mkdtemp(prefix="learn-e2e-")
-env = dict(os.environ, DATA_DIR=data, CONTENT_DIR=str(CONTENT), COOKIE_SECURE="0", PUBLIC_ORIGIN=BASE, PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1",
+env = dict(os.environ, DATA_DIR=data, PACKAGES_DIR=os.path.join(data, "packages"), LINK_SECRET="e2e-secret-e2e-secret-e2e-secret", COOKIE_SECURE="0", PUBLIC_ORIGIN=BASE, PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1",
            AI_API_KEY="stub", AI_BASE_URL=f"http://127.0.0.1:{AI_PORT}/v1")
 add = subprocess.run([sys.executable, "-m", "app.cli", "add-user", "an@example.com"], cwd=ROOT, env=env, capture_output=True, encoding="utf-8")
 temp = add.stdout.rsplit(": ", 1)[1].strip()
+archive = os.path.join(data, "package.zip")
+with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+    for f in sorted(PACKAGE.rglob("*")):
+        if f.is_file():
+            z.write(f, f.relative_to(PACKAGE).as_posix())
+imported = subprocess.run([sys.executable, "-m", "app.cli", "import-package", archive, "an@example.com"], cwd=ROOT, env=env, capture_output=True, encoding="utf-8")
+PACKAGE_ID = imported.stdout.strip().splitlines()[-1]
+with sqlite3.connect(os.path.join(data, "learn.db")) as c:
+    c.execute("UPDATE packages SET ask_status='approved' WHERE id=?", (PACKAGE_ID,))
 srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(PORT), "--log-level", "warning"], cwd=ROOT, env=env)
 for _ in range(50):
     try:
@@ -59,8 +70,8 @@ for _ in range(50):
         break
     except OSError:
         time.sleep(0.2)
-MANIFEST = json.loads((CONTENT / "manifest.json").read_text(encoding="utf-8"))
-L2 = next(x for x in MANIFEST["lessons"] if x["order"] == 2)
+L2 = json.loads((PACKAGE / "lessons" / "bai02" / "lesson.json").read_text(encoding="utf-8-sig"))
+L2_KEY = f"{PACKAGE_ID}.bai02"
 NEW_PW = "ngựa vàng chạy qua cầu mây"
 
 
@@ -116,10 +127,10 @@ try:
         pg.click("#submitBtn")
         pg.wait_for_url(BASE + "/")
         pg.wait_for_selector("#screen-home.active")
-        check("home shows newest lesson", L2["title"] in pg.inner_text("#home-title"), pg.inner_text("#home-title"))
+        check("both lessons listed", pg.locator("#lessonList .stream-row").count() == 2)
         check("no due cards before starting", "Không có thẻ" in pg.inner_text(".dock-foot"), pg.inner_text(".dock-foot"))
 
-        pg.locator("#screen-home .cta-cluster").get_by_role("button", name="Bắt đầu buổi học").click()
+        pg.locator(f'#lessonList [data-lesson="{L2_KEY}"]').click()
         pg.wait_for_selector("#screen-review.active")
         check("summary shown", pg.locator("#summary .summary-band").count() == len(L2["summary"]))
         pg.get_by_role("button", name="Tiếp tục: Nghe podcast").click()
@@ -174,53 +185,12 @@ try:
         pg.get_by_role("button", name="Về trang đầu").click()
         pg.wait_for_selector("#screen-home.active")
 
-        # Full lesson page under the strict CSP: scripts, formulas, audio, quiz, Ask.
-        for lesson in MANIFEST["lessons"]:
-            violations = []
-            page2 = ctx.new_page()
-            e2 = []
-            watch(page2, e2)
-            page2.on("console", lambda m: violations.append(m.text) if "Content Security Policy" in m.text else None)
-            page2.goto(f"{BASE}/content/{lesson['page']}", wait_until="networkidle")
-            page2.wait_for_timeout(2000)
-            tag = lesson["id"]
-            check(f"{tag} no CSP violations", not violations, violations[:2])
-            check(f"{tag} no page errors", not [x for x in e2 if "Content Security" not in x], e2[:2])
-            check(f"{tag} formulas render", page2.locator("mjx-container").count() > 5, page2.locator("mjx-container").count())
-            check(f"{tag} synced to account", "tài khoản" in page2.inner_text("#save-state"), page2.inner_text("#save-state"))
-            r = page2.evaluate("""async ()=>{const a=document.querySelector('.pc audio');a.muted=true;try{await a.play()}catch(e){}
-              await new Promise(r=>setTimeout(r,1200));a.currentTime=100;await new Promise(r=>setTimeout(r,1000));const o={t:a.currentTime,e:a.error&&a.error.code};a.pause();return o}""")
-            check(f"{tag} lesson audio seeks", r["e"] is None and r["t"] >= 99, r)
-            page2.close()
-
-        page3 = ctx.new_page()
-        e3 = []
-        watch(page3, e3)
-        page3.goto(f"{BASE}/content/{L2['page']}", wait_until="networkidle")
-        page3.wait_for_timeout(1500)
-        wrong_i = (L2["quiz"][0]["answer"] + 1) % len(L2["quiz"][0]["options"])
-        page3.locator("#qs .q").first.locator(".opt").nth(wrong_i).click()
-        page3.wait_for_timeout(1500)
-        page3.click("#fab")
-        page3.fill("#ask-in", "Câu hỏi từ trang bài")
-        page3.click("#ask-go")
-        wait_js(page3, "document.querySelector('#ask-go').disabled===false", 30)
-        check("lesson page Ask renders", page3.locator("#chat .msg.a").last.locator("mjx-container").count() >= 1, page3.locator("#chat .msg.a").last.inner_text()[:160])
-        check("lesson page sent no system role", all(m["role"] != "system" for m in seen_ai[-1]["messages"]))
-        page3.close()
-
-        pg.goto(BASE + "/#flashcard")
-        pg.reload()
-        wait_js(pg, "state.cards && state.cards.length>0", 8)
-        qs = pg.evaluate("state.cards")
-        check("wrong quiz answer became a card", any(c["id"] == L2["quiz"][0]["id"] and c["wrong"] for c in qs), [c["id"] for c in qs])
-
         # Phone sizes and themes.
         for w, h in ((360, 720), (390, 844), (768, 1000), (1024, 768), (1440, 900), (1920, 1080)):
             pg.set_viewport_size({"width": w, "height": h})
             for dark in (True, False):
                 pg.evaluate("t=>document.documentElement.setAttribute('data-theme',t)", "dark" if dark else "light")
-                for s in ("home", "review", "listen", "flashcard", "finish"):
+                for s in ("home", "library", "review", "listen", "flashcard", "finish"):
                     pg.evaluate("s=>go(s)", s)
                     pg.wait_for_timeout(150)
                     over = pg.evaluate("document.documentElement.scrollWidth-document.documentElement.clientWidth")

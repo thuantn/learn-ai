@@ -15,6 +15,7 @@
   let dialogOpen = false;
   let linkTimes = [];
   let aiEnabled = false;
+  let lastQuizId = null;
 
   const send = (method, body, extra) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}), ...extra });
 
@@ -22,7 +23,7 @@
     const r = await fetch(url, opts);
     if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) { const e = new Error(d.error || "Có lỗi. Thử lại sau."); e.code = d.code; throw e; }
+    if (!r.ok) { const e = new Error(d.error || "Có lỗi. Thử lại sau."); e.code = d.code; e.status = r.status; throw e; }
     return d;
   }
 
@@ -43,6 +44,13 @@
       try { port.close(); } catch (e) {}
       port = null;
     }
+  }
+
+  function lostAccess() {
+    docPending = null;
+    if (docTimer) { clearTimeout(docTimer); docTimer = null; }
+    setNotice("");
+    setCover("Bạn không còn quyền xem bài này. Có thể tác giả đã bỏ quyền hoặc đã xóa bài.", null);
   }
 
   function showLoading(text) {
@@ -92,6 +100,11 @@
       $("lessonTitle").textContent = `${frameInfo.title} — ${frameInfo.author}`;
       $("askLessonShort").textContent = frameInfo.title;
       $("lessonAskBtn").hidden = !frameInfo.ask;
+      document.body.classList.toggle("no-ask", !frameInfo.ask);
+      aiEnabled = !!frameInfo.ask;
+      $("askInput").disabled = !aiEnabled;
+      $("askSend").disabled = !aiEnabled;
+      $("askInput").placeholder = aiEnabled ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
       createIframe(frameInfo.url, frameInfo.title);
       showFrame();
     } catch (e) {
@@ -176,11 +189,17 @@
         case "quiz.answer": {
           const d = await api(`/api/lessons/${lessonId}/quiz-answer`, send("POST", { id: a.id, option: a.option }));
           reply(id, true, { data: d });
+          lastQuizId = String(a.id);
+          $("lessonQuizWrongBtn").hidden = false;
           return;
         }
         case "ask.open": {
           let text = typeof a.text === "string" ? a.text : "";
           if (text.length > 2000) text = text.slice(0, 2000);
+          if (!frameInfo.ask) {
+            reply(id, false, { code: "disabled", message: "Ô Hỏi chưa được bật cho bài này." });
+            return;
+          }
           openAsk(true);
           $("askInput").value = text;
           reply(id, true, { data: null });
@@ -200,6 +219,7 @@
           reply(id, false, { code: "unknown_op", message: "Không hỗ trợ thao tác này." });
       }
     } catch (e) {
+      if (e.status === 404 && (op === "quiz.answer" || op === "doc.get")) lostAccess();
       reply(id, false, { code: e.code || "error", message: e.message || "Lỗi." });
     }
   }
@@ -219,6 +239,7 @@
     if (keepalive === true) opts.keepalive = true;
     const writePromise = fetch(`/api/doc/${encodeURIComponent(frameInfo.doc)}`, opts)
       .then(async r => {
+        if (r.status === 404) { lostAccess(); return; }
         if (!r.ok) throw new Error("save failed");
         setNotice("");
       })
@@ -341,6 +362,8 @@
       el.textContent = on ? "Thu gọn" : "Mở rộng";
     }
     else if (act === "reload-frame") { loadFrame(); }
+    else if (act === "feedback") { openFeedback({ lesson: lessonId, label: frameInfo ? frameInfo.title : "" }); }
+    else if (act === "quiz-wrong") { openFeedback({ lesson: lessonId, targetType: "quiz", targetId: lastQuizId, kind: "wrong", label: `Câu ${lastQuizId}` }); }
     else if (act === "expired-reload") { flushDocBeforeLeave(false).finally(() => location.reload()); }
   });
 
@@ -352,17 +375,6 @@
     if (!lessonId) {
       setCover("Đường dẫn không hợp lệ.", null);
       return;
-    }
-    try {
-      const me = await api("/api/me", { method: "GET" });
-      aiEnabled = !!me.ai;
-      if (!aiEnabled) {
-        $("askInput").disabled = true;
-        $("askInput").placeholder = "Ô Hỏi chưa được bật.";
-        $("askSend").disabled = true;
-      }
-    } catch (e) {
-      if (e.message === "login") return;
     }
     await loadFrame();
   })();

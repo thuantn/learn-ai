@@ -1,5 +1,7 @@
 "use strict";
 const $ = id => document.getElementById(id);
+// A share link must survive logging in and changing the temporary password.
+const keepJoin = /^#join=[\w.-]+$/.test(location.hash) ? location.hash : "";
 
 function show(message, kind) {
   const box = $("alertBox");
@@ -28,7 +30,7 @@ if (loginForm) loginForm.addEventListener("submit", async e => {
   btn.disabled = true;
   try {
     const { status, data } = await post("/login", { username: $("loginUser").value, password: $("loginPass").value });
-    if (status === 200) { location.href = data.must_change ? "/change-password" : "/"; return; }
+    if (status === 200) { location.href = (data.must_change ? "/change-password" : "/") + keepJoin; return; }
     show(data.error || "Có lỗi. Thử lại sau.", status === 429 ? "wait" : "error");
   } catch (err) {
     show("Không kết nối được. Kiểm tra mạng rồi thử lại.");
@@ -46,7 +48,7 @@ if (passwordForm) passwordForm.addEventListener("submit", async e => {
   btn.disabled = true;
   try {
     const { status, data } = await post("/api/change-password", { password: p1 });
-    if (status === 200) { location.href = "/"; return; }
+    if (status === 200) { location.href = "/" + keepJoin; return; }
     show(data.error || "Có lỗi. Thử lại sau.");
   } catch (err) {
     show("Không kết nối được. Kiểm tra mạng rồi thử lại.");

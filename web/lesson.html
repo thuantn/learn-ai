@@ -13,6 +13,7 @@
 <script src="/static/mathjax-config.js"></script>
 <script src="/static/vendor/tex-svg.min.js" defer></script>
 <script src="/static/answer.js" defer></script>
+<script src="/static/feedback.js" defer></script>
 <script src="/static/lesson-host.js" defer></script>
 </head>
 <body class="lesson-host">
@@ -24,6 +25,8 @@
   </div>
   <div class="lesson-top-right">
     <span class="lesson-notice" id="lessonNotice"></span>
+    <button type="button" class="btn-studio-secondary" id="lessonQuizWrongBtn" data-act="quiz-wrong" hidden>Báo sai câu này</button>
+    <button type="button" class="btn-studio-secondary" id="lessonFeedbackBtn" data-act="feedback">Góp ý</button>
     <button type="button" class="btn-studio-primary" id="lessonAskBtn" data-act="ask-open">Hỏi</button>
   </div>
 </header>
