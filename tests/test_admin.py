@@ -204,3 +204,61 @@ def test_prompt_keeps_author_text_in_the_data_block(ctx):
         assert text in block
     assert "dữ liệu" in instructions and "không đề cập" in instructions
     assert len(prompt) < 82000
+
+
+def test_ask_refuses_when_all_slots_are_busy_without_using_quota(world, monkeypatch):
+    ctx, clients, pid = world
+    monkeypatch.setattr(ctx.main.ai, "call", lambda m: "x")
+    assert approve(clients, pid).status_code == 200
+    monkeypatch.setattr(ctx.main.AI_SLOTS, "locked", lambda: True)
+    r = clients["binh"].post("/api/ask", json={"lesson": f"{pid}.demo", "question": "Vì sao?"})
+    assert r.status_code == 429 and r.json()["code"] == "busy"
+    with ctx.db.connect() as c:
+        assert c.execute("SELECT count(*) n FROM ask_usage").fetchone()["n"] == 0
+
+
+def test_minute_limit_counts_before_any_await(world):
+    ctx, clients, pid = world
+    assert all(ctx.main.take_minute_slot("binh") for _ in range(ctx.main.ASK_PER_MINUTE))
+    assert ctx.main.take_minute_slot("binh") is False
+
+
+def test_provider_failures_become_a_502(world, monkeypatch):
+    import http.client
+    ctx, clients, pid = world
+    assert approve(clients, pid).status_code == 200
+
+    def fails(exc):
+        def call(m):
+            raise exc
+        return call
+
+    for exc in (http.client.RemoteDisconnected("x"), ConnectionResetError(), TypeError("null choices"), ValueError("no_answer")):
+        monkeypatch.setattr(ctx.main.ai, "call", fails(exc))
+        r = clients["binh"].post("/api/ask", json={"lesson": f"{pid}.demo", "question": "Vì sao?"})
+        assert r.status_code == 502, exc
+
+
+def test_abuse_reporter_is_hidden_from_the_author_but_not_the_admin(world):
+    ctx, clients, pid = world
+    url = f"/api/lessons/{pid}.demo/feedback"
+    clients["binh"].post(url, json={"kind": "comment", "target_type": "lesson", "text": "hay"})
+    clients["binh"].post(url, json={"kind": "abuse", "target_type": "lesson", "text": "báo cáo"})
+    seen = {x["kind"]: x["author"] for x in clients["an"].get(f"/api/packages/{pid}/feedback").json()["feedback"]}
+    assert seen == {"comment": "binh", "abuse": None}
+    assert clients["boss"].get("/api/admin/overview").json()["abuse"][0]["author"] == "binh"
+
+
+def test_pending_and_approved_stay_listed_with_many_packages(world):
+    ctx, clients, pid = world
+    assert clients["an"].post(f"/api/packages/{pid}/ask-request").status_code == 200
+    with ctx.db.connect() as c:
+        c.execute("UPDATE packages SET updated_at=0 WHERE id=?", (pid,))
+        for n in range(ctx.main.admin.LIST_LIMIT + 5):
+            c.execute(
+                "INSERT INTO packages(id, owner, slug, title, topic, description, version, size_bytes, ask_hash, created_at, updated_at) VALUES(?,?,?,?,'','',1,0,'',0,1)",
+                (f"p{n:012x}", "an", f"s{n}", "x"),
+            )
+    d = clients["boss"].get("/api/admin/overview").json()
+    assert [p["id"] for p in d["pending"]] == [pid]
+    assert pid in {p["id"] for p in d["packages"]}

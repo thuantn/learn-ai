@@ -1,6 +1,7 @@
 """AI providers, the provider and key in use, and the call itself. The key is written once and never read back."""
 import base64
 import binascii
+import http.client
 import json
 import logging
 import os
@@ -25,6 +26,8 @@ PROVIDERS = {
 KEY_RE = re.compile(r"[\x21-\x7e]{8,512}")
 MODEL_RE = re.compile(r"[A-Za-z0-9._:/-]{1,100}")
 ENV_MODEL = "deepseek/deepseek-v4.1-flash"
+# Everything a call can raise besides HTTPError: connection drops, timeouts, and replies of the wrong shape.
+CALL_ERRORS = (OSError, http.client.HTTPException, KeyError, IndexError, TypeError, ValueError)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -143,7 +146,10 @@ def _post(cfg, messages, max_tokens, timeout):
         headers={"Authorization": "Bearer " + cfg["key"], "Content-Type": "application/json"},
     )
     with _open(req, timeout) as r:
-        return json.loads(r.read())["choices"][0]["message"]["content"]
+        text = json.loads(r.read())["choices"][0]["message"]["content"]
+    if not isinstance(text, str):
+        raise ValueError("no_answer")
+    return text
 
 
 def call(messages, max_tokens=1500) -> str:
@@ -165,7 +171,7 @@ def test() -> dict:
         log.warning("ai test http %s", e.code)
         code = {401: "auth", 403: "auth", 404: "zdr_no_endpoint"}.get(e.code, "refused")
         return {"ok": False, "code": code}
-    except (urllib.error.URLError, TimeoutError, KeyError, IndexError, TypeError, ValueError) as e:
+    except CALL_ERRORS as e:
         log.warning("ai test failed %s", type(e).__name__)
         return {"ok": False, "code": "unreachable"}
     return {"ok": True, "code": "ok"}

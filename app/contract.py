@@ -15,6 +15,8 @@ MAX_JSON = 1 * 1024 * 1024
 MAX_PAGE = 5 * 1024 * 1024
 MAX_CONTENT = 1 * 1024 * 1024
 MAX_META_TOTAL = 16 * 1024 * 1024
+# Renders as nothing for the admin who approves the text, but still reaches the model.
+INVISIBLE_RE = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\U000e0000-\U000e007f]")
 MAX_TEXT = 4000
 MAX_TITLE = 200
 MAX_TOPIC = 80
@@ -103,6 +105,16 @@ class PageChecker(HTMLParser):
             "page/index.html", "page_external",
             f"Tài nguyên ngoài hoặc không hợp lệ: {src}. Chỉ dùng /static/ hoặc file trong package.", "warning"
         ))
+
+
+def _has_invisible(value):
+    if isinstance(value, str):
+        return bool(INVISIBLE_RE.search(value))
+    if isinstance(value, dict):
+        return any(_has_invisible(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_invisible(v) for v in value)
+    return False
 
 
 def _bad_id(value):
@@ -238,6 +250,8 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
     elif _too_long(title, MAX_TITLE):
         problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "text_too_long", f"Tiêu đề bài quá dài: {len(title)} > {MAX_TITLE}."))
 
+    if _has_invisible(lesson):
+        problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "invisible_text", "lesson.json có ký tự vô hình. Xóa chúng đi."))
     cards_for_check = lesson.get("cards")
     if title == "Tên bài" or (isinstance(cards_for_check, list) and any(isinstance(x, dict) and str(x.get("q", "")).startswith("Câu hỏi thẻ") for x in cards_for_check)):
         problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "template_left", "lesson.json vẫn còn nội dung của khung mẫu.", "warning"))
@@ -372,7 +386,8 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
             problems.append(Problem(f"lessons/{lesson_id}/content.md", "content_size", "File content.md quá lớn."))
         else:
             try:
-                content_path.read_text(encoding="utf-8")
+                if _has_invisible(content_path.read_text(encoding="utf-8-sig")):
+                    problems.append(Problem(f"lessons/{lesson_id}/content.md", "invisible_text", "content.md có ký tự vô hình. Xóa chúng đi."))
             except UnicodeDecodeError:
                 problems.append(Problem(f"lessons/{lesson_id}/content.md", "content_encoding", "File content.md phải là UTF-8."))
     elif profile == "full":

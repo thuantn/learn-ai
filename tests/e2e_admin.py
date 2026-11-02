@@ -157,6 +157,11 @@ def run(br, base, temp, work):
     boss.click("#pendingList [type=button]")
     boss.wait_for_selector("#reviewDialog[open]")
     check("review shows what the AI will read", "Bản một" in boss.inner_text("#reviewBody"))
+    shown = boss.inner_text("#reviewBody")
+    sample = json.loads((ROOT / "sample/package/lessons/sample/lesson.json").read_text("utf-8"))
+    missing = [t for q in sample["quiz"] for t in [q["q"], *q["options"], q.get("why", "")] if t and t not in shown]
+    missing += [t for t in sample["summary"] if t not in shown]
+    check("review shows every quiz option and explanation", not missing, missing[:3])
     check("review states there is no Internet option", "Internet" in boss.inner_text("#reviewDialog"))
     boss.screenshot(path=str(SHOTS / "admin-review.png"))
     an.goto(base + "/#library")

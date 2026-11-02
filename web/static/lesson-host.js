@@ -202,8 +202,8 @@
           return;
         }
         case "ask.open": {
-          let text = typeof a.text === "string" ? a.text : "";
-          if (text.length > 2000) text = text.slice(0, 2000);
+          // The learner must be able to see what they are about to send, so no long tails or runs of blank lines.
+          const text = (typeof a.text === "string" ? a.text : "").replace(/\s*\n\s*\n\s*/g, "\n\n").slice(0, 800);
           if (!frameInfo.ask) {
             showAskNotice();
             reply(id, false, { code: "disabled", message: "Ô Hỏi chưa được bật cho bài này." });

@@ -349,3 +349,18 @@ def test_page_quiz_id_missing_from_json_warns(good_package):
 def test_leftover_template_text_warns(good_package):
     _edit_lesson(good_package, title="Tên bài")
     assert "template_left" in {p.code for p in check_package(good_package)}
+
+
+@pytest.mark.parametrize("char", ["\u200b", "\u202e", "\U000e0041"])
+def test_invisible_characters_are_refused(good_package, char):
+    (good_package / "lessons" / "demo" / "content.md").write_text("Bài" + char + "học", encoding="utf-8")
+    assert "invisible_text" in _codes(good_package)
+    (good_package / "lessons" / "demo" / "content.md").write_text("Bài học", encoding="utf-8")
+    assert "invisible_text" not in _codes(good_package)
+    _edit_lesson(good_package, summary=["a", "b" + char, "c"])
+    assert "invisible_text" in _codes(good_package)
+
+
+def test_a_file_starting_with_a_byte_order_mark_is_fine(good_package):
+    (good_package / "lessons" / "demo" / "content.md").write_text("\ufeffBài học", encoding="utf-8")
+    assert "invisible_text" not in _codes(good_package)

@@ -208,3 +208,22 @@ def test_key_never_leaks(ctx, ai, capsys, caplog):
         rows = [dict(r) for r in c.execute("SELECT * FROM admin_log")]
     assert len(rows) == 1 and rows[0]["actor"] == "admin" and rows[0]["action"] == "ai_save"
     assert KEY not in json.dumps(rows) and KEY not in caplog.text and KEY not in capsys.readouterr().out
+
+
+def test_empty_answer_is_a_failure_not_a_success(ctx, ai, monkeypatch):
+    ai.save("openrouter", "", KEY, "admin")
+
+    class Reply:
+        def read(self):
+            return b'{"choices": [{"message": {"content": null}}]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(ai, "_open", lambda req, timeout: Reply())
+    with pytest.raises(ValueError):
+        ai.call([{"role": "user", "content": "x"}])
+    assert ai.test() == {"ok": False, "code": "unreachable"}

@@ -117,20 +117,20 @@ function renderAi(status, list) {
 async function load() {
   const d = await api("/api/admin/overview");
   fill("pendingList", "pendingEmpty", d.pending, p => row(p.title, [pills([p.owner, `${p.lessons} bài`])], [
-    button("Đọc và duyệt", "btn-studio-primary", () => openReview(p.id)),
+    button("Đọc và duyệt", "btn-studio-primary", guarded(() => openReview(p.id))),
   ]));
   renderAi(d.ai, d.providers);
   fill("abuseList", "abuseEmpty", d.abuse, x => row(x.title, [
     pills([`Tác giả: ${x.owner}`, `Người báo: ${x.author || "đã xóa"}`, when(x.created_at)]),
     el("p", "fb-body", x.body),
   ], [
-    button("Đọc nội dung", "btn-studio-secondary", () => openReview(x.package_id)),
-    button("Gỡ package", "btn-studio-secondary btn-danger-soft", () => removePackage(x.package_id, x.title)),
+    button("Đọc nội dung", "btn-studio-secondary", guarded(() => openReview(x.package_id))),
+    button("Gỡ package", "btn-studio-secondary btn-danger-soft", guarded(() => removePackage(x.package_id, x.title))),
   ]));
   fill("packageList", "packagesEmpty", d.packages, p => {
-    const actions = [button("Đọc nội dung", "btn-studio-secondary", () => openReview(p.id))];
-    if (p.ask_status === "approved") actions.push(button("Tắt ô Hỏi", "btn-studio-secondary", () => decide(p.id, "off")));
-    actions.push(button("Gỡ", "btn-studio-secondary btn-danger-soft", () => removePackage(p.id, p.title)));
+    const actions = [button("Đọc nội dung", "btn-studio-secondary", guarded(() => openReview(p.id)))];
+    if (p.ask_status === "approved") actions.push(button("Tắt ô Hỏi", "btn-studio-secondary", guarded(() => decide(p.id, "off"))));
+    actions.push(button("Gỡ", "btn-studio-secondary btn-danger-soft", guarded(() => removePackage(p.id, p.title))));
     return row(p.title, [pills([p.owner, `${p.lessons} bài`, size(p.size_bytes), `Bản ${p.version}`, ASK_LABEL[p.ask_status]])], actions);
   });
   fill("userList", null, d.users, u => row(u.name, [pills([u.admin && "Admin", `${size(u.used)} / ${size(u.quota)}`])]));
@@ -159,7 +159,7 @@ async function openReview(id) {
     box.append(el("h3", "stream-title", l.title));
     box.append(section("Tóm tắt", l.summary));
     box.append(section("Thẻ", l.cards.map(c => `${c.q} → ${c.a}`)));
-    if (l.quiz.length) box.append(section("Quiz", l.quiz.map(q => `${q.q} → ${q.options[q.answer]}`)));
+    if (l.quiz.length) box.append(section("Quiz", l.quiz.map(q => [q.q, `Lựa chọn: ${q.options.join("; ")}`, `Đáp án: ${q.options[q.answer]}`, q.why && `Giải thích: ${q.why}`].filter(Boolean).join("\n"))));
     box.append(section("Nội dung AI đọc", [l.content || "Bài này không có content.md."]));
     body.append(box);
   });

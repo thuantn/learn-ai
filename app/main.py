@@ -52,6 +52,7 @@ SHARE_PER_MINUTE, JOIN_PER_MINUTE = 30, 10
 FEEDBACK_MAX, FEEDBACK_PER_HOUR = 2000, 20
 FEEDBACK_KINDS = ("comment", "wrong", "abuse")
 HASHING = asyncio.Semaphore(2)  # each Argon2 call uses about 19 MB
+AI_SLOTS = asyncio.Semaphore(4)  # a call can hold a worker thread for 90 s, and every request needs one for its session
 PUBLIC_PATHS = {"/login", "/healthz", "/favicon.ico"}
 PASSWORD_PATHS = {"/change-password", "/api/change-password", "/logout"}
 
@@ -834,7 +835,7 @@ async def package_feedback(package_id: str, request: Request):
         out.append({
             "id": r["id"], "lesson_title": lesson.get("title"), "target_type": r["target_type"], "target_id": r["target_id"],
             "target_text": next((x["q"] for x in pool if x["id"] == r["target_id"]), None),
-            "kind": r["kind"], "author": r["author"], "body": r["body"], "created_at": r["created_at"],
+            "kind": r["kind"], "author": None if r["kind"] == "abuse" else r["author"], "body": r["body"], "created_at": r["created_at"],
         })
     return {"feedback": out}
 
@@ -934,19 +935,23 @@ def lesson_context(lesson):
     )
 
 
-def take_quota(user):
+def take_minute_slot(user):
+    """Runs on the event loop with no await inside, so parallel requests cannot all pass."""
     now = time.time()
     recent = ask_recent[user]
     recent[:] = [t for t in recent if now - t < 60]
     if len(recent) >= ASK_PER_MINUTE:
         return False
+    recent.append(now)
+    return True
+
+
+def take_quota(user):
     day = datetime.now(VN).strftime("%Y-%m-%d")
     limit = int(os.environ.get("AI_DAILY_LIMIT", "50"))
     with db.connect() as c:
         c.execute("INSERT INTO ask_usage VALUES(?,?,0) ON CONFLICT(user, day) DO NOTHING", (user, day))
         taken = c.execute("UPDATE ask_usage SET n=n+1 WHERE user=? AND day=? AND n<?", (user, day, limit)).rowcount
-    if taken:
-        recent.append(now)
     return bool(taken)
 
 
@@ -970,14 +975,17 @@ async def ask(request: Request):
     if not 0 < len(question) <= QUESTION_MAX:
         return bad(400, "input", "Câu hỏi quá dài hoặc đang trống.")
     messages = [{"role": "system", "content": lesson_context(lesson)}, {"role": "user", "content": question}]
-    if not await asyncio.to_thread(take_quota, user):
+    if AI_SLOTS.locked():
+        return bad(429, "busy", "Ô Hỏi đang bận. Thử lại sau ít phút.")
+    if not take_minute_slot(user) or not await asyncio.to_thread(take_quota, user):
         return bad(429, "rate_limited", "Đã hết lượt hỏi. Thử lại sau.")
     try:
-        text = await asyncio.to_thread(ai.call, messages)
+        async with AI_SLOTS:
+            text = await asyncio.to_thread(ai.call, messages)
     except urllib.error.HTTPError as e:
         log.warning("ai http %s", e.code)
         return bad(502, "ai", "Dịch vụ AI đang lỗi. Thử lại sau.")
-    except (urllib.error.URLError, TimeoutError, KeyError, IndexError, ValueError) as e:
+    except ai.CALL_ERRORS as e:
         log.warning("ai failed %s", type(e).__name__)
         return bad(502, "ai", "Dịch vụ AI đang lỗi. Thử lại sau.")
     return {"text": text}

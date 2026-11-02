@@ -574,7 +574,7 @@ function joinFromLink() {
   if (!m) return false;
   history.replaceState(null, "", "#home");
   api("/api/join", send("POST", { token: m[1], preview: true })).then(async p => {
-    if (!p.mine && !confirm(`Thêm bài "${p.title}" của ${p.author} vào thư viện?`)) return;
+    if (!p.mine && !confirm(`Tác giả ${p.author} share bài này:\n${p.title.replace(/\s+/g, " ")}\n\nThêm vào thư viện?`)) return;
     const d = await api("/api/join", send("POST", { token: m[1] }));
     if (d.first_lesson) location.replace("/lesson/" + d.first_lesson);
   }).catch(e => {

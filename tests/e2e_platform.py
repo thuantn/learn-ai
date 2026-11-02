@@ -245,7 +245,7 @@ def run(br, base, temp, good, audio, bad):
     login_first(c, base, "cuong@example.com", temp["cuong@example.com"], link.replace(base, ""))
     c.wait_for_url("**/lesson/**")
     check("link survives login and password change", "/lesson/p" in c.url, c.url)
-    check("joining asked first", any("Thêm bài" in x for x in dialogs), dialogs[:2])
+    check("joining asked first", any("Thêm vào thư viện" in x for x in dialogs), dialogs[:2])
     a.click("[data-act=share-close]")
 
     # Binh learns the shared lesson and sees the author.

@@ -46,7 +46,8 @@ async def overview():
             "id": r["id"], "title": r["title"], "owner": r["owner"], "size_bytes": r["size_bytes"], "version": r["version"],
             "ask_status": r["ask_status"], "updated_at": r["updated_at"], "lessons": lesson_counts.get(r["id"], 0),
         } for r in c.execute(
-            "SELECT id, title, owner, size_bytes, version, ask_status, updated_at FROM packages ORDER BY updated_at DESC LIMIT ?", (LIST_LIMIT,))]
+            "SELECT id, title, owner, size_bytes, version, ask_status, updated_at FROM packages "
+            "ORDER BY ask_status IN ('pending', 'approved') DESC, updated_at DESC LIMIT ?", (LIST_LIMIT,))]
         abuse = [dict(r) for r in c.execute(
             """SELECT f.id, f.package_id, p.title, p.owner, f.lesson, f.author, f.body, f.created_at
                FROM feedback f JOIN packages p ON p.id=f.package_id WHERE f.kind='abuse' ORDER BY f.created_at DESC LIMIT ?""", (LIST_LIMIT,))]
