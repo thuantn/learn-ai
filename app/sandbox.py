@@ -5,7 +5,7 @@ import hmac
 import os
 import pathlib
 
-from . import contract
+from . import catalog
 
 LINK_TTL_SECONDS_DEFAULT = 21600
 
@@ -27,7 +27,12 @@ def _secret() -> bytes | None:
 
 
 def make_token(user_id: int, lesson: str, now: float, secret: bytes | None = None) -> str:
-    """Returns a base64url(payload).base64url(HMAC-SHA256) token."""
+    """Returns a base64url(payload).base64url(HMAC-SHA256) token.
+
+    # ponytail: rowid can be reused after deleting the user with the largest rowid,
+    # and the old token lives at most LINK_TTL_SECONDS; the receiver still needs access.
+    Add a dedicated id column if user deletion becomes common.
+    """
     if secret is None:
         secret = _secret()
     exp = now + int(os.environ.get("LINK_TTL_SECONDS", str(LINK_TTL_SECONDS_DEFAULT)))
@@ -64,29 +69,18 @@ def read_token(token: str, now: float, secret: bytes | None = None) -> tuple[int
 
 
 def can_read(c, user_id: int, lesson: str) -> bool:
-    """True if the user exists. Future versions will check a permissions table."""
-    row = c.execute("SELECT 1 FROM users WHERE rowid=?", (user_id,)).fetchone()
-    return row is not None
+    """True if the user exists and has access to the lesson."""
+    row = c.execute("SELECT name FROM users WHERE rowid=?", (user_id,)).fetchone()
+    if not row:
+        return False
+    return catalog.lesson_for(c, row["name"], lesson) is not None
 
 
-def _package_slug() -> str:
-    packages_dir = os.environ.get("PACKAGES_DIR", "packages")
-    try:
-        package = contract.read_json_file(pathlib.Path(packages_dir) / "package.json")
-    except Exception:
-        return "default"
-    if isinstance(package, dict):
-        slug = package.get("slug")
-        if isinstance(slug, str) and slug:
-            return slug
-    return "default"
-
-
-def learner_code(user_id: int, secret: bytes | None = None) -> str:
+def learner_code(user_id: int, package_id: str, secret: bytes | None = None) -> str:
     """A per-user, per-package opaque code exposed to lesson pages."""
     if secret is None:
         secret = _secret()
-    return hmac.new(secret, f"learner|{_package_slug()}|{user_id}".encode(), hashlib.sha256).hexdigest()
+    return hmac.new(secret, f"learner|{package_id}|{user_id}".encode(), hashlib.sha256).hexdigest()
 
 
 def _sandbox_origin() -> str:

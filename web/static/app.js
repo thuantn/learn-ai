@@ -4,6 +4,7 @@ const $$ = sel => [...document.querySelectorAll(sel)];
 const SPEEDS = [1, 1.25, 1.5, 2, 0.75];
 const SCREENS = ["home", "review", "listen", "flashcard", "finish"];
 const state = { me: null, lessons: [], lesson: null, track: "long", due: 0, nextDue: null, cards: [], idx: 0, reviewed: 0 };
+function currentTrack() { return state.lesson && state.lesson.tracks[state.track]; }
 const audio = new Audio();
 audio.preload = "none";
 let lastSaved = 0, pendingSeek = null;
@@ -23,7 +24,6 @@ function fmt(sec) {
   return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
 }
 const lessonNo = l => "Bài " + l.order;
-const currentTrack = () => state.lesson.tracks[state.track];
 
 function statusText(l) {
   if (l.status === "done") return l.due ? `Đã xong, còn ${l.due} thẻ đến hạn` : "Đã xong";
@@ -83,6 +83,16 @@ function renderFlow() {
 
 function renderLesson() {
   const l = state.lesson;
+  if (!l) {
+    $("homePill").textContent = "Chưa có bài nào";
+    $("home-title").textContent = "Học AI";
+    $("homeNote").textContent = "Dùng nút Tải lên để thêm bài của bạn.";
+    $("summary").textContent = "";
+    $("askChips").textContent = "";
+    $("dockKicker").textContent = "";
+    $("dockTitle").textContent = "";
+    return;
+  }
   $$("[data-lesson-title]").forEach(e => { e.textContent = `${lessonNo(l)}: ${l.title}`; });
   $$("[data-lesson-short]").forEach(e => { e.textContent = lessonNo(l); });
   $$("[data-article]").forEach(a => { a.href = l.page; });
@@ -92,8 +102,19 @@ function renderLesson() {
   $("dockTitle").textContent = l.title;
   const t = l.tracks;
   const at = currentTrack();
-  $("homeNote").textContent = `Podcast ${t.short.label.toLowerCase()} ${fmt(t.short.duration)}, ${t.long.label.toLowerCase()} ${fmt(t.long.duration)}` +
-    (at.position ? `, đang dừng ở ${fmt(at.position)} của ${at.label.toLowerCase()}.` : ".") + " Cần có mạng để nghe.";
+  const keys = Object.keys(t);
+  let note = "";
+  if (keys.length === 0) {
+    note = "Bài này không có audio.";
+  } else if (keys.length === 1) {
+    const tr = t[keys[0]];
+    note = `Podcast ${tr.label.toLowerCase()} ${fmt(tr.duration)}` + (at && at.position ? `, đang dừng ở ${fmt(at.position)}.` : ".");
+  } else {
+    note = `Podcast ${t.short.label.toLowerCase()} ${fmt(t.short.duration)}, ${t.long.label.toLowerCase()} ${fmt(t.long.duration)}` +
+      (at && at.position ? `, đang dừng ở ${fmt(at.position)} của ${at.label.toLowerCase()}.` : ".");
+  }
+  if (keys.length > 0) note += " Cần có mạng để nghe.";
+  $("homeNote").textContent = note;
   const box = $("summary");
   box.textContent = "";
   l.summary.forEach((text, i) => {
@@ -164,9 +185,11 @@ function renderList() {
 }
 
 function renderTrackButtons() {
-  const t = state.lesson.tracks;
+  const t = state.lesson ? state.lesson.tracks : {};
   $$("[data-track]").forEach(b => {
     const k = b.dataset.track, tr = t[k];
+    b.hidden = !tr;
+    if (!tr) return;
     b.setAttribute("aria-pressed", String(k === state.track));
     b.textContent = "";
     if (b.classList.contains("track-big")) {
@@ -185,6 +208,14 @@ function renderTrackButtons() {
 
 function renderTime() {
   const t = currentTrack();
+  if (!t) {
+    $$('[data-time="now"]').forEach(e => { e.textContent = "0:00"; });
+    $$('[data-time="total"]').forEach(e => { e.textContent = "0:00"; });
+    $("dockNote").textContent = "Cần có mạng để nghe";
+    $("miniLabel").textContent = "";
+    renderBars(0);
+    return;
+  }
   const pos = pendingSeek ?? (audio.src ? audio.currentTime : t.position);
   $$('[data-time="now"]').forEach(e => { e.textContent = fmt(pos); });
   $$('[data-time="total"]').forEach(e => { e.textContent = fmt(t.duration); });
@@ -217,6 +248,7 @@ function renderPlay() {
 // ---------- Podcast ----------
 function loadTrack() {
   const t = currentTrack();
+  if (!t) return;
   const url = new URL(t.url, location.href).href;
   if (audio.src !== url) {
     audio.src = url;
@@ -230,7 +262,8 @@ audio.addEventListener("loadedmetadata", () => {
   renderTime();
 });
 audio.addEventListener("timeupdate", () => {
-  if (pendingSeek === null) currentTrack().position = audio.currentTime;
+  const t = currentTrack();
+  if (pendingSeek === null && t) t.position = audio.currentTime;
   renderTime();
   if (Date.now() - lastSaved > 10000) savePosition();
 });
@@ -261,14 +294,16 @@ function togglePlay() {
 }
 function seekBy(sec) {
   loadTrack();
+  const t = currentTrack();
+  if (!t) return;
   if (pendingSeek !== null) pendingSeek = Math.max(0, pendingSeek + sec);
-  else audio.currentTime = Math.max(0, Math.min(currentTrack().duration, audio.currentTime + sec));
-  currentTrack().position = pendingSeek ?? audio.currentTime;
+  else audio.currentTime = Math.max(0, Math.min(t.duration, audio.currentTime + sec));
+  t.position = pendingSeek ?? audio.currentTime;
   renderTime();
   savePosition();
 }
 function switchTrack(key) {
-  if (key === state.track || !state.lesson.tracks[key]) return;
+  if (!state.lesson || key === state.track || !state.lesson.tracks[key]) return;
   const wasPlaying = !audio.paused;
   audio.pause();
   savePosition();
@@ -293,7 +328,7 @@ function cycleSpeed() {
   renderSpeed();
 }
 function setupMediaSession() {
-  if (!("mediaSession" in navigator)) return;
+  if (!("mediaSession" in navigator) || !state.lesson) return;
   navigator.mediaSession.metadata = new MediaMetadata({ title: state.lesson.title, artist: "Học AI", album: lessonNo(state.lesson) });
   navigator.mediaSession.setActionHandler("play", () => audio.play());
   navigator.mediaSession.setActionHandler("pause", () => audio.pause());
@@ -398,11 +433,12 @@ function setLesson(id) {
   audio.removeAttribute("src");
   pendingSeek = null;
   state.lesson = l;
-  state.track = l.track in l.tracks ? l.track : "long";
+  state.track = l.track in l.tracks ? l.track : (Object.keys(l.tracks)[0] || null);
   renderLesson();
 }
 async function startLesson(id) {
   if (id) setLesson(id);
+  if (!state.lesson) return;
   await api(`/api/lessons/${state.lesson.id}/start`, send("POST"));
   await refresh();
   go("review");
@@ -499,19 +535,20 @@ async function refresh() {
   state.due = d.due_total;
   state.nextDue = d.next_due;
   const again = d.lessons.find(x => x.id === current);
-  state.lesson = again || d.lessons.find(x => x.status === "in_progress") || d.lessons.find(x => x.status === "new") || d.lessons[0];
-  if (!again) state.track = state.lesson.track in state.lesson.tracks ? state.lesson.track : "long";
-  if (again && heard && audio.src) again.tracks[state.track].position = heard[state.track].position;
+  state.lesson = again || d.lessons.find(x => x.status === "in_progress") || d.lessons.find(x => x.status === "new") || d.lessons[0] || null;
+  if (state.lesson && !again) state.track = state.lesson.track in state.lesson.tracks ? state.lesson.track : (Object.keys(state.lesson.tracks)[0] || null);
+  if (again && heard && audio.src && state.track && again.tracks[state.track]) {
+    again.tracks[state.track].position = heard[state.track].position;
+  }
   renderLesson();
   renderList();
+  const askOn = state.lesson && state.lesson.ask;
+  $("askInput").disabled = !askOn;
+  $("askSend").disabled = !askOn;
+  $("askInput").placeholder = askOn ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
 }
 (async function init() {
   state.me = await api("/api/me");
-  if (!state.me.ai) {
-    $("askInput").disabled = true;
-    $("askInput").placeholder = "Ô Hỏi chưa được bật.";
-    $("askSend").disabled = true;
-  }
   renderFlow();
   renderSpeed();
   renderThemeLabel();

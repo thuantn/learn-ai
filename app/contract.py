@@ -11,6 +11,14 @@ from mutagen.mp3 import MP3
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 FILE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 ALLOWED_EXT = {"html", "js", "css", "json", "svg", "png", "jpg", "webp", "woff2", "mp3", "md"}
+MAX_JSON = 1 * 1024 * 1024
+MAX_PAGE = 5 * 1024 * 1024
+MAX_CONTENT = 1 * 1024 * 1024
+MAX_TEXT = 4000
+MAX_TITLE = 200
+MAX_TOPIC = 80
+MAX_DESCRIPTION = 1000
+MAX_LESSONS = 50
 
 
 @dataclass
@@ -27,13 +35,19 @@ def errors(problems):
 
 
 def read_json_file(path):
-    """Reads JSON accepting UTF-8 BOM and CRLF line endings."""
+    """Reads JSON accepting UTF-8 BOM and CRLF line endings, rejecting huge files."""
+    path = pathlib.Path(path)
+    if path.stat().st_size > MAX_JSON:
+        raise ValueError("File JSON quá lớn.")
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def audio_seconds(path):
-    """Returns the duration of an MP3 file rounded to the nearest second."""
-    return int(round(MP3(str(path)).info.length))
+    """Returns the duration of an MP3 file rounded to the nearest second, or None on error."""
+    try:
+        return int(round(MP3(str(path)).info.length))
+    except Exception:
+        return None
 
 
 class PageChecker(HTMLParser):
@@ -90,6 +104,10 @@ def _bad_name(value):
     return not isinstance(value, str) or not FILE_RE.match(value)
 
 
+def _too_long(value, limit):
+    return isinstance(value, str) and len(value) > limit
+
+
 def check_package(root, profile="basic"):
     """Validates a lesson package and returns a list of Problems."""
     root = pathlib.Path(root)
@@ -103,7 +121,7 @@ def check_package(root, profile="basic"):
     try:
         package = read_json_file(package_path)
     except Exception as exc:
-        problems.append(Problem("package.json", "json_parse", f"Không đọc được package.json: {exc}"))
+        problems.append(Problem("package.json", "json_parse", "Không đọc được package.json."))
         return problems
 
     if not isinstance(package, dict):
@@ -121,11 +139,27 @@ def check_package(root, profile="basic"):
     title = package.get("title", "")
     if not isinstance(title, str) or not title.strip():
         problems.append(Problem("package.json", "empty_text", "Package đang trống tiêu đề."))
+    elif _too_long(title, MAX_TITLE):
+        problems.append(Problem("package.json", "text_too_long", f"Tiêu đề quá dài: {len(title)} > {MAX_TITLE}."))
+
+    topic = package.get("topic", "")
+    if not isinstance(topic, str):
+        problems.append(Problem("package.json", "bad_type", "Topic phải là chuỗi."))
+    elif _too_long(topic, MAX_TOPIC):
+        problems.append(Problem("package.json", "text_too_long", f"Topic quá dài: {len(topic)} > {MAX_TOPIC}."))
+
+    description = package.get("description", "")
+    if not isinstance(description, str):
+        problems.append(Problem("package.json", "bad_type", "Description phải là chuỗi."))
+    elif _too_long(description, MAX_DESCRIPTION):
+        problems.append(Problem("package.json", "text_too_long", f"Mô tả quá dài: {len(description)} > {MAX_DESCRIPTION}."))
 
     lessons = package.get("lessons", [])
     if not isinstance(lessons, list):
         problems.append(Problem("package.json", "lessons", "Danh sách bài phải là một mảng."))
         return problems
+    if not (1 <= len(lessons) <= MAX_LESSONS):
+        problems.append(Problem("package.json", "lessons_count", f"Số bài phải từ 1 đến {MAX_LESSONS}."))
 
     seen_ids = set()
     for lesson_id in lessons:
@@ -175,7 +209,7 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
     try:
         lesson = read_json_file(lesson_path)
     except Exception as exc:
-        problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "json_parse", f"Không đọc được lesson.json: {exc}"))
+        problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "json_parse", "Không đọc được lesson.json."))
         return problems
 
     if not isinstance(lesson, dict):
@@ -193,6 +227,8 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
         for item in summary:
             if not isinstance(item, str) or not item.strip():
                 problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "empty_text", "Ý tóm tắt không được để trống."))
+            elif _too_long(item, MAX_TEXT):
+                problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "text_too_long", "Ý tóm tắt quá dài."))
 
     cards = lesson.get("cards", [])
     if not isinstance(cards, list) or not (5 <= len(cards) <= 30):
@@ -212,9 +248,13 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
             q = card.get("q", "")
             if not isinstance(q, str) or not q.strip():
                 problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "empty_text", f"Thẻ {cid} đang trống câu hỏi."))
+            elif _too_long(q, MAX_TEXT):
+                problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "text_too_long", f"Câu hỏi thẻ {cid} quá dài."))
             a = card.get("a", "")
             if not isinstance(a, str) or not a.strip():
                 problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "empty_text", f"Thẻ {cid} đang trống câu trả lời."))
+            elif _too_long(a, MAX_TEXT):
+                problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "text_too_long", f"Câu trả lời thẻ {cid} quá dài."))
 
     quiz = lesson.get("quiz", [])
     if not isinstance(quiz, list):
@@ -234,10 +274,25 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
             q_text = q.get("q", "")
             if not isinstance(q_text, str) or not q_text.strip():
                 problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "empty_text", f"Câu {qid} đang trống nội dung."))
+            elif _too_long(q_text, MAX_TEXT):
+                problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "text_too_long", f"Câu {qid} quá dài."))
             options = q.get("options", [])
             answer = q.get("answer")
             if not isinstance(options, list) or not options or not isinstance(answer, int) or isinstance(answer, bool) or answer < 0 or answer >= len(options):
                 problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "quiz_answer", f"Câu {qid} có đáp án không hợp lệ."))
+            else:
+                bad_option = False
+                for opt in options:
+                    if not isinstance(opt, str) or not opt.strip():
+                        bad_option = True
+                        break
+                if bad_option:
+                    problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "quiz_answer", f"Câu {qid} có lựa chọn không hợp lệ."))
+            why = q.get("why", "")
+            if not isinstance(why, str):
+                problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "bad_type", f"Giải thích câu {qid} phải là chuỗi."))
+            elif why and _too_long(why, MAX_TEXT):
+                problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "text_too_long", f"Giải thích câu {qid} quá dài."))
         if profile == "full" and len(quiz) != 8:
             problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "full_quiz", "Mức Đầy đủ cần đúng 8 câu quiz."))
 
@@ -254,28 +309,43 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
             if not isinstance(track, dict):
                 problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "tracks_format", f"Track {key} không phải đối tượng."))
                 continue
+            label = track.get("label", "")
+            if not isinstance(label, str) or not label.strip():
+                problems.append(Problem(f"lessons/{lesson_id}/lesson.json", "track_label", f"Track {key} thiếu nhãn."))
             fname = track.get("file", "")
             if _bad_name(fname) or not fname:
                 problems.append(Problem(f"lessons/{lesson_id}/audio/{fname}", "track_missing", f"Không tìm thấy file audio: {fname}."))
-            elif not (lesson_dir / "audio" / fname).is_file():
-                problems.append(Problem(f"lessons/{lesson_id}/audio/{fname}", "track_missing", f"Không tìm thấy file audio: {fname}."))
+            else:
+                audio_path = lesson_dir / "audio" / fname
+                if not audio_path.is_file():
+                    problems.append(Problem(f"lessons/{lesson_id}/audio/{fname}", "track_missing", f"Không tìm thấy file audio: {fname}."))
+                else:
+                    seconds = audio_seconds(audio_path)
+                    if seconds is None or seconds == 0:
+                        problems.append(Problem(f"lessons/{lesson_id}/audio/{fname}", "track_bad", f"File mp3 không đọc được hoặc thời lượng bằng 0: {fname}."))
 
     page_path = lesson_dir / "page" / "index.html"
     if page_path.is_file():
-        try:
-            html = page_path.read_text(encoding="utf-8")
-            checker = PageChecker()
-            checker.feed(html)
-            problems.extend(checker.problems)
-            if profile == "full" and ("Khởi động" not in html or "Đi sâu" not in html):
-                problems.append(Problem(f"lessons/{lesson_id}/page/index.html", "full_sections", "Mức Đầy đủ cần có chuỗi 'Khởi động' và 'Đi sâu' trong trang."))
-        except Exception as exc:
-            problems.append(Problem(f"lessons/{lesson_id}/page/index.html", "html_parse", f"Không đọc được trang: {exc}"))
+        if page_path.stat().st_size > MAX_PAGE:
+            problems.append(Problem(f"lessons/{lesson_id}/page/index.html", "page_size", "Trang bài quá lớn."))
+        else:
+            try:
+                html = page_path.read_text(encoding="utf-8")
+                checker = PageChecker()
+                checker.feed(html)
+                problems.extend(checker.problems)
+                if profile == "full" and ("Khởi động" not in html or "Đi sâu" not in html):
+                    problems.append(Problem(f"lessons/{lesson_id}/page/index.html", "full_sections", "Mức Đầy đủ cần có chuỗi 'Khởi động' và 'Đi sâu' trong trang."))
+            except Exception as exc:
+                problems.append(Problem(f"lessons/{lesson_id}/page/index.html", "html_parse", "Không đọc được trang."))
     else:
         problems.append(Problem(f"lessons/{lesson_id}/page/index.html", "page_missing", f"Thiếu trang bài: lessons/{lesson_id}/page/index.html."))
 
     content_path = lesson_dir / "content.md"
-    if profile == "full" and not content_path.is_file():
+    if content_path.is_file():
+        if content_path.stat().st_size > MAX_CONTENT:
+            problems.append(Problem(f"lessons/{lesson_id}/content.md", "content_size", "File content.md quá lớn."))
+    elif profile == "full":
         problems.append(Problem(f"lessons/{lesson_id}/content.md", "full_content", "Mức Đầy đủ cần có file content.md."))
 
     return problems

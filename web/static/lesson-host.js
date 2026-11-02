@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id);
   const $$ = sel => [...document.querySelectorAll(sel)];
 
-  const lessonId = (location.pathname.match(/^\/lesson\/([a-z0-9][a-z0-9-]*)$/) || [])[1];
+  const lessonId = (location.pathname.match(/^\/lesson\/(p[0-9a-f]{12}\.[a-z0-9-]+)$/) || [])[1];
   let frameInfo = null;
   let iframe = null;
   let port = null;
@@ -89,8 +89,9 @@
         return;
       }
       frameInfo = await r.json();
-      $("lessonTitle").textContent = frameInfo.title;
+      $("lessonTitle").textContent = `${frameInfo.title} — ${frameInfo.author}`;
       $("askLessonShort").textContent = frameInfo.title;
+      $("lessonAskBtn").hidden = !frameInfo.ask;
       createIframe(frameInfo.url, frameInfo.title);
       showFrame();
     } catch (e) {

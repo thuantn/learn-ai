@@ -4,12 +4,15 @@
   python -m app.cli end-sessions NAME    ends all sessions
   python -m app.cli remove-user NAME     deletes the account and its data
   python -m app.cli list-users
+  python -m app.cli import-package PATH OWNER  install or update a package (PATH may be a directory for now)
 """
+import pathlib
 import secrets
 import sys
 import time
 
-from . import auth, db
+from . import auth, catalog, contract, db
+from .contract import errors
 
 
 def temp_password():
@@ -25,6 +28,21 @@ def main(argv):
             for r in c.execute("SELECT name, must_change FROM users ORDER BY name"):
                 print(r["name"], "(chưa đổi mật khẩu tạm)" if r["must_change"] else "")
             return 0
+        if cmd == "import-package":
+            if len(argv) != 3:
+                print(__doc__)
+                return 2
+            owner = argv[2].strip().lower()
+            if not c.execute("SELECT 1 FROM users WHERE name=?", (owner,)).fetchone():
+                print("Không có tài khoản này.")
+                return 1
+            path = pathlib.Path(argv[1])
+            if errors(contract.check_package(path)):
+                print("Package không hợp lệ.")
+                return 1
+            result = catalog.install_version(owner, path)
+            print(result["id"])
+            return 0
         if not name or cmd not in ("add-user", "reset-password", "end-sessions", "remove-user"):
             print(__doc__)
             return 2
@@ -34,7 +52,7 @@ def main(argv):
                 print("Tài khoản đã có. Dùng reset-password.")
                 return 1
             password = temp_password()
-            c.execute("INSERT INTO users VALUES(?,?,1,?)", (name, auth.hash_password(password), time.time()))
+            c.execute("INSERT INTO users(name, pw_hash, must_change, created_at) VALUES(?,?,1,?)", (name, auth.hash_password(password), time.time()))
             print(f"Mật khẩu tạm của {name}: {password}")
             return 0
         if not exists:

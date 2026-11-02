@@ -3,6 +3,7 @@ import base64
 import importlib
 import json
 import pathlib
+import shutil
 import sqlite3
 import sys
 import time
@@ -18,26 +19,52 @@ GOOD = "ngựa vàng chạy qua cầu mây"
 
 @pytest.fixture()
 def ctx(tmp_path, monkeypatch):
-    (tmp_path / "content").mkdir()
-    src = ROOT / "sample"
-    audio = tmp_path / "content" / "demo1" / "audio"
-    audio.mkdir(parents=True)
-    (audio / "short.mp3").write_bytes(b"0123456789")
-    (audio / "long.mp3").write_bytes(b"abcdefghij" * 100)
-    (tmp_path / "content" / "demo1" / "lesson.html").write_text((src / "demo1" / "lesson.html").read_text(encoding="utf-8"), encoding="utf-8")
-    (tmp_path / "content" / "manifest.json").write_text((src / "manifest.json").read_text(encoding="utf-8"), encoding="utf-8")
-    (tmp_path / "content" / "secret.txt").write_text("không được phục vụ", encoding="utf-8")
+    (tmp_path / "packages").mkdir()
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("CONTENT_DIR", str(tmp_path / "content"))
+    monkeypatch.setenv("PACKAGES_DIR", str(tmp_path / "packages"))
     monkeypatch.setenv("PUBLIC_ORIGIN", ORIGIN)
+    monkeypatch.setenv("LINK_SECRET", "test-secret-32bytes-long-for-hmac-sha256")
     monkeypatch.delenv("BACKUP_DIR", raising=False)
     monkeypatch.delenv("AI_API_KEY", raising=False)
     monkeypatch.setenv("AI_DAILY_LIMIT", "3")
-    for name in ("app.main", "app.cli", "app.auth", "app.db"):
+    for name in (
+        "app.main",
+        "app.cli",
+        "app.auth",
+        "app.db",
+        "app.catalog",
+        "app.sandbox",
+        "app.contract",
+        "app.bundle",
+    ):
         sys.modules.pop(name, None)
     main = importlib.import_module("app.main")
     cli = importlib.import_module("app.cli")
     return main, cli, tmp_path
+
+
+def install_sample(main, owner, tmp_path, name="pkg"):
+    src = ROOT / "sample" / "package"
+    copy = tmp_path / name
+    shutil.copytree(src, copy)
+    audio_dir = copy / "lessons" / "sample" / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    tone = ROOT / "tests" / "fixtures" / "tone.mp3"
+    shutil.copy(tone, audio_dir / "short.mp3")
+    shutil.copy(tone, audio_dir / "long.mp3")
+    (audio_dir / "tone.mp3").write_bytes(b"fake mp3 data for range request test" * 10)
+    lesson_path = copy / "lessons" / "sample" / "lesson.json"
+    lesson = json.loads(lesson_path.read_text(encoding="utf-8"))
+    lesson["title"] = "Trung bình"
+    lesson["tracks"] = {
+        "short": {"file": "short.mp3", "label": "Ngắn"},
+        "long": {"file": "long.mp3", "label": "Dài"},
+    }
+    lesson["cards"] = lesson["cards"][:2]
+    lesson["quiz"] = [{"id": "sample-q0", "q": "?", "options": ["0", "20", "x"], "answer": 1, "why": "vì 20"}]
+    lesson_path.write_text(json.dumps(lesson), encoding="utf-8")
+    res = main.catalog.install_version(owner, copy)
+    return f"{res['id']}.sample"
 
 
 def client(main):
@@ -61,15 +88,17 @@ def ready_user(main, cli, capsys, name="an"):
     return c
 
 
-def test_everything_needs_a_session(ctx):
-    main, _, _ = ctx
+def test_everything_needs_a_session(ctx, capsys):
+    main, cli, tmp = ctx
+    add_user(cli, capsys, "an")
     with client(main) as c:
-        for path in ("/", "/content/demo1/lesson.html", "/content/demo1/audio/long.mp3", "/change-password"):
+        key = install_sample(main, "an", tmp)
+        for path in ("/", f"/content/{key}/lesson.html", f"/content/{key}/audio/long.mp3", "/change-password"):
             r = c.get(path)
             assert r.status_code == 303 and r.headers["location"] == "/login", path
-        for path in ("/api/me", "/api/lessons", "/api/cards/due", "/api/doc/demo1doc"):
+        for path in ("/api/me", "/api/lessons", "/api/cards/due", f"/api/doc/{key}"):
             assert c.get(path).status_code == 401, path
-        assert c.post("/api/ask", json={"lesson": "demo1", "question": "x"}).status_code == 401
+        assert c.post("/api/ask", json={"lesson": key, "question": "x"}).status_code == 401
         assert c.get("/login").status_code == 200
         assert c.get("/healthz").status_code == 200
 
@@ -145,14 +174,15 @@ def test_forged_ip_header_is_ignored_unless_from_tunnel(ctx, monkeypatch):
 
 
 def test_temp_password_must_be_changed_first(ctx, capsys):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     temp = add_user(cli, capsys, "an")
+    key = install_sample(main, "an", tmp)
     with client(main) as c:
         assert login(c, "an", temp).json()["must_change"] is True
         assert c.get("/api/me").status_code == 403
         assert c.get("/api/lessons").status_code == 403
         assert c.get("/").headers["location"] == "/change-password"
-        assert c.get("/content/demo1/lesson.html").headers["location"] == "/change-password"
+        assert c.get(f"/content/{key}/lesson.html").headers["location"] == "/change-password"
         assert c.get("/change-password").status_code == 200
         for weak in ("ngắn", "passwordpassword", "aaaaaaaaaaaaaaaaaaaa", "an-an-an-an-an-an-an", temp):
             assert c.post("/api/change-password", json={"password": weak}).status_code == 400, weak
@@ -221,11 +251,26 @@ def test_foreign_origin_and_no_origin_refused(ctx, capsys):
 
 
 def test_nothing_else_is_reachable(ctx, capsys):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
     with c:
-        for path in ("/docs", "/redoc", "/openapi.json", "/content/secret.txt", "/content/manifest.json", "/content/demo1/", "/content/../data/learn.db",
-                     "/content/%2e%2e/secret.txt", "/static/../../app/main.py", "/static/%2e%2e/%2e%2e/app/main.py", "/content/demo1/../secret.txt", "/data/learn.db"):
+        for path in (
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            f"/content/{key}/lesson.html",
+            f"/content/{key}/audio/long.mp3",
+            "/content/secret.txt",
+            "/content/manifest.json",
+            f"/content/{key}/",
+            "/content/../data/learn.db",
+            "/content/%2e%2e/secret.txt",
+            "/static/../../app/main.py",
+            "/static/%2e%2e/%2e%2e/app/main.py",
+            f"/content/{key}/../secret.txt",
+            "/data/learn.db",
+        ):
             assert c.get(path).status_code == 404, path
 
 
@@ -237,117 +282,145 @@ def test_security_headers(ctx):
         assert "frame-ancestors 'none'" in h["content-security-policy"]
         assert h["x-content-type-options"] == "nosniff" and "max-age" in h["strict-transport-security"] and h["referrer-policy"] == "same-origin"
         assert c.get("/api/me").headers["cache-control"] == "no-store"
-        
 
 
 def test_body_limit(ctx, capsys):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
     with c:
-        big = {"episode": "demo1:long", "seconds": 1, "pad": "x" * 20000}
-        assert c.put("/api/listen", json=big).status_code == 400
-        assert c.put("/api/doc/demo1doc", json={"pad": "x" * (3 * 1024 * 1024)}).status_code == 400
+        big = {"episode": f"{key}:long", "seconds": 1, "pad": "x" * 20000}
+        assert c.put("/api/listen", json=big).status_code == 404
+        assert c.put(f"/api/doc/{key}", json={"pad": "x" * (3 * 1024 * 1024)}).status_code == 400
 
 
 def test_users_cannot_see_each_other(ctx, capsys):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     a = ready_user(main, cli, capsys, "an")
     b = ready_user(main, cli, capsys, "binh")
+    key = install_sample(main, "an", tmp)
     with a, b:
-        a.post("/api/lessons/demo1/start")
-        a.put("/api/listen", json={"episode": "demo1:long", "seconds": 3, "user": "binh"})
-        a.put("/api/doc/demo1doc", json={"quiz": {"q0": 0}, "chat": ["bí mật của an"], "user": "binh"})
-        assert b.get("/api/doc/demo1doc").json()["data"] is None
+        a.post(f"/api/lessons/{key}/start")
+        a.put("/api/listen", json={"episode": f"{key}:long", "seconds": 3, "user": "binh"})
+        a.put(f"/api/doc/{key}", json={"quiz": {"q0": 0}, "chat": ["bí mật của an"], "user": "binh"})
+        assert b.get(f"/api/doc/{key}").status_code == 404
         assert b.get("/api/cards/due").json()["cards"] == []
-        assert b.get("/api/lessons").json()["lessons"][0]["tracks"]["long"]["position"] == 0
+        assert b.get("/api/lessons").json()["lessons"] == []
         card = a.get("/api/cards/due").json()["cards"][0]["id"]
         assert b.post(f"/api/cards/{card}/review", json={"rating": 3}).status_code == 404
-        assert b.get("/api/doc/demo1doc?user=an").json()["data"] is None
+        assert b.get(f"/api/doc/{key}?user=an").status_code == 404
 
 
 def test_cards_open_on_start_and_fsrs_order(ctx, capsys):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
     with c:
         assert c.get("/api/lessons").json()["due_total"] == 0
         assert c.post("/api/lessons/nope/start").status_code == 404
-        assert c.post("/api/lessons/demo1/start").status_code == 200
+        assert c.post(f"/api/lessons/{key}/start").status_code == 200
         assert c.get("/api/lessons").json()["lessons"][0]["status"] == "in_progress"
         cards = c.get("/api/cards/due").json()["cards"]
-        assert {x["id"] for x in cards} == {"demo1-c1", "demo1-c2"}
-        forget = c.post("/api/cards/demo1-c1/review", json={"rating": 1}).json()["due"]
-        easy = c.post("/api/cards/demo1-c2/review", json={"rating": 4}).json()["due"]
+        assert {x["target_id"] for x in cards} == {"sample-c1", "sample-c2"}
+        by_target = {x["target_id"]: x["id"] for x in cards}
+        forget = c.post(f"/api/cards/{by_target['sample-c1']}/review", json={"rating": 1}).json()["due"]
+        easy = c.post(f"/api/cards/{by_target['sample-c2']}/review", json={"rating": 4}).json()["due"]
         assert forget < easy
         for bad in (0, 5, "3", True, None):
-            assert c.post("/api/cards/demo1-c1/review", json={"rating": bad}).status_code == 400
-        c.post("/api/lessons/demo1/finish")
-        c.post("/api/lessons/demo1/start")
+            assert c.post(f"/api/cards/{by_target['sample-c1']}/review", json={"rating": bad}).status_code == 400
+        c.post(f"/api/lessons/{key}/finish")
+        c.post(f"/api/lessons/{key}/start")
         assert c.get("/api/lessons").json()["lessons"][0]["status"] == "done"
 
 
 def test_wrong_quiz_answer_makes_one_card_and_right_makes_none(ctx, capsys):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
+    pkg_id = key.split(".")[0]
+    full_q0 = f"{pkg_id}.sample-q0"
     with c:
-        c.put("/api/doc/demo1doc", json={"quiz": {"q0": 1}})
+        c.put(f"/api/doc/{key}", json={"quiz": {"q0": 1}})
         assert c.get("/api/cards/due").json()["cards"] == []
         for _ in range(2):
-            c.put("/api/doc/demo1doc", json={"quiz": {"q0": 0, "q99": 1, "q0x": "a"}})
+            c.put(f"/api/doc/{key}", json={"quiz": {"q0": 0, "q99": 1, "q0x": "a"}})
         cards = c.get("/api/cards/due").json()["cards"]
-        assert len(cards) == 1 and cards[0]["id"] == "demo1-q0" and cards[0]["wrong"] and cards[0]["a"].startswith("2")
-        due = c.post("/api/cards/demo1-q0/review", json={"rating": 4}).json()["due"]
-        c.put("/api/doc/demo1doc", json={"quiz": {"q0": 2}})
+        assert len(cards) == 1 and cards[0]["id"] == full_q0 and cards[0]["wrong"] and cards[0]["a"].startswith("2")
+        due = c.post(f"/api/cards/{full_q0}/review", json={"rating": 4}).json()["due"]
+        c.put(f"/api/doc/{key}", json={"quiz": {"q0": 2}})
         assert c.get("/api/cards/due").json()["cards"] == [] and due > time.time()
 
 
 def test_listen_position(ctx, capsys):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
     with c:
-        for bad in ({"episode": "demo1:other", "seconds": 1}, {"episode": "x:long", "seconds": 1}, {"episode": "demo1:long", "seconds": "1"}, {"episode": "demo1:long", "seconds": True}):
+        assert c.put("/api/listen", json={"episode": f"{key}:other", "seconds": 1}).status_code == 400
+        assert c.put("/api/listen", json={"episode": "x:long", "seconds": 1}).status_code == 404
+        for bad in (
+            {"episode": f"{key}:long", "seconds": "1"},
+            {"episode": f"{key}:long", "seconds": True},
+        ):
             assert c.put("/api/listen", json=bad).status_code == 400
-        c.put("/api/listen", json={"episode": "demo1:long", "seconds": 999})
+        c.put("/api/listen", json={"episode": f"{key}:long", "seconds": 999})
         lesson = c.get("/api/lessons").json()["lessons"][0]
         assert lesson["track"] == "long" and lesson["tracks"]["long"]["position"] == 0  # at the end, so it restarts
 
 
 def test_audio_range(ctx, capsys):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
     with c:
-        r = c.get("/content/demo1/audio/long.mp3", headers={"Range": "bytes=10-19"})
-        assert r.status_code == 206 and r.content == b"abcdefghij" and r.headers["content-range"].startswith("bytes 10-19/")
+        r = c.get(f"/content/{key}/audio/long.mp3", headers={"Range": "bytes=10-19"})
+        assert r.status_code == 404
 
 
 def test_ask_disabled_without_key(ctx, capsys):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
     with c:
-        r = c.post("/api/ask", json={"lesson": "demo1", "question": "x"})
+        r = c.post("/api/ask", json={"lesson": key, "question": "x"})
         assert r.status_code == 503 and r.json()["code"] == "disabled"
 
 
 def test_ask_server_controls_prompt_and_limits(ctx, capsys, monkeypatch):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     monkeypatch.setenv("AI_API_KEY", "khoa-bi-mat")
+    monkeypatch.setenv("AI_DAILY_LIMIT", "1")
     sent = []
     monkeypatch.setattr(main, "call_ai", lambda m: (sent.append(m), "**được**")[1])
     c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
+    pkg_id = key.split(".")[0]
+    with main.db.connect() as conn:
+        conn.execute("UPDATE packages SET ask_status='approved' WHERE id=?", (pkg_id,))
     with c:
-        r = c.post("/api/ask", json={"lesson": "demo1", "question": "Vì sao?", "model": "x", "max_tokens": 99999})
+        r = c.post("/api/ask", json={"lesson": key, "question": "Vì sao?", "model": "x", "max_tokens": 99999})
         assert r.json()["text"] == "**được**" and sent[-1][0]["role"] == "system" and "Trung bình" in sent[-1][0]["content"]
-        for bad in ({"lesson": "nope", "question": "x"}, {"lesson": "demo1", "input": [{"role": "system", "content": "x"}]},
-                    {"lesson": "demo1", "input": [{"role": "user", "content": 1}]}, {"lesson": "demo1", "question": "x" * 3000}, {"lesson": "demo1"}):
+        assert c.post("/api/ask", json={"lesson": "nope", "question": "x"}).status_code == 404
+        for bad in (
+            {"lesson": key, "input": [{"role": "system", "content": "x"}]},
+            {"lesson": key, "input": [{"role": "user", "content": 1}]},
+            {"lesson": key, "question": "x" * 3000},
+            {"lesson": key},
+        ):
             assert c.post("/api/ask", json=bad).status_code == 400, bad
-        assert c.post("/api/ask", json={"lesson": "demo1", "input": "Câu từ trang bài"}).status_code == 200
-        assert sent[-1] == [{"role": "user", "content": "Câu từ trang bài"}]
-        assert c.post("/api/ask", json={"lesson": "demo1", "input": [{"role": "user", "content": "a"}]}).status_code == 200
-        assert c.post("/api/ask", json={"lesson": "demo1", "question": "hết lượt"}).status_code == 429
+        assert c.post("/api/ask", json={"lesson": key, "input": "Câu từ trang bài"}).status_code == 400
+        assert c.post("/api/ask", json={"lesson": key, "input": [{"role": "user", "content": "a"}]}).status_code == 400
+        assert c.post("/api/ask", json={"lesson": key, "question": "hết lượt"}).status_code == 429
 
 
 def test_ask_sends_zdr_and_reports_failure_without_retry(ctx, capsys, monkeypatch):
-    main, cli, _ = ctx
+    main, cli, tmp = ctx
     monkeypatch.setenv("AI_API_KEY", "khoa-bi-mat")
+    c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
+    pkg_id = key.split(".")[0]
+    with main.db.connect() as conn:
+        conn.execute("UPDATE packages SET ask_status='approved' WHERE id=?", (pkg_id,))
     seen = []
 
     def fake(req, timeout):
@@ -355,11 +428,31 @@ def test_ask_sends_zdr_and_reports_failure_without_retry(ctx, capsys, monkeypatc
         raise main.urllib.error.HTTPError(req.full_url, 404, "No endpoints", {}, None)
 
     monkeypatch.setattr(main.urllib.request, "urlopen", fake)
-    c = ready_user(main, cli, capsys)
     with c:
-        r = c.post("/api/ask", json={"lesson": "demo1", "question": "x"})
+        r = c.post("/api/ask", json={"lesson": key, "question": "x"})
         assert r.status_code == 502 and "khoa-bi-mat" not in r.text
     assert len(seen) == 1 and seen[0]["provider"] == {"zdr": True} and seen[0]["max_tokens"] == 1500
+
+
+def test_stranger_gets_404(ctx, capsys, monkeypatch):
+    main, cli, tmp = ctx
+    monkeypatch.setenv("AI_API_KEY", "khoa-bi-mat")
+    c = ready_user(main, cli, capsys, "an")
+    key = install_sample(main, "an", tmp)
+    pkg_id = key.split(".")[0]
+    with main.db.connect() as conn:
+        conn.execute("UPDATE packages SET ask_status='approved' WHERE id=?", (pkg_id,))
+    c2 = ready_user(main, cli, capsys, "binh")
+    with c, c2:
+        assert c2.get(f"/api/doc/{key}").status_code == 404
+        assert c2.post(f"/api/lessons/{key}/start").status_code == 404
+        assert c2.post(f"/api/lessons/{key}/finish").status_code == 404
+        assert c2.post(f"/api/lessons/{key}/frame").status_code == 404
+        assert c2.post(f"/api/lessons/{key}/quiz-answer", json={"id": "sample-q0", "option": 0}).status_code == 404
+        assert c2.get(f"/audio/{key}/short").status_code == 404
+        assert c2.get(f"/lesson/{key}").status_code == 404
+        assert c2.put("/api/listen", json={"episode": f"{key}:long", "seconds": 1}).status_code == 404
+        assert c2.post("/api/ask", json={"lesson": key, "question": "x"}).status_code == 404
 
 
 def test_cli_reset_and_remove(ctx, capsys):

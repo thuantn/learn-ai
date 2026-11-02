@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fsrs import Card, Rating, Scheduler
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auth, db, sandbox
+from . import auth, catalog, db, sandbox
 
 log = logging.getLogger("learn")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -53,18 +53,6 @@ scheduler = Scheduler(enable_fuzzing=False)
 ask_recent = defaultdict(list)
 
 
-def load_content():
-    root = pathlib.Path(os.environ.get("CONTENT_DIR", "sample")).resolve()
-    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    lessons = sorted(manifest["lessons"], key=lambda x: -x["order"])
-    return root, lessons, set(manifest["files"])
-
-
-CONTENT_ROOT, LESSONS, FILES = load_content()
-BY_ID = {x["id"]: x for x in LESSONS}
-BY_DOC = {x["doc"]: x for x in LESSONS}
-
-
 async def backup_loop(dest):
     while True:
         try:
@@ -77,6 +65,12 @@ async def backup_loop(dest):
 @asynccontextmanager
 async def lifespan(_):
     db.init()
+    if not os.environ.get("LINK_SECRET"):
+        raise RuntimeError("LINK_SECRET is required")
+    packages_dir = pathlib.Path(os.environ.get("PACKAGES_DIR", "packages"))
+    packages_dir.mkdir(parents=True, exist_ok=True)
+    (packages_dir / ".staging").mkdir(exist_ok=True)
+    catalog.sweep()
     dest = os.environ.get("BACKUP_DIR")
     task = asyncio.create_task(backup_loop(dest)) if dest else None
     yield
@@ -117,7 +111,7 @@ async def guard(request: Request, call_next):
         if k == "X-Frame-Options" and request.url.path.startswith("/s/"):
             continue
         resp.headers.setdefault(k, v)
-    if not request.url.path.startswith(("/static/", "/content/", "/s/")):
+    if not request.url.path.startswith(("/static/", "/s/")):
         resp.headers.setdefault("Cache-Control", "no-store")
     return resp
 
@@ -200,8 +194,9 @@ async def change_password_page(request: Request):
 
 @app.get("/lesson/{lesson_id}")
 async def lesson_page(lesson_id: str, request: Request):
-    if not known_lesson(lesson_id):
-        return Response(status_code=404)
+    with db.connect() as c:
+        if not catalog.lesson_for(c, request.state.user, lesson_id):
+            return Response(status_code=404)
     return page("lesson.html")
 
 
@@ -271,82 +266,98 @@ async def change_password(request: Request):
 
 @app.get("/api/me")
 async def me(request: Request):
-    return {"id": request.state.user, "ai": bool(os.environ.get("AI_API_KEY"))}
+    return {"id": request.state.user}
 
 
 # ---------- Lessons ----------
-
-def track_public(lesson, positions):
-    out = {}
-    for key, t in lesson["tracks"].items():
-        pos = positions.get(f"{lesson['id']}:{key}", 0)
-        out[key] = {"url": "/content/" + t["file"], "duration": t["duration"], "position": 0 if pos >= t["duration"] - 15 else pos, "label": t["label"]}
-    return out
-
-
-def card_front(lesson_id, card_id, user_wrong):
-    if card_id in user_wrong:
-        return user_wrong[card_id]
-    for card in BY_ID[lesson_id]["cards"]:
-        if card["id"] == card_id:
-            return card["q"], card["a"]
-    return None
-
 
 @app.get("/api/lessons")
 async def lessons(request: Request):
     user = request.state.user
     now = time.time()
     with db.connect() as c:
+        lessons = catalog.lessons_for(c, user)
         progress = {r["lesson"]: r for r in c.execute("SELECT * FROM lesson_progress WHERE user=?", (user,))}
         positions = {r["episode"]: r["seconds"] for r in c.execute("SELECT episode, seconds FROM listen_pos WHERE user=?", (user,))}
-        due = {r["lesson"]: r["n"] for r in c.execute("SELECT lesson, count(*) n FROM card_state WHERE user=? AND due<=? GROUP BY lesson", (user, now))}
-        upcoming = c.execute("SELECT min(due) m FROM card_state WHERE user=? AND due>?", (user, now)).fetchone()["m"]
+        due_rows, lesson_map = _due_rows(c, user, now)
+        due = {}
+        for r in due_rows:
+            due[r["lesson"]] = due.get(r["lesson"], 0) + 1
+        next_due = None
+        for r in c.execute(
+            "SELECT card_id, lesson, due FROM card_state WHERE user=? AND due>? ORDER BY due",
+            (user, now),
+        ).fetchall():
+            lesson = lesson_map.get(r["lesson"])
+            if not lesson:
+                continue
+            bare_id = r["card_id"].split(".", 1)[1]
+            if _find_card(lesson, bare_id):
+                next_due = r["due"]
+                break
     out = []
-    for x in LESSONS:
+    for x in lessons:
         p = progress.get(x["id"])
+        tracks = {}
+        for key, t in x["tracks"].items():
+            pos = positions.get(f"{x['id']}:{key}", 0)
+            tracks[key] = {
+                "url": t["url"],
+                "duration": t["duration"],
+                "position": 0 if pos >= t["duration"] - 15 else pos,
+                "label": t["label"],
+            }
         out.append({
-            "id": x["id"], "title": x["title"], "order": x["order"], "page": "/content/" + x["page"], "summary": x["summary"],
-            "status": p["status"] if p else "new", "track": p["track"] if p else "long", "due": due.get(x["id"], 0),
-            "tracks": track_public(x, positions), "suggest": [card["q"] for card in x["cards"][:3]],
+            "id": x["id"],
+            "title": x["title"],
+            "order": x["ord"] + 1,
+            "page": x["page"],
+            "summary": x["summary"],
+            "status": p["status"] if p else "new",
+            "track": p["track"] if p else next(iter(tracks), "long"),
+            "due": due.get(x["id"], 0),
+            "tracks": tracks,
+            "suggest": [card["q"] for card in x["cards"][:3]],
+            "package_id": x["package_id"],
+            "package_title": x["package_title"],
+            "author": x["author"],
+            "mine": x["mine"],
+            "ask": bool(os.environ.get("AI_API_KEY")) and x["ask_status"] == "approved",
         })
-    return {"lessons": out, "due_total": sum(due.values()), "next_due": upcoming}
-
-
-def known_lesson(lesson_id):
-    return BY_ID.get(lesson_id)
+    return {"lessons": out, "due_total": sum(due.values()), "next_due": next_due}
 
 
 @app.post("/api/lessons/{lesson_id}/start")
 async def start_lesson(lesson_id: str, request: Request):
-    lesson = known_lesson(lesson_id)
-    if not lesson:
-        return bad(404, "lesson", "Không có bài này.")
     user = request.state.user
     now = time.time()
     with db.connect() as c:
+        lesson = catalog.lesson_for(c, user, lesson_id)
+        if not lesson:
+            return bad(404, "lesson", "Không có bài này.")
         c.execute(
-            "INSERT INTO lesson_progress VALUES(?,?,'in_progress','long',?) ON CONFLICT(user, lesson) DO NOTHING",
-            (user, lesson_id, now),
+            "INSERT INTO lesson_progress VALUES(?,?,'in_progress',?,?) ON CONFLICT(user, lesson) DO NOTHING",
+            (user, lesson_id, next(iter(lesson["tracks"]), "long"), now),
         )
         for card in lesson["cards"]:
-            add_card(c, user, card["id"], lesson_id, now)
+            add_card(c, user, card["id"], lesson_id, lesson["package_id"], now)
     return {"ok": True}
 
 
-def add_card(c, user, card_id, lesson_id, now):
+def add_card(c, user, bare_id, lesson_key, package_id, now):
     c.execute(
         "INSERT INTO card_state VALUES(?,?,?,?,?) ON CONFLICT(user, card_id) DO NOTHING",
-        (user, card_id, lesson_id, now, Card().to_json()),
+        (user, catalog.progress_id(package_id, bare_id), lesson_key, now, Card().to_json()),
     )
 
 
 @app.post("/api/lessons/{lesson_id}/finish")
 async def finish_lesson(lesson_id: str, request: Request):
-    if not known_lesson(lesson_id):
-        return bad(404, "lesson", "Không có bài này.")
+    user = request.state.user
     with db.connect() as c:
-        c.execute("UPDATE lesson_progress SET status='done', updated_at=? WHERE user=? AND lesson=?", (time.time(), request.state.user, lesson_id))
+        if not catalog.lesson_for(c, user, lesson_id):
+            return bad(404, "lesson", "Không có bài này.")
+        c.execute("UPDATE lesson_progress SET status='done', updated_at=? WHERE user=? AND lesson=?", (time.time(), user, lesson_id))
     return {"ok": True}
 
 
@@ -354,49 +365,52 @@ async def finish_lesson(lesson_id: str, request: Request):
 async def lesson_frame(lesson_id: str, request: Request):
     if not sandbox._secret():
         return Response(status_code=404)
-    lesson = known_lesson(lesson_id)
-    if not lesson:
-        return bad(404, "lesson", "Không có bài này.")
     user = request.state.user
     now = time.time()
     with db.connect() as c:
+        lesson = catalog.lesson_for(c, user, lesson_id)
+        if not lesson:
+            return bad(404, "lesson", "Không có bài này.")
         row = c.execute("SELECT rowid FROM users WHERE name=?", (user,)).fetchone()
         if not row:
             return bad(403, "user", "Tài khoản không tồn tại.")
         user_id = row["rowid"]
         expires = now + int(os.environ.get("LINK_TTL_SECONDS", str(sandbox.LINK_TTL_SECONDS_DEFAULT)))
         token = sandbox.make_token(user_id, lesson_id, now)
-        learner = sandbox.learner_code(user_id)
+        learner = sandbox.learner_code(user_id, lesson["package_id"])
     return JSONResponse({
         "url": f"/s/{token}/page/index.html",
         "expires": expires,
         "doc": lesson["doc"],
         "title": lesson["title"],
         "learner": learner,
+        "author": lesson["author"],
+        "package_title": lesson["package_title"],
+        "ask": bool(os.environ.get("AI_API_KEY")) and lesson["ask_status"] == "approved",
     })
 
 
 @app.post("/api/lessons/{lesson_id}/quiz-answer")
 async def lesson_quiz_answer(lesson_id: str, request: Request):
-    lesson = known_lesson(lesson_id)
-    if not lesson:
-        return bad(404, "lesson", "Không có bài này.")
     data = await read_json(request)
     qid = str((data or {}).get("id", ""))
     option = (data or {}).get("option")
     if not isinstance(option, int) or isinstance(option, bool):
         return bad(400, "input", "Dữ liệu không hợp lệ.")
-    quiz_item = None
-    for q in lesson["quiz"]:
-        if q["id"] == qid:
-            quiz_item = q
-            break
-    if not quiz_item:
-        return bad(400, "input", "Không có câu hỏi này.")
-    correct = option == quiz_item["answer"]
     user, now = request.state.user, time.time()
-    if not correct:
-        with db.connect() as c:
+    with db.connect() as c:
+        lesson = catalog.lesson_for(c, user, lesson_id)
+        if not lesson:
+            return bad(404, "lesson", "Không có bài này.")
+        quiz_item = None
+        for q in lesson["quiz"]:
+            if q["id"] == qid:
+                quiz_item = q
+                break
+        if not quiz_item:
+            return bad(400, "input", "Không có câu hỏi này.")
+        correct = option == quiz_item["answer"]
+        if not correct:
             _record_wrong(c, user, lesson, quiz_item, now)
     return {"correct": correct}
 
@@ -404,37 +418,112 @@ async def lesson_quiz_answer(lesson_id: str, request: Request):
 @app.put("/api/listen")
 async def save_listen(request: Request):
     data = await read_json(request)
-    lesson_id, _, track = str((data or {}).get("episode", "")).partition(":")
-    lesson = known_lesson(lesson_id)
+    episode = str((data or {}).get("episode", ""))
+    lesson_key, _, track = episode.partition(":")
     seconds = (data or {}).get("seconds")
-    if not lesson or track not in lesson["tracks"] or not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
-        return bad(400, "input", "Dữ liệu không hợp lệ.")
-    seconds = max(0.0, min(float(seconds), float(lesson["tracks"][track]["duration"])))
     user, now = request.state.user, time.time()
     with db.connect() as c:
-        c.execute("INSERT OR REPLACE INTO listen_pos VALUES(?,?,?,?)", (user, f"{lesson_id}:{track}", seconds, now))
+        lesson = catalog.lesson_for(c, user, lesson_key)
+        if not lesson:
+            return bad(404, "lesson", "Không có bài này.")
+        if track not in lesson["tracks"] or not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+            return bad(400, "input", "Dữ liệu không hợp lệ.")
+        seconds = max(0.0, min(float(seconds), float(lesson["tracks"][track]["duration"])))
+        c.execute("INSERT OR REPLACE INTO listen_pos VALUES(?,?,?,?)", (user, episode, seconds, now))
         c.execute(
             "INSERT INTO lesson_progress VALUES(?,?,'in_progress',?,?) ON CONFLICT(user, lesson) DO UPDATE SET track=excluded.track, updated_at=excluded.updated_at",
-            (user, lesson_id, track, now),
+            (user, lesson_key, track, now),
         )
     return {"ok": True}
 
 
+@app.get("/audio/{lesson_id}/{track}")
+async def audio(lesson_id: str, track: str, request: Request):
+    user = request.state.user
+    with db.connect() as c:
+        lesson = catalog.lesson_for(c, user, lesson_id)
+        if not lesson or track not in lesson["tracks"]:
+            return Response(status_code=404)
+        base = catalog.lesson_dir(c, lesson_id)
+    if not base:
+        return Response(status_code=404)
+    target = base / "audio" / lesson["tracks"][track]["file"]
+    if target.is_symlink() or not target.is_file():
+        return Response(status_code=404)
+    return FileResponse(
+        target,
+        media_type="audio/mpeg",
+        headers={
+            "Accept-Ranges": "bytes",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=300",
+        },
+    )
+
+
 # ---------- Flashcards ----------
+
+def _due_rows(c, user, now):
+    """Returns card_state rows due<=now whose lesson is accessible and whose bare id still exists."""
+    lessons = catalog.lessons_for(c, user)
+    lesson_map = {l["id"]: l for l in lessons}
+    rows = c.execute(
+        "SELECT card_id, lesson, due FROM card_state WHERE user=? AND due<=? ORDER BY due",
+        (user, now),
+    ).fetchall()
+    out = []
+    for r in rows:
+        lesson = lesson_map.get(r["lesson"])
+        if not lesson:
+            continue
+        bare_id = r["card_id"].split(".", 1)[1]
+        if not _find_card(lesson, bare_id):
+            continue
+        out.append(r)
+    return out, lesson_map
+
+
+def _find_card(lesson, bare_id):
+    for card in lesson["cards"]:
+        if card["id"] == bare_id:
+            return card["q"], card["a"], "card"
+    for q in lesson["quiz"]:
+        if q["id"] == bare_id:
+            answer = q["options"][q["answer"]]
+            if q.get("why"):
+                answer = f"{answer}. {q['why']}"
+            return q["q"], answer, "quiz"
+    return None
+
 
 @app.get("/api/cards/due")
 async def due_cards(request: Request):
     user, now = request.state.user, time.time()
     with db.connect() as c:
-        rows = c.execute("SELECT card_id, lesson FROM card_state WHERE user=? AND due<=? ORDER BY due LIMIT 200", (user, now)).fetchall()
-        wrong = {r["card_id"]: (r["question"], r["answer"]) for r in c.execute("SELECT card_id, question, answer FROM wrong_card WHERE user=?", (user,))}
+        rows, lesson_map = _due_rows(c, user, now)
+        wrong = {r["card_id"] for r in c.execute("SELECT card_id FROM wrong_card WHERE user=?", (user,))}
     out = []
     for r in rows:
-        if r["lesson"] not in BY_ID:
+        lesson = lesson_map.get(r["lesson"])
+        if not lesson:
             continue
-        pair = card_front(r["lesson"], r["card_id"], wrong)
-        if pair:
-            out.append({"id": r["card_id"], "lesson": r["lesson"], "lesson_order": BY_ID[r["lesson"]]["order"], "q": pair[0], "a": pair[1], "wrong": r["card_id"] in wrong})
+        bare_id = r["card_id"].split(".", 1)[1]
+        pair = _find_card(lesson, bare_id)
+        if not pair:
+            continue
+        q, a, target_type = pair
+        out.append({
+            "id": r["card_id"],
+            "lesson": r["lesson"],
+            "lesson_order": lesson["ord"] + 1,
+            "q": q,
+            "a": a,
+            "wrong": r["card_id"] in wrong,
+            "target_type": target_type,
+            "target_id": bare_id,
+        })
+        if len(out) >= 200:
+            break
     return {"cards": out}
 
 
@@ -446,8 +535,12 @@ async def review_card(card_id: str, request: Request):
         return bad(400, "input", "Dữ liệu không hợp lệ.")
     user, now = request.state.user, time.time()
     with db.connect() as c:
-        row = c.execute("SELECT card_json FROM card_state WHERE user=? AND card_id=?", (user, card_id)).fetchone()
+        row = c.execute("SELECT card_json, lesson FROM card_state WHERE user=? AND card_id=?", (user, card_id)).fetchone()
         if not row:
+            return bad(404, "card", "Không có thẻ này.")
+        lesson = catalog.lesson_for(c, user, row["lesson"])
+        bare_id = card_id.partition(".")[2]
+        if not bare_id or not lesson or not _find_card(lesson, bare_id):
             return bad(404, "card", "Không có thẻ này.")
         card, _ = scheduler.review_card(Card.from_json(row["card_json"]), Rating(rating), review_datetime=datetime.now(timezone.utc))
         due = card.due.timestamp()
@@ -456,22 +549,23 @@ async def review_card(card_id: str, request: Request):
     return {"due": due}
 
 
-# ---------- Lesson page storage, used through the shim ----------
+# ---------- Lesson page storage, used through the bridge ----------
 
 def _record_wrong(c, user, lesson, q, now):
     """Stores one wrong quiz answer as a wrong card and opens an FSRS card."""
+    card_id = catalog.progress_id(lesson["package_id"], q["id"])
     answer = q["options"][q["answer"]]
     if q.get("why"):
         answer = f"{answer}. {q['why']}"
     c.execute(
         "INSERT INTO wrong_card VALUES(?,?,?,?,?,?) ON CONFLICT(user, card_id) DO NOTHING",
-        (user, q["id"], lesson["id"], q["q"], answer, now),
+        (user, card_id, lesson["id"], q["q"], answer, now),
     )
-    add_card(c, user, q["id"], lesson["id"], now)
+    add_card(c, user, q["id"], lesson["id"], lesson["package_id"], now)
 
 
 def record_wrong_answers(c, user, lesson, quiz, now):
-    """The browser only says which option was picked; whether it was right comes from the manifest."""
+    """The browser only says which option was picked; whether it was right comes from the lesson."""
     if not isinstance(quiz, dict):
         return
     for i, q in enumerate(lesson["quiz"]):
@@ -483,23 +577,25 @@ def record_wrong_answers(c, user, lesson, quiz, now):
 
 @app.get("/api/doc/{name}")
 async def get_doc(name: str, request: Request):
-    if name not in BY_DOC:
-        return bad(404, "doc", "Không có tài liệu này.")
+    user = request.state.user
     with db.connect() as c:
-        row = c.execute("SELECT body FROM user_doc WHERE user=? AND name=?", (request.state.user, name)).fetchone()
+        if not catalog.lesson_for(c, user, name):
+            return bad(404, "doc", "Không có tài liệu này.")
+        row = c.execute("SELECT body FROM user_doc WHERE user=? AND name=?", (user, name)).fetchone()
     return {"data": json.loads(row["body"]) if row else None}
 
 
 @app.put("/api/doc/{name}")
 async def put_doc(name: str, request: Request):
-    lesson = BY_DOC.get(name)
-    if not lesson:
-        return bad(404, "doc", "Không có tài liệu này.")
+    user = request.state.user
     data = await read_json(request, DOC_LIMIT)
     if data is None:
         return bad(400, "input", "Dữ liệu không hợp lệ.")
-    user, now = request.state.user, time.time()
+    now = time.time()
     with db.connect() as c:
+        lesson = catalog.lesson_for(c, user, name)
+        if not lesson:
+            return bad(404, "doc", "Không có tài liệu này.")
         c.execute("INSERT OR REPLACE INTO user_doc VALUES(?,?,?,?)", (user, name, json.dumps(data, ensure_ascii=False), now))
         record_wrong_answers(c, user, lesson, data.get("quiz"), now)
     return {"ok": True}
@@ -507,30 +603,14 @@ async def put_doc(name: str, request: Request):
 
 # ---------- Ask box ----------
 
-def clean_input(raw):
-    """A string or a list of user and assistant turns. System prompts come only from this server."""
-    if isinstance(raw, str):
-        return [{"role": "user", "content": raw}] if 0 < len(raw) <= ASK_INPUT_MAX else None
-    if not isinstance(raw, list) or not raw or len(raw) > 100:
-        return None
-    total = 0
-    out = []
-    for m in raw:
-        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant") or not isinstance(m.get("content"), str):
-            return None
-        total += len(m["content"])
-        out.append({"role": m["role"], "content": m["content"]})
-    if total > ASK_INPUT_MAX or out[-1]["role"] != "user":
-        return None
-    return out
-
-
 def lesson_context(lesson):
     points = "\n".join("- " + p for p in lesson["summary"])
     cards = "\n".join(f"- {x['q']} {x['a']}" for x in lesson["cards"])
+    content = lesson.get("content", "")[:60000]
     return (
         f"Bạn là trợ giảng cho bài \"{lesson['title']}\". Trả lời bằng tiếng Việt, ngắn gọn và chính xác, dùng Markdown; công thức viết trong \\( \\). "
         "Nếu câu hỏi ngoài phạm vi học tập, hãy nói vậy.\n\n"
+        f"Nội dung bài:\n{content}\n\n"
         f"Tóm tắt bài:\n{points}\n\nÝ quan trọng:\n{cards}"
     )
 
@@ -569,19 +649,22 @@ async def ask(request: Request):
     if not os.environ.get("AI_API_KEY"):
         return bad(503, "disabled", "Ô Hỏi chưa được bật.")
     data = await read_json(request, ASK_INPUT_MAX * 4)
-    lesson = known_lesson((data or {}).get("lesson"))
+    user = request.state.user
+    lesson_key = (data or {}).get("lesson")
+    with db.connect() as c:
+        lesson = catalog.lesson_for(c, user, lesson_key)
     if not lesson:
+        return bad(404, "lesson", "Không có bài này.")
+    if lesson["ask_status"] != "approved":
+        return bad(503, "disabled", "Ô Hỏi chưa được bật.")
+    question = (data or {}).get("question")
+    if not isinstance(question, str):
         return bad(400, "input", "Dữ liệu không hợp lệ.")
-    if isinstance(data.get("question"), str):
-        question = data["question"].strip()
-        if not 0 < len(question) <= QUESTION_MAX:
-            return bad(400, "input", "Câu hỏi quá dài hoặc đang trống.")
-        messages = [{"role": "system", "content": lesson_context(lesson)}, {"role": "user", "content": question}]
-    else:
-        messages = clean_input(data.get("input"))
-        if not messages:
-            return bad(400, "input", "Dữ liệu không hợp lệ.")
-    if not await asyncio.to_thread(take_quota, request.state.user):
+    question = question.strip()
+    if not 0 < len(question) <= QUESTION_MAX:
+        return bad(400, "input", "Câu hỏi quá dài hoặc đang trống.")
+    messages = [{"role": "system", "content": lesson_context(lesson)}, {"role": "user", "content": question}]
+    if not await asyncio.to_thread(take_quota, user):
         return bad(429, "rate_limited", "Đã hết lượt hỏi. Thử lại sau.")
     try:
         text = await asyncio.to_thread(call_ai, messages)
@@ -610,13 +693,6 @@ def serve_listed(root, rel, extra=None):
     return FileResponse(target, media_type=kind, headers=headers)
 
 
-@app.get("/content/{rel:path}")
-async def content(rel: str):
-    if rel not in FILES:
-        return Response(status_code=404)
-    return serve_listed(CONTENT_ROOT, rel)
-
-
 STATIC_FILES = {p.relative_to(WEB / "static").as_posix() for p in (WEB / "static").rglob("*") if p.is_file()} if (WEB / "static").exists() else set()
 
 
@@ -639,13 +715,12 @@ async def sandbox_file(token: str, rel: str, request: Request):
     parsed = sandbox.read_token(token, time.time())
     if parsed is None:
         return Response(status_code=403)
-    user_id, lesson = parsed
+    user_id, lesson_key = parsed
     with db.connect() as c:
-        if not sandbox.can_read(c, user_id, lesson):
+        if not sandbox.can_read(c, user_id, lesson_key):
             return Response(status_code=403)
-    packages_dir = pathlib.Path(os.environ.get("PACKAGES_DIR", "packages")).resolve()
-    base = (packages_dir / "lessons" / lesson).resolve()
-    if not base.is_dir():
+        base = catalog.lesson_dir(c, lesson_key)
+    if not base or not base.is_dir():
         return Response(status_code=404)
     page_root = (base / "page").resolve()
     audio_root = (base / "audio").resolve()

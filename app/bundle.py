@@ -1,15 +1,17 @@
 """Pack and safely unpack lesson packages."""
+import logging
 import pathlib
 import shutil
-import stat
 import zipfile
 
 from .contract import Problem, check_package, errors
 
+log = logging.getLogger("learn")
 MAX_ZIP = 90 * 1024 * 1024
 MAX_UNPACKED = 400 * 1024 * 1024
 MAX_FILES = 2000
 MAX_RATIO = 100
+MAX_NON_MP3 = 32 * 1024 * 1024
 
 
 def pack(root, out):
@@ -44,16 +46,17 @@ def safe_extract(zip_path, dest):
         try:
             zip_size = zip_path.stat().st_size
         except OSError as exc:
-            return [Problem(str(zip_path), "zip_bad", f"Không đọc được file zip: {exc}")]
+            log.warning("cannot read zip: %s", exc)
+            return [Problem("upload.zip", "zip_bad", "Không đọc được file zip.")]
 
         if zip_size > MAX_ZIP:
-            return [Problem(str(zip_path), "zip_size", f"Zip quá lớn: {zip_size} > {MAX_ZIP} byte.")]
+            return [Problem("upload.zip", "zip_size", f"Zip quá lớn: {zip_size} > {MAX_ZIP} byte.")]
 
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
                 infos = zf.infolist()
                 if len(infos) > MAX_FILES:
-                    return [Problem(str(zip_path), "zip_size", f"Quá nhiều file: {len(infos)} > {MAX_FILES}.")]
+                    return [Problem("upload.zip", "zip_size", f"Quá nhiều file: {len(infos)} > {MAX_FILES}.")]
 
                 problems = []
                 seen = set()
@@ -65,6 +68,9 @@ def safe_extract(zip_path, dest):
                     norm = name.replace("\\", "/")
                     if norm.startswith("/"):
                         problems.append(Problem(name, "zip_path", f"Đường dẫn tuyệt đối không được phép: {name}."))
+                        continue
+                    if norm == ".":
+                        problems.append(Problem(name, "zip_path", f"Tên file không hợp lệ: {name}."))
                         continue
                     is_dir = norm.endswith("/")
                     parts = [p for p in norm.split("/") if p != "."]
@@ -111,6 +117,9 @@ def safe_extract(zip_path, dest):
                         break
                     if not info.filename.lower().endswith(".mp3"):
                         uncompressed = target.stat().st_size
+                        if uncompressed > MAX_NON_MP3:
+                            problems.append(Problem(info.filename, "zip_size", f"File không phải mp3 quá lớn: {uncompressed} > {MAX_NON_MP3} byte."))
+                            break
                         compressed = info.compress_size or 1
                         if uncompressed / compressed > MAX_RATIO:
                             problems.append(Problem(info.filename, "zip_size", f"Tỉ lệ nén quá cao: {uncompressed}/{compressed}."))
@@ -125,8 +134,10 @@ def safe_extract(zip_path, dest):
                 tmp_dir.rename(dest)
                 return []
         except zipfile.BadZipFile as exc:
-            return [Problem(str(zip_path), "zip_bad", f"Không phải file zip hợp lệ: {exc}")]
+            log.warning("bad zip file: %s", exc)
+            return [Problem("upload.zip", "zip_bad", "Không phải file zip hợp lệ.")]
 
     except Exception as exc:
+        log.warning("extract failed: %s", exc)
         cleanup()
-        return [Problem(str(zip_path), "zip_bad", f"Lỗi khi giải nén: {exc}")]
+        return [Problem("upload.zip", "zip_bad", "Lỗi khi giải nén.")]

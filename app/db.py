@@ -1,10 +1,12 @@
 """SQLite: one connection per call, WAL so reads never wait for writes."""
 import glob
+import logging
 import os
 import sqlite3
 import time
 
-SCHEMA = """
+MIGRATIONS = [
+    """
 CREATE TABLE IF NOT EXISTS users(
   name TEXT PRIMARY KEY, pw_hash TEXT NOT NULL, must_change INTEGER NOT NULL, created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions(
@@ -30,7 +32,34 @@ CREATE TABLE IF NOT EXISTS user_doc(
   PRIMARY KEY(user, name));
 CREATE TABLE IF NOT EXISTS ask_usage(
   user TEXT NOT NULL REFERENCES users(name) ON DELETE CASCADE, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY(user, day));
-"""
+""",
+    """
+ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN quota_bytes INTEGER;
+CREATE TABLE packages(
+  id TEXT PRIMARY KEY, owner TEXT NOT NULL REFERENCES users(name) ON DELETE CASCADE,
+  slug TEXT NOT NULL, title TEXT NOT NULL, topic TEXT NOT NULL, description TEXT NOT NULL,
+  version INTEGER NOT NULL, size_bytes INTEGER NOT NULL, link_nonce TEXT,
+  ask_status TEXT NOT NULL DEFAULT 'none', ask_hash TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL,
+  UNIQUE(owner, slug));
+CREATE TABLE package_lessons(
+  key TEXT PRIMARY KEY, package_id TEXT NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL, data TEXT NOT NULL);
+CREATE INDEX package_lessons_pkg ON package_lessons(package_id);
+CREATE TABLE package_access(
+  package_id TEXT NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+  user TEXT NOT NULL REFERENCES users(name) ON DELETE CASCADE,
+  via TEXT NOT NULL, granted_at REAL NOT NULL, revoked_at REAL, PRIMARY KEY(package_id, user));
+CREATE INDEX package_access_user ON package_access(user);
+CREATE TABLE feedback(
+  id INTEGER PRIMARY KEY, package_id TEXT NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+  lesson TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, kind TEXT NOT NULL,
+  author TEXT REFERENCES users(name) ON DELETE SET NULL, body TEXT NOT NULL, created_at REAL NOT NULL);
+CREATE INDEX feedback_pkg ON feedback(package_id, created_at);
+""",
+]
+
+log = logging.getLogger("learn")
 
 
 def path():
@@ -45,11 +74,39 @@ def connect():
     return c
 
 
+def _backup_premigrate(dest_dir, version):
+    os.makedirs(dest_dir, exist_ok=True)
+    target = os.path.join(dest_dir, time.strftime(f"premigrate-v{version}-%Y%m%d-%H%M%S.db", time.gmtime()))
+    src = connect()
+    dst = sqlite3.connect(target)
+    with dst:
+        src.backup(dst)
+    dst.close()
+    src.close()
+    return target
+
+
 def init():
     os.makedirs(os.path.dirname(path()), exist_ok=True)
     with connect() as c:
         c.execute("PRAGMA journal_mode=WAL")
-        c.executescript(SCHEMA)
+        version = c.execute("PRAGMA user_version").fetchone()[0]
+        if version >= len(MIGRATIONS):
+            return
+        has_users = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
+        ).fetchone() is not None
+        backup_dir = os.environ.get("BACKUP_DIR")
+        if has_users and backup_dir:
+            _backup_premigrate(backup_dir, version)
+        for i in range(version, len(MIGRATIONS)):
+            sql = MIGRATIONS[i]
+            try:
+                c.executescript(f"BEGIN; {sql}; PRAGMA user_version={i + 1}; COMMIT;")
+            except Exception:
+                log.exception("migration %d failed", i + 1)
+                c.execute("ROLLBACK")
+                raise
 
 
 def backup(dest_dir, keep=14):
