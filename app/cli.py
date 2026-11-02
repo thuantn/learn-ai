@@ -5,6 +5,8 @@
   python -m app.cli remove-user NAME     deletes the account and its data
   python -m app.cli list-users
   python -m app.cli import-package ZIP OWNER  install or update a package
+  python -m app.cli set-admin NAME on|off
+  python -m app.cli set-quota NAME GB
 """
 import pathlib
 import secrets
@@ -46,6 +48,23 @@ def main(argv):
             print(catalog.install_version(owner, info["dir"])["id"])
             shutil.rmtree(info["dir"], ignore_errors=True)
             return 0
+        if cmd in ("set-admin", "set-quota"):
+            value = argv[2] if len(argv) == 3 else ""
+            if not c.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone():
+                print("Không có tài khoản này.")
+                return 1
+            if cmd == "set-admin" and value in ("on", "off"):
+                c.execute("UPDATE users SET is_admin=? WHERE name=?", (int(value == "on"), name))
+                db.admin_log(c, "cli", "set_admin", name, value)
+                print("Đã đổi quyền admin.")
+                return 0
+            if cmd == "set-quota" and value.isdigit() and 1 <= int(value) <= 100:
+                c.execute("UPDATE users SET quota_bytes=? WHERE name=?", (int(value) * 1024 ** 3, name))
+                db.admin_log(c, "cli", "set_quota", name, value + " GB")
+                print("Đã đổi hạn mức.")
+                return 0
+            print(__doc__)
+            return 2
         if not name or cmd not in ("add-user", "reset-password", "end-sessions", "remove-user"):
             print(__doc__)
             return 2

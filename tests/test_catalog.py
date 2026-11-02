@@ -39,6 +39,8 @@ def _fresh_db_module(tmp_path, monkeypatch, **extra_env):
         "app.bundle",
         "app.uploads",
         "app.ai",
+        "app.admin",
+        "app.web_util",
     ):
         sys.modules.pop(name, None)
     for k, v in extra_env.items():
