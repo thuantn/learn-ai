@@ -32,10 +32,11 @@ APP_GID=
 PUBLIC_ORIGIN=https://your.host
 ALLOWED_HOSTS=your.host
 TUNNEL_TOKEN=
+LINK_SECRET=        # random 32+ byte string for signed sandbox lesson URLs
 AI_API_KEY=         # optional; the Ask box says it is off without it. Use a key with a spending cap.
 ```
 
-Put packaged lessons in `./content`, make `./data` and `./backups` owned by that user, then:
+Put packaged lessons in `./content`, lesson packages for the sandbox in `./packages`, make `./data` and `./backups` owned by that user, then:
 
 ```
 docker compose up -d --build

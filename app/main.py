@@ -17,16 +17,19 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fsrs import Card, Rating, Scheduler
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auth, db
+from . import auth, db, sandbox
 
 log = logging.getLogger("learn")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 WEB = pathlib.Path(__file__).resolve().parent.parent / "web"
 VN = timezone(timedelta(hours=7))
+_PUBLIC_ORIGIN = os.environ.get("PUBLIC_ORIGIN") or "'self'"
+_FRAME_SRC = f"{_PUBLIC_ORIGIN}/s/" if _PUBLIC_ORIGIN != "'self'" else "'self'"
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; "
-    "connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    "connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; "
+    f"frame-src {_FRAME_SRC}"
 )
 HEADERS = {
     "Content-Security-Policy": CSP,
@@ -111,8 +114,10 @@ def bad(status, code, message):
 async def guard(request: Request, call_next):
     resp = await _guarded(request, call_next)
     for k, v in HEADERS.items():
+        if k == "X-Frame-Options" and request.url.path.startswith("/s/"):
+            continue
         resp.headers.setdefault(k, v)
-    if not request.url.path.startswith(("/static/", "/content/")):
+    if not request.url.path.startswith(("/static/", "/content/", "/s/")):
         resp.headers.setdefault("Cache-Control", "no-store")
     return resp
 
@@ -122,7 +127,7 @@ async def _guarded(request, call_next):
     path = request.url.path
     if request.method not in ("GET", "HEAD") and not origin_ok(request):
         return bad(403, "origin", "Yêu cầu không hợp lệ.")
-    if path in PUBLIC_PATHS or path.startswith("/static/"):
+    if path in PUBLIC_PATHS or path.startswith("/static/") or path.startswith("/s/"):
         return await call_next(request)
     found = await asyncio.to_thread(auth.lookup_session, request.cookies.get(auth.cookie_name()))
     wants_api = path.startswith("/api/")
@@ -338,6 +343,57 @@ async def finish_lesson(lesson_id: str, request: Request):
     return {"ok": True}
 
 
+@app.post("/api/lessons/{lesson_id}/frame")
+async def lesson_frame(lesson_id: str, request: Request):
+    if not sandbox._secret():
+        return Response(status_code=404)
+    lesson = known_lesson(lesson_id)
+    if not lesson:
+        return bad(404, "lesson", "Không có bài này.")
+    user = request.state.user
+    now = time.time()
+    with db.connect() as c:
+        row = c.execute("SELECT rowid FROM users WHERE name=?", (user,)).fetchone()
+        if not row:
+            return bad(403, "user", "Tài khoản không tồn tại.")
+        user_id = row["rowid"]
+        expires = now + int(os.environ.get("LINK_TTL_SECONDS", str(sandbox.LINK_TTL_SECONDS_DEFAULT)))
+        token = sandbox.make_token(user_id, lesson_id, now)
+        learner = sandbox.learner_code(user_id)
+    return JSONResponse({
+        "url": f"/s/{token}/page/index.html",
+        "expires": expires,
+        "doc": lesson["doc"],
+        "title": lesson["title"],
+        "learner": learner,
+    })
+
+
+@app.post("/api/lessons/{lesson_id}/quiz-answer")
+async def lesson_quiz_answer(lesson_id: str, request: Request):
+    lesson = known_lesson(lesson_id)
+    if not lesson:
+        return bad(404, "lesson", "Không có bài này.")
+    data = await read_json(request)
+    qid = str((data or {}).get("id", ""))
+    option = (data or {}).get("option")
+    if not isinstance(option, int) or isinstance(option, bool):
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+    quiz_item = None
+    for q in lesson["quiz"]:
+        if q["id"] == qid:
+            quiz_item = q
+            break
+    if not quiz_item:
+        return bad(400, "input", "Không có câu hỏi này.")
+    correct = option == quiz_item["answer"]
+    user, now = request.state.user, time.time()
+    if not correct:
+        with db.connect() as c:
+            _record_wrong(c, user, lesson, quiz_item, now)
+    return {"correct": correct}
+
+
 @app.put("/api/listen")
 async def save_listen(request: Request):
     data = await read_json(request)
@@ -395,6 +451,18 @@ async def review_card(card_id: str, request: Request):
 
 # ---------- Lesson page storage, used through the shim ----------
 
+def _record_wrong(c, user, lesson, q, now):
+    """Stores one wrong quiz answer as a wrong card and opens an FSRS card."""
+    answer = q["options"][q["answer"]]
+    if q.get("why"):
+        answer = f"{answer}. {q['why']}"
+    c.execute(
+        "INSERT INTO wrong_card VALUES(?,?,?,?,?,?) ON CONFLICT(user, card_id) DO NOTHING",
+        (user, q["id"], lesson["id"], q["q"], answer, now),
+    )
+    add_card(c, user, q["id"], lesson["id"], now)
+
+
 def record_wrong_answers(c, user, lesson, quiz, now):
     """The browser only says which option was picked; whether it was right comes from the manifest."""
     if not isinstance(quiz, dict):
@@ -403,14 +471,7 @@ def record_wrong_answers(c, user, lesson, quiz, now):
         picked = quiz.get(f"q{i}")
         if not isinstance(picked, int) or isinstance(picked, bool) or picked == q["answer"]:
             continue
-        answer = q["options"][q["answer"]]
-        if q.get("why"):
-            answer = f"{answer}. {q['why']}"
-        c.execute(
-            "INSERT INTO wrong_card VALUES(?,?,?,?,?,?) ON CONFLICT(user, card_id) DO NOTHING",
-            (user, q["id"], lesson["id"], q["q"], answer, now),
-        )
-        add_card(c, user, q["id"], lesson["id"], now)
+        _record_wrong(c, user, lesson, q, now)
 
 
 @app.get("/api/doc/{name}")
@@ -528,7 +589,7 @@ async def ask(request: Request):
 
 # ---------- Static files ----------
 
-def serve_listed(root, rel):
+def serve_listed(root, rel, extra=None):
     """Serves only listed files, so traversal, directory listing and symlinks have nothing to reach."""
     target = root / rel
     if target.is_symlink() or not target.is_file() or root not in target.resolve().parents:
@@ -536,7 +597,10 @@ def serve_listed(root, rel):
     kind = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     if kind.startswith("text/") or kind.endswith("javascript"):
         kind += "; charset=utf-8"
-    return FileResponse(target, media_type=kind, headers={"Cache-Control": "private, max-age=300"})
+    headers = {"Cache-Control": "private, max-age=300"}
+    if extra:
+        headers.update(extra)
+    return FileResponse(target, media_type=kind, headers=headers)
 
 
 @app.get("/content/{rel:path}")
@@ -553,4 +617,39 @@ STATIC_FILES = {p.relative_to(WEB / "static").as_posix() for p in (WEB / "static
 async def static(rel: str):
     if rel not in STATIC_FILES:
         return Response(status_code=404)
-    return serve_listed(WEB / "static", rel)
+    extra = {"Cross-Origin-Resource-Policy": "cross-origin"}
+    if rel.lower().endswith(".woff2"):
+        extra["Access-Control-Allow-Origin"] = "*"
+    return serve_listed(WEB / "static", rel, extra=extra)
+
+
+@app.get("/s/{token}/{rel:path}")
+async def sandbox_file(token: str, rel: str, request: Request):
+    if not sandbox._secret():
+        return Response(status_code=404)
+    if not rel.startswith(("page/", "audio/")):
+        return Response(status_code=404)
+    parsed = sandbox.read_token(token, time.time())
+    if parsed is None:
+        return Response(status_code=403)
+    user_id, lesson = parsed
+    with db.connect() as c:
+        if not sandbox.can_read(c, user_id, lesson):
+            return Response(status_code=403)
+    packages_dir = pathlib.Path(os.environ.get("PACKAGES_DIR", "packages")).resolve()
+    base = (packages_dir / "lessons" / lesson).resolve()
+    if not base.is_dir():
+        return Response(status_code=404)
+    page_root = (base / "page").resolve()
+    audio_root = (base / "audio").resolve()
+    target = base / rel
+    if target.is_symlink():
+        return Response(status_code=404)
+    resolved = target.resolve()
+    under_page = page_root in resolved.parents
+    under_audio = audio_root in resolved.parents
+    if not (under_page or under_audio) or not resolved.is_file():
+        return Response(status_code=404)
+    if resolved.suffix.lower() == ".html" and request.headers.get("Sec-Fetch-Dest") != "iframe":
+        return Response(status_code=403)
+    return serve_listed(base, rel, extra=sandbox.page_headers(rel))
