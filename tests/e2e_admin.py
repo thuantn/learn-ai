@@ -213,7 +213,7 @@ def run(br, base, temp, work):
     check("approved package leaves the queue", True)
 
     binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
-    check("Ask appears after approval", binh.locator("#lessonAskBtn").is_visible())
+    check("Ask appears after approval", binh.locator("#askDock").is_visible())
     if not binh.locator("#askDock").is_visible():
         binh.click("#lessonAskBtn")
     binh.fill("#askInput", "Vì sao?")
@@ -247,18 +247,66 @@ def run(br, base, temp, work):
     check("app page shows the thread from the lesson page", binh.locator("#askThread .is-question").all_inner_texts() == ["Vì sao?", "Còn gì nữa?"], binh.locator("#askThread").inner_text())
     if not binh.locator("#askForm").is_visible():
         binh.click(".capsule-ask-btn")
-    binh.fill("#askInput", "Từ trang app")
-    binh.click("#askSend")
+    chip = binh.locator("#askChips .prompt-chip").first
+    chip_text = chip.inner_text()
+    chip.click()
     binh.wait_for_selector("#askThread .md-answer >> nth=2")
     for _ in range(50):
         if "Đang trả lời" not in binh.locator("#askThread").inner_text():
             break
         binh.wait_for_timeout(100)
+    pos = binh.evaluate("""() => {
+        const dock = document.getElementById('askDock').getBoundingClientRect();
+        const header = document.querySelector('.ask-dock-header').getBoundingClientRect();
+        const scroller = (document.getElementById('askScroll') || document.querySelector('.ask-dock-scroll')).getBoundingClientRect();
+        const thread = document.getElementById('askThread').getBoundingClientRect();
+        const questions = document.querySelectorAll('#askThread .is-question');
+        const q = questions[questions.length - 1].getBoundingClientRect();
+        return {
+            qRightDiff: Math.abs(q.right - thread.right),
+            qLeftDiff: Math.abs(q.left - thread.left),
+            headerInside: header.top >= dock.top,
+            qNearTop: Math.abs(q.top - scroller.top) <= 120,
+            qTopRel: Math.round(q.top - scroller.top),
+            scroll: (s => [Math.round(s.scrollTop), s.scrollHeight, s.clientHeight])(document.getElementById('askScroll')),
+        };
+    }""")
+    check("question bubble right-aligned within 2px", pos["qRightDiff"] <= 2, pos)
+    check("question bubble left edge not at thread left", pos["qLeftDiff"] > 5, pos)
+    check("header inside dock visible area", pos["headerInside"], pos)
+    check("clicked suggestion chip is gone", chip_text not in binh.locator("#askChips").inner_text())
+    check("question just asked visible near top of scroller", pos["qNearTop"], pos)
+    # The dock is a grid column in a lesson at 1280 px: a chip must not open the backdrop over it.
+    check("no backdrop over the docked Ask column", not binh.locator("#askBackdrop").is_visible())
+    binh.evaluate("go('home')")
+    binh.locator("#lessonList .stream-row [data-act=start]").first.click()
+    binh.wait_for_selector("#screen-review.active")
+    check("used suggestion does not come back after leaving the lesson", chip_text not in binh.locator("#askChips").inner_text())
     sent = SEEN[-1]["body"]["messages"]
     check("app page follows on from the lesson page", len(sent) == 6 and sent[1]["content"] == "Vì sao?", [m["role"] for m in sent])
     binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
     binh.wait_for_selector("#askThread .is-question >> nth=2", state="attached")
-    check("lesson page shows what was asked on the app page", binh.locator("#askThread .is-question").nth(2).inner_text() == "Từ trang app")
+    check("lesson page shows what was asked on the app page", binh.locator("#askThread .is-question").nth(2).inner_text() == chip_text)
+
+    # Overlay outside lesson on library screen at 1280 px
+    binh.goto(f"{base}/#library", wait_until="networkidle")
+    binh.wait_for_selector(".topbar-ask-btn")
+    binh.click(".topbar-ask-btn")
+    binh.wait_for_selector("#askDock.overlay-open")
+    dock_rect = binh.evaluate("document.getElementById('askDock').getBoundingClientRect()")
+    check("dock is visible as overlay on right", dock_rect["left"] > 800, dock_rect)
+    pick_text = binh.locator("#askLessonPick").inner_text()
+    check("askLessonPick lists approved lesson", "Bài 1" in pick_text or "Bài" in pick_text, pick_text)
+    binh.fill("#askInput", "Từ thư viện")
+    binh.click("#askSend")
+    binh.wait_for_selector("#askThread .md-answer >> nth=3")
+    for _ in range(50):
+        if "Đang trả lời" not in binh.locator("#askThread").inner_text():
+            break
+        binh.wait_for_timeout(100)
+    binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
+    binh.wait_for_selector("#askThread .is-question >> nth=3", state="attached")
+    check("lesson thread shows question asked from library", binh.locator("#askThread .is-question").nth(3).inner_text() == "Từ thư viện")
 
     # A thread too long for the panel on a phone: the input stays on screen, the panel opens on the last answer.
     binh.set_viewport_size({"width": 390, "height": 500})
@@ -268,8 +316,8 @@ def run(br, base, temp, work):
     binh.wait_for_timeout(400)
     spot = binh.evaluate("""() => {
         const b = id => document.getElementById(id).getBoundingClientRect();
-        const dock = b('askDock'), last = document.getElementById('askThread').lastElementChild.getBoundingClientRect();
-        return {input: b('askInput').bottom, send: b('askSend').bottom, bottom: dock.bottom, top: dock.top, last: last.top};
+        const dock = b('askDock'), scroller = (document.getElementById('askScroll') || document.querySelector('.ask-dock-scroll')).getBoundingClientRect(), last = document.getElementById('askThread').lastElementChild.getBoundingClientRect();
+        return {input: b('askInput').bottom, send: b('askSend').bottom, bottom: dock.bottom, top: scroller.top, last: last.top};
     }""")
     check("input stays on screen in a long thread", spot["input"] <= spot["bottom"] and spot["send"] <= spot["bottom"] + 1, spot)
     check("panel opens on the last answer", spot["top"] <= spot["last"] < spot["bottom"], spot)
@@ -287,7 +335,7 @@ def run(br, base, temp, work):
         binh.click("#lessonAskBtn")
     binh.click("#askClear")
     binh.wait_for_timeout(200)
-    check("dismissing the question keeps the thread", binh.locator("#askThread .is-question").count() == 3)
+    check("dismissing the question keeps the thread", binh.locator("#askThread .is-question").count() == 4)
     binh.evaluate("window.confirm = window.realConfirm")
     binh.click("#askClear")
     binh.wait_for_selector("#askThread .is-question", state="detached")
@@ -307,7 +355,7 @@ def run(br, base, temp, work):
     binh.wait_for_selector("text=chưa được bật")
     check("off stops sending at once", len(SEEN) == calls)
     binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
-    check("Ask is gone after reload", not binh.locator("#lessonAskBtn").is_visible())
+    check("Ask is gone after reload", not binh.locator("#lessonAskBtn").is_visible() and not binh.locator("#askDock").is_visible())
 
     # A new version with other text goes back to the queue.
     call(an, "POST", f"/api/packages/{pid}/ask-request")

@@ -240,7 +240,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.wait_for_selector("#lessonList .stream-row")
 
     # No audio: the session has no Listen step, and no Ask box without approval.
-    check("no Ask without approval", not a.locator("#askDock").is_visible() and not a.locator(".capsule-ask-btn").is_visible())
+    check("no Ask without approval", not a.locator("#askDock").is_visible() and not a.locator(".capsule-ask-btn").is_visible() and not a.locator(".topbar-ask-btn").is_visible())
     asks = []
     a.on("request", lambda r: asks.append(r.url) if "/api/ask" in r.url else None)
     a.locator("#homeCta [data-act=start]").click()
@@ -321,7 +321,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     b.goto(f"{base}/lesson/{href}")
     b.wait_for_selector("iframe.lesson-iframe")
     b.wait_for_timeout(1000)
-    check("lesson bar shows author", "an@example.com" in b.locator("#lessonTitle").inner_text())
+    check("lesson bar shows author", b.locator(".lesson-author").inner_text() == "an")
     check("lesson title did not run as HTML", b.evaluate("window.__xss") is None)
     check("no Ask button on lesson page", not b.locator("#lessonAskBtn").is_visible())
     check("no Ask dock on lesson page", not b.locator("#askDock").is_visible())

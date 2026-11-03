@@ -115,7 +115,18 @@
         return;
       }
       frameInfo = await r.json();
-      $("lessonTitle").textContent = `${frameInfo.title} — ${frameInfo.author}`;
+      $("lessonTitle").textContent = frameInfo.title;
+      const authorEl = $("lessonAuthor");
+      if (authorEl) {
+        const author = frameInfo.author || "";
+        if (author && !frameInfo.mine) {
+          authorEl.textContent = author.includes("@") ? author.split("@")[0] : author;
+          authorEl.hidden = false;
+        } else {
+          authorEl.textContent = "";
+          authorEl.hidden = true;
+        }
+      }
       $("askLessonShort").textContent = frameInfo.title;
       $("lessonAskBtn").hidden = !frameInfo.ask;
       document.body.classList.toggle("no-ask", !frameInfo.ask);
@@ -353,7 +364,7 @@
     const b = document.createElement("div");
     b.className = "ask-bubble " + cls;
     $("askThread").append(b);
-    AskThread.showEnd();
+    $("askClear").hidden = false;
     return b;
   }
 
@@ -378,20 +389,23 @@
   async function sendAsk(question) {
     question = question.trim();
     if (!question || $("askInput").disabled) return;
-    askBubble("is-question").textContent = question;
+    const qEl = askBubble("is-question");
+    qEl.textContent = question;
     $("askInput").value = "";
-    const out = askBubble("md-answer");
+    const out = askBubble("md-answer is-pending");
     out.textContent = "Đang trả lời…";
     $("askSend").disabled = true;
     AskThread.sending = true;
+    AskThread.scrollTo(qEl);
     try {
       const d = await api("/api/ask", send("POST", { lesson: lessonId, question }));
       AskThread.saved += 2;
+      out.classList.remove("is-pending");
       out.innerHTML = renderAnswer(d.text);
       if (window.MathJax && MathJax.typesetPromise) await MathJax.typesetPromise([out]).catch(() => {});
-      AskThread.showEnd();
     } catch (e) {
       AskThread.sending = false;
+      out.classList.remove("is-pending");
       if (e.status === 404) { lostAccess(); return; }
       out.textContent = e.message;
       out.classList.add("is-error");
@@ -404,6 +418,14 @@
 
   $("askForm").addEventListener("submit", e => { e.preventDefault(); sendAsk($("askInput").value); });
   $("askInput").addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (narrow.matches) {
+        openAsk(false);
+      }
+      return;
+    }
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendAsk(e.target.value); }
   });
 

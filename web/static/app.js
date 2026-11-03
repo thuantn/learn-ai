@@ -7,7 +7,7 @@ const state = { me: null, lessons: [], lesson: null, track: "long", due: 0, next
 function currentTrack() { return state.lesson && state.lesson.tracks[state.track]; }
 const audio = new Audio();
 audio.preload = "none";
-let lastSaved = 0, pendingSeek = null;
+let lastSaved = 0, pendingSeek = null, askLessonId = null;
 
 // Leaving the page cuts in-flight requests; WebKit then logs a page error for each one even when
 // the caller catches it. Aborting them first turns that into a plain AbortError.
@@ -48,7 +48,12 @@ function go(id, replace, hash) {
   const isLesson = ["review", "listen", "flashcard", "finish"].includes(id);
   document.body.classList.toggle("in-lesson", isLesson);
   document.body.classList.toggle("on-listen", id === "listen");
-  if (!isLesson) openAsk(false);
+  if (!isLesson) {
+    openAsk(false);
+  } else {
+    $("askDock").classList.remove("overlay-open");
+  }
+  syncAsk();
   $$(".screen").forEach(s => s.classList.toggle("active", s.id === "screen-" + id));
   const navTarget = id.startsWith("test") ? "tests" : id;
   $$("[data-nav]").forEach(t => t.dataset.nav === navTarget ? t.setAttribute("aria-current", "page") : t.removeAttribute("aria-current"));
@@ -72,8 +77,17 @@ function closeNav() {
 }
 function openAsk(open) {
   if (open) closeNav();
-  $("askDock").classList.toggle("mobile-open", open);
-  $("askBackdrop").classList.toggle("open", open);
+  const dock = $("askDock");
+  const isLesson = document.body.classList.contains("in-lesson");
+  if (!isLesson) {
+    dock.classList.toggle("overlay-open", open);
+  } else {
+    dock.classList.remove("overlay-open");
+  }
+  dock.classList.toggle("mobile-open", open);
+  // In a lesson on a wide screen the dock is a column of the grid; a backdrop there would cover it.
+  const floats = !isLesson || window.matchMedia("(max-width: 1023px)").matches;
+  $("askBackdrop").classList.toggle("open", open && floats);
   if (open && !$("askInput").disabled) $("askInput").focus();
   if (open) AskThread.showEnd();
 }
@@ -125,7 +139,7 @@ function renderLesson() {
       $("homeNote").textContent = "Tải lên bài của bạn, hoặc nhờ đồng nghiệp share bài để bắt đầu học.";
     }
     $("summary").textContent = "";
-    $("askChips").textContent = "";
+    renderChipsForLesson(null);
     $("dockKicker").textContent = "";
     $("dockTitle").textContent = "";
     return;
@@ -172,16 +186,7 @@ function renderLesson() {
     band.append(n, p);
     box.append(band);
   });
-  const chips = $("askChips");
-  chips.textContent = "";
-  l.suggest.forEach(q => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "prompt-chip";
-    b.dataset.act = "ask-chip";
-    b.textContent = q;
-    chips.append(b);
-  });
+  renderChipsForLesson(l);
   renderTrackButtons();
   renderTime();
 }
@@ -532,29 +537,75 @@ async function finish() {
 }
 
 // ---------- Ask box ----------
+// Suggestions already asked in this visit, as "lesson\nquestion": go() re-renders the chips on every screen change.
+// ponytail: forgotten on reload; filter against the saved thread if learners notice.
+const askedChips = new Set();
+
+function renderChipsForLesson(l) {
+  const chips = $("askChips");
+  if (!chips) return;
+  chips.textContent = "";
+  const left = l && Array.isArray(l.suggest) ? l.suggest.filter(q => !askedChips.has(l.id + "\n" + q.trim())) : [];
+  if (!left.length) {
+    chips.hidden = true;
+    return;
+  }
+  left.forEach(q => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "prompt-chip";
+    b.dataset.act = "ask-chip";
+    b.textContent = q;
+    chips.append(b);
+  });
+  chips.hidden = false;
+}
+
+function removeChipIfAsked(question) {
+  const chips = $("askChips");
+  if (!chips) return;
+  const chip = [...chips.querySelectorAll(".prompt-chip")].find(c => c.textContent.trim() === question.trim());
+  if (chip) {
+    chip.remove();
+  }
+  if (!chips.querySelector(".prompt-chip")) {
+    chips.hidden = true;
+  }
+}
+
 function askBubble(cls) {
   const b = document.createElement("div");
   b.className = "ask-bubble " + cls;
   $("askThread").append(b);
-  AskThread.showEnd();
+  $("askClear").hidden = false;
   return b;
 }
+
 async function sendAsk(question) {
   question = question.trim();
   if (!question || $("askInput").disabled) return;
-  askBubble("is-question").textContent = question;
+  removeChipIfAsked(question);
+  const isLesson = document.body.classList.contains("in-lesson");
+  const targetLessonId = isLesson ? (state.lesson ? state.lesson.id : null) : askLessonId;
+  if (!targetLessonId) return;
+  askedChips.add(targetLessonId + "\n" + question);
+
+  const qEl = askBubble("is-question");
+  qEl.textContent = question;
   $("askInput").value = "";
-  const out = askBubble("md-answer");
+  const out = askBubble("md-answer is-pending");
   out.textContent = "Đang trả lời...";
   $("askSend").disabled = true;
   AskThread.sending = true;
+  AskThread.scrollTo(qEl);
   try {
-    const d = await api("/api/ask", send("POST", { lesson: state.lesson.id, question }));
+    const d = await api("/api/ask", send("POST", { lesson: targetLessonId, question }));
     AskThread.saved += 2;
+    out.classList.remove("is-pending");
     out.innerHTML = renderAnswer(d.text);
     if (window.MathJax && MathJax.typesetPromise) await MathJax.typesetPromise([out]).catch(() => {});
-    AskThread.showEnd();
   } catch (e) {
+    out.classList.remove("is-pending");
     out.textContent = e.message;
     out.classList.add("is-error");
     // It was not kept, so the learner should not have to type it again.
@@ -563,10 +614,35 @@ async function sendAsk(question) {
   AskThread.sending = false;
   $("askSend").disabled = false;
 }
+
 $("askForm").addEventListener("submit", e => { e.preventDefault(); sendAsk($("askInput").value); });
 $("askInput").addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    const isPhone = window.matchMedia("(max-width: 1023px)").matches;
+    const isOverlay = !document.body.classList.contains("in-lesson");
+    if (isPhone || isOverlay) {
+      openAsk(false);
+    }
+    return;
+  }
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendAsk(e.target.value); }
 });
+
+const askPick = $("askLessonPick");
+if (askPick) {
+  askPick.addEventListener("change", e => {
+    askLessonId = e.target.value;
+    const currentL = state.lessons.find(l => l.id === askLessonId);
+    const askOn = !!(currentL && currentL.ask);
+    $("askInput").disabled = !askOn;
+    $("askSend").disabled = !askOn;
+    $("askInput").placeholder = askOn ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
+    renderChipsForLesson(currentL);
+    AskThread.sync(askOn ? askLessonId : null, api).catch(() => {});
+  });
+}
 
 // ---------- Actions ----------
 function setLesson(id) {
@@ -717,11 +793,70 @@ async function refresh() {
   syncAsk();
 }
 function syncAsk() {
-  const askOn = state.lesson && state.lesson.ask;
-  $("askInput").disabled = !askOn;
-  $("askSend").disabled = !askOn;
-  $("askInput").placeholder = askOn ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
-  AskThread.sync(askOn ? state.lesson.id : null, api).catch(() => {});
+  const isLesson = document.body.classList.contains("in-lesson");
+  const askLessonPick = $("askLessonPick");
+  const askLessonShort = $("askLessonShort");
+  const askContextText = $("askContextText");
+  const askNoLessons = $("askNoLessons");
+
+  if (isLesson) {
+    askLessonId = state.lesson ? state.lesson.id : null;
+    const askOn = !!(state.lesson && state.lesson.ask);
+    document.body.classList.toggle("no-ask", !askOn);
+    $("askInput").disabled = !askOn;
+    $("askSend").disabled = !askOn;
+    $("askInput").placeholder = askOn ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
+    if (askContextText) askContextText.hidden = false;
+    if (askNoLessons) askNoLessons.hidden = true;
+    if (askLessonShort) {
+      askLessonShort.hidden = false;
+      askLessonShort.textContent = state.lesson ? lessonNo(state.lesson) : "";
+    }
+    if (askLessonPick) askLessonPick.hidden = true;
+    renderChipsForLesson(state.lesson);
+    AskThread.sync(askOn ? askLessonId : null, api).catch(() => {});
+  } else {
+    const askable = (state.lessons || []).filter(l => l.ask);
+    const hasAnyAsk = askable.length > 0;
+    document.body.classList.toggle("no-ask", !hasAnyAsk);
+    if (!hasAnyAsk) {
+      askLessonId = null;
+      if (askContextText) askContextText.hidden = true;
+      if (askNoLessons) askNoLessons.hidden = false;
+      $("askInput").disabled = true;
+      $("askSend").disabled = true;
+      $("askInput").placeholder = "Chưa có bài nào bật Ô Hỏi.";
+      if ($("askChips")) $("askChips").textContent = "";
+      AskThread.sync(null, api).catch(() => {});
+    } else {
+      if (askContextText) askContextText.hidden = false;
+      if (askNoLessons) askNoLessons.hidden = true;
+      if (askLessonShort) askLessonShort.hidden = true;
+      if (askLessonPick) {
+        askLessonPick.hidden = false;
+        if (!askable.some(l => l.id === askLessonId)) {
+          askLessonId = (state.lesson && state.lesson.ask ? state.lesson : askable[0]).id;
+        }
+        askLessonPick.innerHTML = "";
+        state.lessons.forEach(l => {
+          const opt = document.createElement("option");
+          opt.value = l.id;
+          opt.textContent = l.ask ? `${lessonNo(l)}: ${l.title}` : `${lessonNo(l)}: ${l.title} (chưa bật Ô Hỏi)`;
+          opt.disabled = !l.ask;
+          if (l.id === askLessonId) opt.selected = true;
+          askLessonPick.append(opt);
+        });
+        askLessonPick.value = askLessonId;
+      }
+      const currentL = state.lessons.find(l => l.id === askLessonId);
+      const askOn = !!(currentL && currentL.ask);
+      $("askInput").disabled = !askOn;
+      $("askSend").disabled = !askOn;
+      $("askInput").placeholder = askOn ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
+      renderChipsForLesson(currentL);
+      AskThread.sync(askOn ? askLessonId : null, api).catch(() => {});
+    }
+  }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) syncAsk(); });
 window.addEventListener("pageshow", e => { if (e.persisted) syncAsk(); });

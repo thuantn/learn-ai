@@ -89,9 +89,14 @@ def wait_js(page, expr, seconds=15):
         page.wait_for_timeout(100)
 
 
+def expected_403(m, pg):
+    # The change-password page asks /api/me whether this is a voluntary change; a temporary password gets 403 by design.
+    return m.location.get("url", "").endswith("/api/me") and pg.url.endswith("/change-password")
+
+
 def watch(pg, errs):
     pg.on("pageerror", lambda e: errs.append("js: " + str(e)))
-    pg.on("console", lambda m: errs.append(f"console: {m.text[:50]} @ {m.location} on {pg.url}") if m.type == "error" and "401" not in m.text and "Load failed" not in m.text and "purify.min.js" not in m.location.get("url", "") else None)  # Load failed: WebKit reports fetches cut short by leaving a page
+    pg.on("console", lambda m: errs.append(f"console: {m.text[:50]} @ {m.location} on {pg.url}") if m.type == "error" and "401" not in m.text and "Load failed" not in m.text and "purify.min.js" not in m.location.get("url", "") and not expected_403(m, pg) else None)  # Load failed: WebKit reports fetches cut short by leaving a page
 
 
 def make_env(data_dir, packages_dir, extras=None):

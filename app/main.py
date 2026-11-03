@@ -449,6 +449,7 @@ async def lesson_frame(lesson_id: str, request: Request):
         "title": lesson["title"],
         "learner": learner,
         "author": lesson["author"],
+        "mine": lesson["author"] == user,
         "package_title": lesson["package_title"],
         "ask": lesson["ask_status"] == "approved" and ai.current() is not None,
     })

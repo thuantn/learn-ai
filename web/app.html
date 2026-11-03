@@ -63,6 +63,7 @@
         <a class="stage-tab" href="#tests" data-nav="tests">Bộ đề</a>
       </nav>
       <div class="top-bar-right">
+        <button type="button" class="topbar-ask-btn" data-act="ask-open">Hỏi</button>
         <details class="account-menu" id="accountMenu">
           <summary class="account-menu-summary" aria-label="Tài khoản">Tài khoản</summary>
           <div class="account-menu-panel">
@@ -360,16 +361,16 @@
 
   <div class="ask-backdrop" id="askBackdrop" data-act="ask-close"></div>
   <aside class="ask-dock" id="askDock" aria-label="Ô Hỏi">
-    <div>
-      <div class="ask-dock-header">
-        <h2 class="display-font ask-title">Ô Hỏi</h2>
-        <div class="ask-header-controls">
-          <button type="button" class="btn-expand-ask" id="askClear" data-act="ask-clear" hidden>Xóa</button>
-          <button type="button" class="btn-expand-ask" id="btnExpandAsk" data-act="ask-expand" aria-expanded="false">Mở rộng</button>
-          <button type="button" class="ask-close-mobile" data-act="ask-close" aria-label="Đóng ô hỏi">✕</button>
-        </div>
+    <div class="ask-dock-header">
+      <h2 class="display-font ask-title">Ô Hỏi</h2>
+      <div class="ask-header-controls">
+        <button type="button" class="btn-expand-ask" id="askClear" data-act="ask-clear" hidden>Xóa</button>
+        <button type="button" class="btn-expand-ask" id="btnExpandAsk" data-act="ask-expand" aria-expanded="false">Mở rộng</button>
+        <button type="button" class="ask-close-mobile" data-act="ask-close" aria-label="Đóng ô hỏi">✕</button>
       </div>
-      <p class="ask-context">Đang hỏi về: <strong data-lesson-short></strong>. Câu hỏi được lưu để bạn xem lại và hỏi tiếp; tác giả bài không xem được.</p>
+    </div>
+    <div class="ask-dock-scroll" id="askScroll">
+      <p class="ask-context"><span id="askContextText">Đang hỏi về: <strong data-lesson-short id="askLessonShort"></strong><select id="askLessonPick" class="ask-lesson-pick" aria-label="Chọn bài học"></select>. Chỉ bạn xem được câu hỏi.</span><span id="askNoLessons" hidden>Chưa có bài nào bật Ô Hỏi.</span></p>
       <div class="ask-prompt-chips" id="askChips" role="group" aria-label="Gợi ý câu hỏi"></div>
       <div class="ask-thread" id="askThread" aria-live="polite"></div>
     </div>
@@ -501,7 +502,7 @@
         <button type="button" class="ask-close-mobile" data-act="test-ask-close" aria-label="Đóng ô hỏi">✕</button>
       </div>
     </div>
-    <p class="ask-context" id="testAskContext">Đang hỏi về câu này. Câu hỏi được lưu để bạn xem lại và hỏi tiếp; tác giả đề không xem được.</p>
+    <p class="ask-context" id="testAskContext">Đang hỏi về câu này. Chỉ bạn xem được câu hỏi.</p>
     <div class="ask-thread" id="testAskThread" aria-live="polite"></div>
     <form id="testAskForm">
       <label class="sr-only" for="testAskInput">Nhập câu hỏi</label>

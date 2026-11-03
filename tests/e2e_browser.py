@@ -213,6 +213,7 @@ try:
         check("no page errors", not errs, errs[:3])
 
         pg.evaluate("go('home')")
+        pg.click("#accountMenu summary")
         pg.get_by_role("button", name="Đăng xuất").first.click()
         pg.wait_for_url("**/login")
         pg.goto(BASE + "/api/me")

@@ -1376,7 +1376,7 @@ async function openItemAsk(itemId) {
   const input = $("testAskInput");
   if (!dia || !thread) return;
 
-  if (ctx) ctx.textContent = `Đang hỏi về: ${att.title || "Bộ đề"} · ${numStr}. Câu hỏi được lưu để bạn xem lại và hỏi tiếp; tác giả đề không xem được.`;
+  if (ctx) ctx.textContent = `Đang hỏi về: ${att.title || "Bộ đề"} · ${numStr}. Chỉ bạn xem được câu hỏi.`;
   if (err) err.hidden = true;
   if (clearBtn) clearBtn.hidden = true;
   if (input) input.value = "";
@@ -1398,11 +1398,16 @@ async function openItemAsk(itemId) {
       return b;
     });
     thread.append(...bubbles);
-    thread.scrollTop = thread.scrollHeight;
+    const lastQ = bubbles.slice().reverse().find(b => b.classList.contains("is-question")) || bubbles[bubbles.length - 1];
+    if (lastQ) {
+      thread.scrollTop += lastQ.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+    }
     if (window.MathJax && MathJax.startup) {
       await MathJax.startup.promise;
       await MathJax.typesetPromise(bubbles).catch(() => {});
-      thread.scrollTop = thread.scrollHeight;
+      if (lastQ) {
+        thread.scrollTop += lastQ.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+      }
     }
   } catch (e) {
     thread.textContent = e.message || "Không tải được lịch sử hỏi.";
@@ -1426,9 +1431,9 @@ async function sendItemAsk() {
   thread.append(userBubble);
   input.value = "";
 
-  const botBubble = el("div", "ask-bubble md-answer", "Đang trả lời...");
+  const botBubble = el("div", "ask-bubble md-answer is-pending", "Đang trả lời...");
   thread.append(botBubble);
-  thread.scrollTop = thread.scrollHeight;
+  thread.scrollTop += userBubble.getBoundingClientRect().top - thread.getBoundingClientRect().top;
 
   _askSending = true;
   if (sendBtn) sendBtn.disabled = true;
@@ -1438,19 +1443,20 @@ async function sendItemAsk() {
       `/api/attempts/${encodeURIComponent(_askAttemptId)}/items/${encodeURIComponent(_askItemId)}/ask`,
       send("POST", { question: q })
     );
+    botBubble.classList.remove("is-pending");
     botBubble.innerHTML = renderAnswer(d.text);
     if (window.MathJax && MathJax.typesetPromise) {
       await MathJax.typesetPromise([botBubble]).catch(() => {});
     }
     if (clearBtn) clearBtn.hidden = false;
   } catch (e) {
+    botBubble.classList.remove("is-pending");
     botBubble.textContent = e.message || "Có lỗi khi gửi câu hỏi.";
     botBubble.classList.add("is-error");
     if (!input.value) input.value = q;
   } finally {
     _askSending = false;
     if (sendBtn) sendBtn.disabled = false;
-    thread.scrollTop = thread.scrollHeight;
   }
 }
 

@@ -136,7 +136,8 @@ def test_cookie_attributes_and_nothing_in_clear(ctx, capsys, caplog):
             assert part.lower() in cookie.lower(), part
         assert "domain" not in cookie.lower()
         token = cookie.split("=", 1)[1].split(";")[0]
-    raw = (tmp / "data" / "learn.db").read_bytes() + (tmp / "data" / "learn.db-wal").read_bytes()
+    # SQLite removes learn.db-wal when the last connection closes, so read whichever files are there.
+    raw = b"".join(p.read_bytes() for p in (tmp / "data").glob("learn.db*"))
     assert temp.encode() not in raw and token.encode() not in raw
     assert temp not in caplog.text and token not in caplog.text
 
