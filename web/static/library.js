@@ -48,14 +48,28 @@ function renderLibrary(d) {
     const info = el("div", "lib-info");
     info.append(el("h3", "stream-title", p.title));
     const pills = el("div", "meta-pills");
-    [p.topic && `Chủ đề: ${p.topic}`, `${p.lessons.length} bài`, size(p.size_bytes), `${p.people} người được share`, p.link_on && "Link đang bật"]
-      .filter(Boolean).forEach(t => pills.append(el("span", "meta-pill", t)));
+    const pillList = [
+      p.topic && `Chủ đề: ${p.topic}`,
+      p.lessons && p.lessons.length ? `${p.lessons.length} bài` : null,
+      p.tests && p.tests.length ? `${p.tests.length} đề` : null,
+      size(p.size_bytes),
+      `${p.people} người được share`,
+      p.link_on && "Link đang bật"
+    ].filter(Boolean);
+    pillList.forEach(t => pills.append(el("span", "meta-pill", t)));
     if (ASK_LABEL[p.ask_status]) pills.append(el("span", "meta-pill", ASK_LABEL[p.ask_status]));
     info.append(pills);
     const act = el("div", "stream-actions");
-    const learn = actionButton("Học", "start", null, "btn-studio-primary");
-    learn.dataset.lesson = p.first_lesson;
-    act.append(learn, actionButton("Share", "lib-share", p.id), actionButton(`Góp ý (${p.feedback})`, "lib-feedback", p.id),
+    if (p.first_lesson) {
+      const learn = actionButton("Học", "start", null, "btn-studio-primary");
+      learn.dataset.lesson = p.first_lesson;
+      act.append(learn);
+    }
+    if (p.tests && p.tests.length > 0) {
+      const doTests = actionButton("Làm đề", "lib-tests", p.id, p.first_lesson ? "btn-studio-secondary" : "btn-studio-primary");
+      act.append(doTests);
+    }
+    act.append(actionButton("Share", "lib-share", p.id), actionButton(`Góp ý (${p.feedback})`, "lib-feedback", p.id),
       actionButton("Tải bản mới", "lib-upload"), actionButton("Xóa", "lib-delete", p.id, "btn-studio-secondary btn-danger-soft"));
     if (p.has_content && (p.ask_status === "none" || p.ask_status === "rejected")) act.append(actionButton("Xin bật ô Hỏi", "lib-ask", p.id));
     row.append(info, act);
@@ -67,11 +81,21 @@ function renderLibrary(d) {
   d.shared.forEach(p => {
     const row = el("article", "stream-row");
     const info = el("div", "lib-info");
-    info.append(el("h3", "stream-title", p.title), el("p", "stream-status", `Tác giả: ${p.author}, ${p.lessons.length} bài`));
-    const learn = actionButton("Học", "start", null, "btn-studio-primary");
-    learn.dataset.lesson = p.first_lesson;
+    const descParts = [`Tác giả: ${p.author}`];
+    if (p.lessons && p.lessons.length) descParts.push(`${p.lessons.length} bài`);
+    if (p.tests && p.tests.length) descParts.push(`${p.tests.length} đề`);
+    info.append(el("h3", "stream-title", p.title), el("p", "stream-status", descParts.join(", ")));
     const act = el("div", "stream-actions");
-    act.append(learn, actionButton("Bỏ khỏi thư viện", "lib-leave", p.id));
+    if (p.first_lesson) {
+      const learn = actionButton("Học", "start", null, "btn-studio-primary");
+      learn.dataset.lesson = p.first_lesson;
+      act.append(learn);
+    }
+    if (p.tests && p.tests.length > 0) {
+      const doTests = actionButton("Làm đề", "lib-tests", p.id, p.first_lesson ? "btn-studio-secondary" : "btn-studio-primary");
+      act.append(doTests);
+    }
+    act.append(actionButton("Bỏ khỏi thư viện", "lib-leave", p.id));
     row.append(info, act);
     shared.append(row);
   });
@@ -87,12 +111,17 @@ async function deletePackage(id) {
 }
 
 // ---------- Upload ----------
+const MAX_TESTS_TOTAL = 16 * 1024 * 1024;
+
 function uploadStep(step) {
   ["upPick", "upBusy", "upError", "upConfirm"].forEach(id => { $(id).hidden = id !== step; });
 }
 function openUpload() {
   $("upFile").value = "";
+  if ($("upJsonText")) $("upJsonText").value = "";
   $("upPickError").hidden = true;
+  const copied = $("upPromptCopied");
+  if (copied) copied.hidden = true;
   uploadStep("upPick");
   $("uploadDialog").showModal();
 }
@@ -107,28 +136,31 @@ function showUploadProblems(problems) {
   });
   uploadStep("upError");
 }
-function sendFile(file) {
+function sendFile(file, contentType, name) {
   if (!file) return;
-  if (file.size > MAX_ZIP) {
-    $("upPickError").textContent = "File zip quá lớn, tối đa 90 MB.";
+  const isJson = contentType === "application/json" || file.type === "application/json" || (file.name && file.name.toLowerCase().endsWith(".json"));
+  const type = isJson ? "application/json" : "application/zip";
+  const limit = isJson ? MAX_TESTS_TOTAL : MAX_ZIP;
+  if (file.size > limit) {
+    $("upPickError").textContent = isJson ? "File JSON quá lớn, tối đa 16 MB." : "File zip quá lớn, tối đa 90 MB.";
     $("upPickError").hidden = false;
     return;
   }
   uploadStep("upBusy");
-  $("upBusyName").textContent = file.name;
+  $("upBusyName").textContent = name || file.name || (isJson ? "tests.json" : "package.zip");
   $("upBusyText").textContent = "Đang tải lên";
   $("upPercent").textContent = "0%";
   $("upMeter").style.width = "0%";
   const xhr = new XMLHttpRequest();
   upload.xhr = xhr;
   xhr.open("POST", "/api/uploads");
-  xhr.setRequestHeader("Content-Type", "application/zip");
+  xhr.setRequestHeader("Content-Type", type);
   xhr.upload.onprogress = e => {
     if (!e.lengthComputable) return;
     const percent = Math.round(e.loaded / e.total * 100);
     $("upPercent").textContent = percent + "%";
     $("upMeter").style.width = percent + "%";
-    if (percent === 100) $("upBusyText").textContent = "Đang kiểm tra bài";
+    if (percent === 100) $("upBusyText").textContent = "Đang kiểm tra";
   };
   xhr.onload = () => {
     upload.xhr = null;
@@ -146,23 +178,71 @@ function sendFile(file) {
 }
 function showConfirm(d) {
   upload.id = d.upload_id;
-  upload.removed = d.removed;
-  $("upTitle").textContent = d.title;
-  $("upMeta").textContent = `${d.is_update ? "Bản mới của bài đã có" : "Bài mới"}, ${d.lessons.length} bài, ${size(d.size)}`;
+  upload.removed = d.removed || [];
+  $("upTitle").textContent = d.title || "";
+  const nLessons = (d.lessons && d.lessons.length) || 0;
+  const nTests = (d.tests && d.tests.length) || 0;
+  $("upMeta").textContent = `${d.is_update ? "Bản mới của bài đã có" : "Bài mới"}, ${nLessons} bài, ${nTests} đề, ${size(d.size)}`;
   const fill = (id, items) => {
     const box = $(id);
     box.textContent = "";
-    items.forEach(t => box.append(el("li", "", t)));
+    (items || []).forEach(t => box.append(el("li", "", t)));
   };
-  fill("upLessons", d.lessons);
-  fill("upRemoved", d.removed);
-  $("upRemovedBox").hidden = d.removed.length === 0;
-  fill("upWarnings", d.warnings.map(w => w.message));
-  $("upWarningsBox").hidden = d.warnings.length === 0;
+  const allItems = [];
+  (d.lessons || []).forEach(l => allItems.push(d.tests && d.tests.length ? `Bài: ${l}` : l));
+  (d.tests || []).forEach(t => allItems.push(d.lessons && d.lessons.length ? `Đề: ${t}` : t));
+  fill("upLessons", allItems);
+  fill("upRemoved", d.removed || []);
+  $("upRemovedBox").hidden = !d.removed || d.removed.length === 0;
+  fill("upWarnings", (d.warnings || []).map(w => w.message || w));
+  $("upWarningsBox").hidden = !d.warnings || d.warnings.length === 0;
   $("upAttest").checked = false;
   $("upCommit").disabled = true;
   $("upConfirmError").hidden = true;
   uploadStep("upConfirm");
+}
+
+async function handleFileSelect(files) {
+  if (!files || !files.length) return;
+  $("upPickError").hidden = true;
+  if (files.length === 1 && files[0].name.toLowerCase().endsWith(".zip")) {
+    return sendFile(files[0]);
+  }
+  try {
+    const parsedList = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (!f.name.toLowerCase().endsWith(".json") && f.type !== "application/json") {
+        throw new Error("Chỉ chọn các file .json hoặc một file .zip.");
+      }
+      const text = await f.text();
+      parsedList.push(parseTestJson(text));
+    }
+    const merged = mergeTestFiles(parsedList);
+    const blob = new Blob([JSON.stringify(merged)], { type: "application/json" });
+    sendFile(blob, "application/json", files.length === 1 ? files[0].name : "tests-merged.json");
+  } catch (err) {
+    $("upPickError").textContent = err.message || "Không đọc được file JSON.";
+    $("upPickError").hidden = false;
+  }
+}
+
+async function handlePasteSend() {
+  const text = $("upJsonText").value;
+  if (!text || !text.trim()) {
+    $("upPickError").textContent = "Hãy dán nội dung JSON trước.";
+    $("upPickError").hidden = false;
+    return;
+  }
+  $("upPickError").hidden = true;
+  try {
+    const parsed = parseTestJson(text);
+    const blob = new Blob([JSON.stringify(parsed)], { type: "application/json" });
+    sendFile(blob, "application/json", "pasted.json");
+  } catch (err) {
+    $("upPickError").textContent = err.message || "Không đọc được JSON.";
+    $("upPickError").hidden = false;
+  }
 }
 async function commitUpload() {
   $("upCommit").disabled = true;
@@ -300,9 +380,12 @@ Object.assign(ACTIONS, {
     await refresh();
     go("library", true);
   },
+  "lib-tests": b => { location.hash = "#tests=" + encodeURIComponent(b.dataset.id); },
   "up-close": closeUpload,
   "up-commit": commitUpload,
   "up-again": openUpload,
+  "up-prompt": () => copyTestPrompt(),  // practice.js loads after this file
+  "up-paste-send": handlePasteSend,
   "share-close": closeShare,
   "share-remove": removePerson,
   "share-copy": copyLink,
@@ -310,7 +393,7 @@ Object.assign(ACTIONS, {
   "share-off": linkOff,
   "fb-list-close": () => $("feedbackListDialog").close(),
 });
-$("upFile").addEventListener("change", e => sendFile(e.target.files[0]));
+$("upFile").addEventListener("change", e => handleFileSelect(e.target.files));
 $("upAttest").addEventListener("change", e => { $("upCommit").disabled = !e.target.checked; });
 $("shareForm").addEventListener("submit", addPerson);
 $("uploadDialog").addEventListener("cancel", e => { e.preventDefault(); closeUpload(); });

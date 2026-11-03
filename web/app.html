@@ -18,6 +18,7 @@
 <script src="/static/feedback.js" defer></script>
 <script src="/static/app.js" defer></script>
 <script src="/static/library.js" defer></script>
+<script src="/static/practice.js" defer></script>
 </head>
 <body>
 <div class="workbench" id="workbenchGrid">
@@ -86,6 +87,8 @@
         </div>
         <h2 class="list-heading" id="homeListHeading">Danh sách bài học</h2>
         <div class="lesson-stream" id="lessonList"></div>
+        <h2 class="list-heading" id="homeTestsHeading" hidden>Bộ đề</h2>
+        <div class="lesson-stream" id="homeTestList"></div>
       </section>
 
       <section id="screen-library" class="screen" aria-labelledby="library-title">
@@ -194,6 +197,37 @@
           </div>
         </div>
       </section>
+
+      <section id="screen-tests" class="screen" aria-labelledby="tests-title">
+        <div class="flow-strip">
+          <button type="button" class="btn-studio-secondary" data-act="go" data-to="home">← Trang đầu</button>
+        </div>
+        <h1 id="tests-title" class="hero-title small-title">Bộ đề luyện thi</h1>
+        <p class="lesson-name" id="testsSubtitle"></p>
+        <div class="lesson-stream" id="testsList"></div>
+        <p class="dock-note" id="testsEmpty" hidden>Chưa có bộ đề nào.</p>
+      </section>
+
+      <section id="screen-test-detail" class="screen" aria-labelledby="testDetailTitle">
+        <div class="flow-strip">
+          <button type="button" class="btn-studio-secondary" data-act="test-back">← Danh sách đề</button>
+        </div>
+        <div class="hero-banner">
+          <div class="status-pill" id="testDetailPill">Bộ đề</div>
+          <h1 id="testDetailTitle" class="hero-title small-title"></h1>
+          <div class="meta-pills" id="testDetailPills"></div>
+          <div class="test-desc-box" id="testDetailDesc"></div>
+          <div class="cta-cluster" id="testDetailActions"></div>
+          <p class="studio-alert error" id="testDetailAlert" role="alert" hidden></p>
+        </div>
+        <h2 class="list-heading" id="testHistoryHeading">Lịch sử làm bài</h2>
+        <div class="lesson-stream" id="testHistoryList"></div>
+        <p class="dock-note" id="testHistoryEmpty" hidden>Chưa có lượt làm nào.</p>
+      </section>
+
+      <section id="screen-test-run" class="screen" aria-label="Làm bài thi"></section>
+
+      <section id="screen-test-result" class="screen" aria-label="Kết quả bài thi"></section>
     </main>
   </div>
 
@@ -226,8 +260,17 @@
   <div class="lesson-dialog-form">
     <h2 class="fc-title" id="upHeading">Tải lên bài học</h2>
     <div class="lesson-dialog-form" id="upPick">
-      <p class="dock-note">Chọn file zip đã đóng gói theo khung bài học, tối đa 90 MB. Tải lại cùng một bài sẽ thành bản mới, tiến độ của người học vẫn giữ.</p>
-      <label class="btn-studio-secondary file-pick">Chọn file zip<input type="file" id="upFile" accept=".zip,application/zip"></label>
+      <p class="dock-note">Chọn file zip đã đóng gói theo khung bài học, hoặc file .json bộ đề. Tải lại cùng slug sẽ thành bản mới, tiến độ vẫn giữ.</p>
+      <div class="up-pick-actions">
+        <label class="btn-studio-secondary file-pick">Chọn file (.zip, .json)<input type="file" id="upFile" accept=".zip,.json,application/zip,application/json" multiple></label>
+        <button type="button" class="btn-studio-secondary" data-act="up-prompt">Hướng dẫn cho AI khác</button>
+      </div>
+      <p class="dock-note" id="upPromptCopied" role="status" hidden></p>
+      <div class="up-paste-box">
+        <label class="auth-label" for="upJsonText"><span>Hoặc dán nội dung JSON</span></label>
+        <textarea id="upJsonText" class="studio-textarea" rows="4" placeholder="Dán JSON của bộ đề vào đây..."></textarea>
+        <button type="button" class="btn-studio-primary" data-act="up-paste-send">Tải lên từ nội dung đã dán</button>
+      </div>
       <a class="btn-link-quiet" href="/api/toolkit.zip" download>Chưa có bài? Tải skill tạo bài cho Claude</a>
       <p class="dock-note">Claude app, web: bật Code execution trong Settings, Capabilities, rồi vào Customize, Skills, nút +, Create skill, Upload a skill và chọn file zip này. Claude Code: giải nén vào <code>~/.claude/skills/</code>.</p>
       <p class="studio-alert error" id="upPickError" role="alert" hidden></p>
