@@ -241,6 +241,8 @@ def run(br, base, temp, work):
 
     # The app page shows the same thread, and what is asked there shows on the lesson page.
     binh.goto(f"{base}/#home", wait_until="networkidle")
+    binh.locator("#lessonList .stream-row [data-act=start]").first.click()
+    binh.wait_for_selector("#screen-review.active")
     binh.wait_for_selector("#askThread .is-question", state="attached")
     check("app page shows the thread from the lesson page", binh.locator("#askThread .is-question").all_inner_texts() == ["Vì sao?", "Còn gì nữa?"], binh.locator("#askThread").inner_text())
     if not binh.locator("#askForm").is_visible():
@@ -381,6 +383,8 @@ def run(br, base, temp, work):
     check("first password change lands on /", dung_pg.url == f"{base}/")
 
     # Opens app, clicks "Đổi mật khẩu", page shows #pass0
+    if not dung_pg.locator("a.btn-logout:has-text('Đổi mật khẩu')").is_visible():
+        dung_pg.click("details.account-menu summary")
     dung_pg.click("a.btn-logout:has-text('Đổi mật khẩu')")
     dung_pg.wait_for_url(f"{base}/change-password*")
     dung_pg.wait_for_selector("#pass0Block:not([hidden])")

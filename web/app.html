@@ -26,7 +26,6 @@
     <div>
       <div class="brand-row">
         <a href="#home" class="brand-badge" data-act="go" data-to="home"><img class="brand-logo" src="/static/icon.svg" alt="" width="28" height="28"><span>Học AI</span></a>
-        <button type="button" class="theme-pill" data-act="theme" data-theme-label>Nền Sáng</button>
       </div>
       <div class="dock-now">
         <div class="dock-kicker" id="dockKicker"></div>
@@ -61,15 +60,18 @@
       <nav class="stage-nav" aria-label="Các màn hình">
         <button type="button" class="stage-tab" data-act="go" data-to="home" data-nav="home">Trang đầu</button>
         <button type="button" class="stage-tab" data-act="go" data-to="library" data-nav="library">Thư viện</button>
-        <button type="button" class="stage-tab" data-act="go" data-to="review" data-nav="review">1. Ôn lại</button>
-        <button type="button" class="stage-tab" data-act="go" data-to="listen" data-nav="listen">2. Nghe</button>
-        <button type="button" class="stage-tab" data-act="go" data-to="flashcard" data-nav="flashcard">3. Flashcard</button>
-        <a class="stage-tab" data-article href="#">Bài đầy đủ</a>
+        <a class="stage-tab" href="#tests" data-nav="tests">Bộ đề</a>
       </nav>
       <div class="top-bar-right">
-        <a class="btn-logout" href="/change-password">Đổi mật khẩu</a>
-        <a class="btn-logout" href="/admin" data-admin-link hidden>Quản trị</a>
-        <button type="button" class="btn-logout" data-act="logout">Đăng xuất</button>
+        <details class="account-menu" id="accountMenu">
+          <summary class="account-menu-summary" aria-label="Tài khoản">Tài khoản</summary>
+          <div class="account-menu-panel">
+            <button type="button" class="account-menu-item" data-act="theme" data-theme-label>Nền Sáng</button>
+            <a class="account-menu-item btn-logout" href="/change-password">Đổi mật khẩu</a>
+            <a class="account-menu-item" href="/admin" data-admin-link hidden>Quản trị</a>
+            <button type="button" class="account-menu-item danger" data-act="logout">Đăng xuất</button>
+          </div>
+        </details>
       </div>
     </header>
 
@@ -532,6 +534,7 @@
     <nav class="drawer-nav-list" aria-label="Các màn hình">
       <button type="button" class="drawer-nav-item" data-act="go" data-to="home" data-nav="home"><span>Trang đầu</span></button>
       <button type="button" class="drawer-nav-item" data-act="go" data-to="library" data-nav="library"><span>Thư viện</span></button>
+      <a class="drawer-nav-item" href="#tests" data-nav="tests"><span>Bộ đề</span></a>
       <button type="button" class="drawer-nav-item" data-act="go" data-to="review" data-nav="review"><span>1. Ôn lại</span></button>
       <button type="button" class="drawer-nav-item" data-act="go" data-to="listen" data-nav="listen"><span>2. Nghe</span></button>
       <button type="button" class="drawer-nav-item" data-act="go" data-to="flashcard" data-nav="flashcard"><span>3. Flashcard</span><span class="nav-sub" data-due-short></span></button>

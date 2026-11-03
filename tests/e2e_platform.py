@@ -154,7 +154,8 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.wait_for_selector("#screen-home.active")
     check("new account sees guidance", a.locator("#homeEmptyCta").is_visible() and "Chưa có" in a.locator("#home-title").inner_text())
     check("no start button yet", not a.locator("#homeCta").is_visible())
-    check("no lesson tabs yet", not a.locator(".stage-tab[data-nav=review]").is_visible() and not a.locator(".stage-tab[data-article]").is_visible())
+    top_tabs = [t.strip() for t in a.locator(".stage-nav .stage-tab").all_inner_texts()]
+    check("no lesson tabs yet", top_tabs == ["Trang đầu", "Thư viện", "Bộ đề"] and not a.locator("#navDrawer [data-nav=review]").is_visible() and not a.locator("#navDrawer [data-article]").is_visible())
     a.screenshot(path=str(SHOTS / "empty.png"))
     for screen in ("review", "listen", "flashcard"):
         a.goto(f"{base}/#{screen}")
@@ -236,12 +237,12 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.wait_for_selector("#lessonList .stream-row")
 
     # No audio: the session has no Listen step, and no Ask box without approval.
-    check("no audio hides Listen", not a.locator(".stage-tab[data-nav=listen]").is_visible())
     check("no Ask without approval", not a.locator("#askDock").is_visible() and not a.locator(".capsule-ask-btn").is_visible())
     asks = []
     a.on("request", lambda r: asks.append(r.url) if "/api/ask" in r.url else None)
     a.locator("#homeCta [data-act=start]").click()
     a.wait_for_selector("#screen-review.active")
+    check("no audio hides Listen", "Nghe" not in a.locator("#screen-review .flow-strip").inner_text(), a.locator("#screen-review .flow-strip").inner_text())
     check("next step says Flashcard", "Flashcard" in a.locator("#screen-review [data-next-listen]").inner_text())
     a.locator("#screen-review [data-next-listen]").click()
     a.wait_for_selector("#screen-flashcard.active")
@@ -264,8 +265,12 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.check("#upAttest")
     a.click("#upCommit")
     a.locator("#libMine .stream-row", has_text="Bài có audio").wait_for()
+    check("library: dock and ask are hidden", not a.locator(".studio-dock").is_visible() and not a.locator("#askDock").is_visible())
+    check("top bar has tests tab and account menu", a.locator(".stage-nav .stage-tab[data-nav=tests]").is_visible() and a.locator("details.account-menu").is_visible())
     a.locator("#libMine .stream-row", has_text="Bài có audio").locator("[data-act=start]").click()
     a.wait_for_selector("#screen-review.active")
+    check("in lesson with audio: studio dock visible", a.locator(".studio-dock").is_visible())
+    # Ask approval is tested in e2e_admin; in e2e_platform no packages have Ask approved, so #askDock remains hidden
     a.locator("#screen-review [data-next-listen]").click()
     a.wait_for_selector("#screen-listen.active")
     check("single track shown", a.locator(".track-big:visible").count() == 1)

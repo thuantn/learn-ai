@@ -45,8 +45,13 @@ function go(id, replace, hash) {
   if (!SCREENS.includes(id)) id = "home";
   if (!state.lesson && ["review", "listen", "flashcard", "finish"].includes(id)) id = "home";
   if (id === "listen" && !hasAudio()) id = "flashcard";
+  const isLesson = ["review", "listen", "flashcard", "finish"].includes(id);
+  document.body.classList.toggle("in-lesson", isLesson);
+  document.body.classList.toggle("on-listen", id === "listen");
+  if (!isLesson) openAsk(false);
   $$(".screen").forEach(s => s.classList.toggle("active", s.id === "screen-" + id));
-  $$("[data-nav]").forEach(t => t.dataset.nav === id ? t.setAttribute("aria-current", "page") : t.removeAttribute("aria-current"));
+  const navTarget = id.startsWith("test") ? "tests" : id;
+  $$("[data-nav]").forEach(t => t.dataset.nav === navTarget ? t.setAttribute("aria-current", "page") : t.removeAttribute("aria-current"));
   const targetHash = hash || ("#" + id);
   if (location.hash !== targetHash) history[replace ? "replaceState" : "pushState"](null, "", targetHash);
   closeNav();
@@ -592,6 +597,12 @@ const ACTIONS = {
   }
 };
 document.addEventListener("click", e => {
+  const menu = $("accountMenu");
+  if (menu && menu.hasAttribute("open")) {
+    if (e.target.closest(".account-menu-panel") || !e.target.closest(".account-menu")) {
+      menu.removeAttribute("open");
+    }
+  }
   const el = e.target.closest("[data-act]");
   if (!el) return;
   if (el.tagName === "A") e.preventDefault();
@@ -607,11 +618,18 @@ document.addEventListener("input", e => {
   renderTime();
 });
 document.addEventListener("change", e => { if (e.target.matches("[data-scrub]")) savePosition(); });
-document.querySelector("[data-article]") && $$("[data-article]").forEach(a => a.addEventListener("click", () => { audio.pause(); savePosition(true); }));
+document.querySelector("[data-article]") && $$("[data-article]").forEach(a => a.addEventListener("click", () => { audio.pause(); savePosition(true); closeNav(); }));
+$("navDrawer") && $("navDrawer").addEventListener("click", e => { if (e.target.closest("a")) closeNav(); });
 
 document.addEventListener("keydown", e => {
   if (e.target.matches("input:not([type=range]),textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.key === "Escape") { closeNav(); openAsk(false); return; }
+  if (e.key === "Escape") {
+    closeNav();
+    openAsk(false);
+    const menu = $("accountMenu");
+    if (menu) menu.removeAttribute("open");
+    return;
+  }
   const on = $$(".screen.active")[0];
   if (!on) return;
   if (on.id === "screen-listen") {

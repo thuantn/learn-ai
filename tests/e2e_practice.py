@@ -601,7 +601,7 @@ def run(br, base, temp, work):
     an.wait_for_selector("#screen-test-result.active")
     an.wait_for_timeout(1500)
     in_test_after = an.evaluate("document.body.classList.contains('in-test')")
-    dock_visible = an.locator(".studio-dock").is_visible()
+    dock_visible = an.locator(".unified-top-bar").is_visible()  # in-test hides the top bar; the dock is now hidden outside lessons anyway
     rev_state = json.loads(call(an, "GET", f"/api/attempts/{rev_aid}")["text"])["status"]
     check("rời màn làm bài bằng Back dọn sạch",
           in_test_before and not in_test_after and dock_visible and not submits and rev_state != "submitted",
