@@ -6,12 +6,13 @@
 import argparse
 import pathlib
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from app.bundle import pack, safe_extract
-from app.contract import check_package, errors
+from app.contract import check_package, errors, unpack_test_file
 
 
 def _print_problems(problems):
@@ -36,7 +37,12 @@ def main(argv=None):
 
     args = ap.parse_args(argv)
     if args.cmd == "validate":
-        problems = check_package(pathlib.Path(args.dir), args.profile)
+        target = pathlib.Path(args.dir)
+        if target.suffix.lower() == ".json":
+            with tempfile.TemporaryDirectory() as tmp:
+                problems = unpack_test_file(target, pathlib.Path(tmp))
+        else:
+            problems = check_package(target, args.profile)
         _print_problems(problems)
         if errors(problems):
             return 1

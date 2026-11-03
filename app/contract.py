@@ -26,6 +26,27 @@ MAX_TITLE = 200
 MAX_TOPIC = 80
 MAX_DESCRIPTION = 1000
 MAX_LESSONS = 50
+# Test files are copied into the database, so the whole package's tests stay capped.
+MAX_TEST_JSON = 5 * 1024 * 1024
+MAX_TESTS_TOTAL = 16 * 1024 * 1024
+MAX_TESTS = 20
+MAX_TEST_ITEMS = 200
+MAX_OPTIONS = 8
+MAX_OPTION_TEXT = 1000
+MAX_BEST_PRACTICE = 1000
+MAX_DOMAIN = 100
+MAX_MINUTES = 600
+MAX_DOCS = 5
+MAX_DOMAINS = 12
+TEST_LANGS = ("vi", "en")
+# Words that name a choice by letter give wrong answers once the options are shuffled.
+LETTER_RE = re.compile(
+    r"(?i:đáp án|lựa chọn|phương án|option|answer|choice)\s+[A-H]\b"
+    r"|\b(?i:cả|both)\s+[A-H]\s+(?i:và|and)\s+[A-H]\b"
+    r"|(?i:tất cả|cả|không có).{0,20}(?i:đáp án|lựa chọn|phương án)\s+(?i:trên|nào)"
+    r"|(?i:all|none) of the (?i:above|options)"
+)
+MD_LINK_RE = re.compile(r"\]\(\s*<?([^)\s>]+)")
 
 
 @dataclass
@@ -41,12 +62,69 @@ def errors(problems):
     return [p for p in problems if p.severity == "error"]
 
 
-def read_json_file(path):
+def read_json_file(path, limit=MAX_JSON):
     """Reads JSON accepting UTF-8 BOM and CRLF line endings, rejecting huge files."""
     path = pathlib.Path(path)
-    if path.stat().st_size > MAX_JSON:
+    if path.stat().st_size > limit:
         raise ValueError("File JSON quá lớn.")
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def read_test_file(path):
+    """Reads one tests/<id>.json file, capped at MAX_TEST_JSON."""
+    return read_json_file(path, MAX_TEST_JSON)
+
+
+def unpack_test_file(src, dest):
+    """Turns a single .json upload into a package folder, then checks it.
+
+    Every id must pass ID_RE and be unique before any file is written, so a
+    hostile body cannot escape the destination folder.
+    """
+    try:
+        body = read_json_file(src, MAX_TESTS_TOTAL)
+    except Exception:
+        return [Problem("package.json", "json_parse", "Không đọc được file bộ đề.")]
+    if not isinstance(body, dict):
+        return [Problem("package.json", "json_parse", "File bộ đề phải là một đối tượng.")]
+    body_tests = body.get("tests")
+    if not isinstance(body_tests, list):
+        return [Problem("package.json", "json_parse", "File bộ đề phải có danh sách tests.")]
+
+    entries = []
+    seen = set()
+    for test in body_tests:
+        if not isinstance(test, dict):
+            return [Problem("package.json", "bad_id", "Mỗi bộ đề phải là một đối tượng.")]
+        test_id = test.get("id")
+        if _bad_id(test_id):
+            return [Problem("package.json", "bad_id", f"Id bộ đề không hợp lệ: {test_id}.")]
+        if test_id in seen:
+            return [Problem("package.json", "duplicate_id", f"Id bộ đề bị trùng: {test_id}.")]
+        seen.add(test_id)
+        entries.append(test)
+
+    package = {
+        "contract_version": "v1",
+        "slug": body.get("slug", ""),
+        "title": body.get("title", ""),
+        "topic": body.get("topic", ""),
+        "description": body.get("description", ""),
+        "lessons": [],
+        "tests": [test["id"] for test in entries],
+    }
+    try:
+        dest = pathlib.Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        tests_dir = dest / "tests"
+        tests_dir.mkdir(exist_ok=True)
+        (dest / "package.json").write_text(json.dumps(package), encoding="utf-8")
+        for entry in entries:
+            test_body = {k: v for k, v in entry.items() if k != "id"}
+            (tests_dir / f"{entry['id']}.json").write_text(json.dumps(test_body), encoding="utf-8")
+    except Exception:
+        return [Problem("package.json", "write_failed", "Không ghi được package rời file bộ đề.")]
+    return check_package(dest)
 
 
 def audio_seconds(path):
@@ -183,8 +261,16 @@ def check_package(root, profile="basic"):
     if not isinstance(lessons, list):
         problems.append(Problem("package.json", "lessons", "Danh sách bài phải là một mảng."))
         return problems
-    if not (1 <= len(lessons) <= MAX_LESSONS):
+    tests = package.get("tests", [])
+    if not isinstance(tests, list):
+        problems.append(Problem("package.json", "tests", "Danh sách bộ đề phải là một mảng."))
+        return problems
+    if not lessons and not tests:
+        problems.append(Problem("package.json", "package_empty", "Package phải có ít nhất một bài học hoặc một bộ đề."))
+    if len(lessons) > MAX_LESSONS:
         problems.append(Problem("package.json", "lessons_count", f"Số bài phải từ 1 đến {MAX_LESSONS}."))
+    if len(tests) > MAX_TESTS:
+        problems.append(Problem("package.json", "test_count", f"Số bộ đề tối đa là {MAX_TESTS}."))
 
     seen_ids = set()
     for lesson_id in lessons:
@@ -200,6 +286,16 @@ def check_package(root, profile="basic"):
             problems.append(Problem(f"lessons/{lesson_id}", "lesson_missing", f"Thiếu thư mục bài: lessons/{lesson_id}."))
             continue
         problems.extend(_check_lesson(lesson_dir, lesson_id, profile, seen_ids))
+
+    for test_id in tests:
+        if _bad_id(test_id):
+            problems.append(Problem("package.json", "bad_id", f"Id bộ đề không hợp lệ: {test_id}."))
+            continue
+        if test_id in seen_ids:
+            problems.append(Problem("package.json", "duplicate_id", f"Id bộ đề bị trùng: {test_id}."))
+            continue
+        seen_ids.add(test_id)
+        problems.extend(_check_test(root, test_id))
 
     for path in root.rglob("*"):
         if not path.is_file() or path.is_symlink():
@@ -227,6 +323,202 @@ def check_package(root, profile="basic"):
         meta = sum(f.stat().st_size for d in lessons_root.iterdir() for f in (d / "lesson.json", d / "content.md") if f.is_file())
         if meta > MAX_META_TOTAL:
             problems.append(Problem("lessons", "meta_size", "Tổng lesson.json và content.md của package quá lớn."))
+
+    tests_root = root / "tests"
+    if tests_root.is_dir():
+        total_tests = sum(f.stat().st_size for f in tests_root.iterdir() if f.is_file())
+        if total_tests > MAX_TESTS_TOTAL:
+            problems.append(Problem("tests", "test_size", "Tổng dung lượng bộ đề của package quá lớn."))
+
+    return problems
+
+
+def _has_bad_md_link(text):
+    return any(not url.startswith("https://") for url in MD_LINK_RE.findall(text))
+
+
+def _check_test(root, test_id):
+    problems = []
+    rel = f"tests/{test_id}.json"
+    test_path = pathlib.Path(root) / "tests" / f"{test_id}.json"
+    if not test_path.is_file():
+        problems.append(Problem(rel, "test_missing", f"Thiếu file bộ đề: {rel}."))
+        return problems
+    if test_path.stat().st_size > MAX_TEST_JSON:
+        problems.append(Problem(rel, "test_size", "File bộ đề quá lớn."))
+        return problems
+    try:
+        test = read_test_file(test_path)
+    except Exception:
+        problems.append(Problem(rel, "json_parse", "Không đọc được file bộ đề."))
+        return problems
+    if not isinstance(test, dict):
+        problems.append(Problem(rel, "json_parse", "File bộ đề phải là một đối tượng."))
+        return problems
+
+    if _has_invisible(test):
+        problems.append(Problem(rel, "invisible_text", "Bộ đề có ký tự vô hình. Xóa chúng đi."))
+
+    title = test.get("title", "")
+    if not isinstance(title, str) or not title.strip():
+        problems.append(Problem(rel, "empty_text", f"Bộ đề {test_id} đang trống tiêu đề."))
+    elif _too_long(title, MAX_TITLE):
+        problems.append(Problem(rel, "text_too_long", f"Tiêu đề bộ đề quá dài: {len(title)} > {MAX_TITLE}."))
+
+    description = test.get("description", "")
+    if not isinstance(description, str):
+        problems.append(Problem(rel, "bad_type", "Mô tả bộ đề phải là chuỗi."))
+    elif _too_long(description, MAX_DESCRIPTION):
+        problems.append(Problem(rel, "text_too_long", f"Mô tả bộ đề quá dài: {len(description)} > {MAX_DESCRIPTION}."))
+
+    lang = test.get("lang", "vi")
+    if not isinstance(lang, str) or lang not in TEST_LANGS:
+        problems.append(Problem(rel, "test_lang", "Ngôn ngữ bộ đề chỉ chấp nhận vi hoặc en."))
+
+    minutes = test.get("time_limit_minutes", 0)
+    if not isinstance(minutes, int) or isinstance(minutes, bool) or not (0 <= minutes <= MAX_MINUTES):
+        problems.append(Problem(rel, "test_time", f"Thời gian làm bài phải từ 0 đến {MAX_MINUTES} phút."))
+
+    pass_percent = test.get("pass_percent", 70)
+    if not isinstance(pass_percent, int) or isinstance(pass_percent, bool) or not (1 <= pass_percent <= 100):
+        problems.append(Problem(rel, "test_pass", "Ngưỡng đậu phải từ 1 đến 100."))
+
+    items = test.get("items")
+    if not isinstance(items, list) or not (1 <= len(items) <= MAX_TEST_ITEMS):
+        problems.append(Problem(rel, "test_items", f"Số câu phải từ 1 đến {MAX_TEST_ITEMS}."))
+        return problems
+
+    seen_items = set()
+    domains = set()
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            problems.append(Problem(rel, "test_items", f"Câu {idx + 1}: Câu hỏi phải là một đối tượng."))
+            continue
+        iid = item.get("id", "")
+        prefix = f"Câu {iid}:"
+        if _bad_id(iid):
+            problems.append(Problem(rel, "bad_id", f"{prefix} Id câu không hợp lệ: {iid}."))
+        elif iid in seen_items:
+            problems.append(Problem(rel, "duplicate_id", f"{prefix} Id câu bị trùng: {iid}."))
+        else:
+            seen_items.add(iid)
+
+        domain = item.get("domain", "")
+        if not isinstance(domain, str):
+            problems.append(Problem(rel, "bad_type", f"{prefix} Lĩnh vực phải là chuỗi."))
+        elif _too_long(domain, MAX_DOMAIN):
+            problems.append(Problem(rel, "text_too_long", f"{prefix} Lĩnh vực quá dài."))
+        else:
+            domains.add((domain.strip() or "Khác").casefold())
+
+        itype = item.get("type")
+        if itype not in ("single", "multi"):
+            problems.append(Problem(rel, "test_type", f"{prefix} Loại câu chỉ chấp nhận single hoặc multi."))
+
+        question = item.get("question", "")
+        if not isinstance(question, str) or not question.strip():
+            problems.append(Problem(rel, "empty_text", f"{prefix} Câu hỏi đang trống nội dung."))
+        else:
+            if _too_long(question, MAX_TEXT):
+                problems.append(Problem(rel, "text_too_long", f"{prefix} Câu hỏi quá dài."))
+            if _has_bad_md_link(question):
+                problems.append(Problem(rel, "bad_link", f"{prefix} Link trong câu hỏi phải bắt đầu bằng https://."))
+
+        options = item.get("options")
+        opt_ids = []
+        opt_texts = []
+        if not isinstance(options, list) or not (2 <= len(options) <= MAX_OPTIONS):
+            problems.append(Problem(rel, "test_options", f"{prefix} Số lựa chọn phải từ 2 đến {MAX_OPTIONS}."))
+        else:
+            bad_opt = False
+            for opt in options:
+                if not isinstance(opt, dict):
+                    bad_opt = True
+                    continue
+                oid = opt.get("id")
+                otext = opt.get("text")
+                if not isinstance(oid, str) or len(oid) != 1 or oid not in "ABCDEFGH" or oid in opt_ids:
+                    bad_opt = True
+                else:
+                    opt_ids.append(oid)
+                if not isinstance(otext, str) or not otext.strip():
+                    bad_opt = True
+                else:
+                    opt_texts.append(otext)
+                    if _too_long(otext, MAX_OPTION_TEXT):
+                        problems.append(Problem(rel, "text_too_long", f"{prefix} Nội dung lựa chọn quá dài."))
+                    if _has_bad_md_link(otext):
+                        problems.append(Problem(rel, "bad_link", f"{prefix} Link trong lựa chọn phải bắt đầu bằng https://."))
+                why = opt.get("why", "")
+                if not isinstance(why, str):
+                    problems.append(Problem(rel, "bad_type", f"{prefix} Giải thích lựa chọn phải là chuỗi."))
+                else:
+                    opt_texts.append(why)
+                    if _too_long(why, MAX_OPTION_TEXT):
+                        problems.append(Problem(rel, "text_too_long", f"{prefix} Giải thích lựa chọn quá dài."))
+                    if _has_bad_md_link(why):
+                        problems.append(Problem(rel, "bad_link", f"{prefix} Link trong giải thích lựa chọn phải bắt đầu bằng https://."))
+            if bad_opt:
+                problems.append(Problem(rel, "test_options", f"{prefix} Lựa chọn không hợp lệ."))
+
+        correct = item.get("correct")
+        if (
+            not isinstance(correct, list)
+            or not correct
+            or any(not isinstance(c, str) or c not in opt_ids for c in correct)
+            or len(set(correct)) != len(correct)
+            or (itype == "single" and len(correct) != 1)
+            or (itype == "multi" and len(correct) < 2)
+        ):
+            problems.append(Problem(rel, "test_correct", f"{prefix} Đáp án đúng không hợp lệ."))
+
+        explanation = item.get("explanation", "")
+        if not isinstance(explanation, str) or not explanation.strip():
+            problems.append(Problem(rel, "empty_text", f"{prefix} Lời giải đang trống."))
+        else:
+            if _too_long(explanation, MAX_TEXT):
+                problems.append(Problem(rel, "text_too_long", f"{prefix} Lời giải quá dài."))
+            if _has_bad_md_link(explanation):
+                problems.append(Problem(rel, "bad_link", f"{prefix} Link trong lời giải phải bắt đầu bằng https://."))
+
+        best_practice = item.get("best_practice", "")
+        if not isinstance(best_practice, str):
+            problems.append(Problem(rel, "bad_type", f"{prefix} Best practice phải là chuỗi."))
+        else:
+            if _too_long(best_practice, MAX_BEST_PRACTICE):
+                problems.append(Problem(rel, "text_too_long", f"{prefix} Best practice quá dài."))
+            if _has_bad_md_link(best_practice):
+                problems.append(Problem(rel, "bad_link", f"{prefix} Link trong best practice phải bắt đầu bằng https://."))
+
+        docs = item.get("docs", [])
+        if not isinstance(docs, list) or len(docs) > MAX_DOCS:
+            problems.append(Problem(rel, "test_docs", f"{prefix} Danh sách docs phải là mảng tối đa {MAX_DOCS} link."))
+        else:
+            for doc in docs:
+                if not isinstance(doc, str) or not doc.startswith("https://"):
+                    problems.append(Problem(rel, "bad_link", f"{prefix} Link trong docs phải bắt đầu bằng https://."))
+                    break
+
+        shuffle = item.get("shuffle", True)
+        if not isinstance(shuffle, bool):
+            problems.append(Problem(rel, "bad_type", f"{prefix} Trường shuffle phải là boolean."))
+        elif shuffle:
+            texts_to_scan = [
+                t for t in [question, explanation, best_practice, *opt_texts] if isinstance(t, str)
+            ]
+            if any(LETTER_RE.search(t) for t in texts_to_scan):
+                problems.append(Problem(
+                    rel, "test_letters",
+                    f"{prefix} Nội dung nhắc tới chữ cái lựa chọn trong khi vẫn xáo thứ tự.",
+                    "warning",
+                ))
+
+    if len(domains) > MAX_DOMAINS:
+        problems.append(Problem(
+            rel, "test_domains",
+            f"Bộ đề có hơn {MAX_DOMAINS} lĩnh vực ({len(domains)}).",
+            "warning",
+        ))
 
     return problems
 
