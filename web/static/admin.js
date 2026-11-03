@@ -117,7 +117,11 @@ function renderAi(status, list) {
 
 async function load() {
   const d = await api("/api/admin/overview");
-  fill("pendingList", "pendingEmpty", d.pending, p => row(p.title, [pills([p.owner, `${p.lessons} bài`])], [
+  fill("pendingList", "pendingEmpty", d.pending, p => row(p.title, [pills([
+    p.owner,
+    p.lessons ? `${p.lessons} bài` : null,
+    p.tests ? `${p.tests} đề` : null,
+  ])], [
     button("Đọc và duyệt", "btn-studio-primary", guarded(() => openReview(p.id))),
   ]));
   renderAi(d.ai, d.providers);
@@ -132,7 +136,14 @@ async function load() {
     const actions = [button("Đọc nội dung", "btn-studio-secondary", guarded(() => openReview(p.id)))];
     if (p.ask_status === "approved") actions.push(button("Tắt ô Hỏi", "btn-studio-secondary", guarded(() => decide(p.id, "off"))));
     actions.push(button("Gỡ", "btn-studio-secondary btn-danger-soft", guarded(() => removePackage(p.id, p.title))));
-    return row(p.title, [pills([p.owner, `${p.lessons} bài`, size(p.size_bytes), `Bản ${p.version}`, ASK_LABEL[p.ask_status]])], actions);
+    return row(p.title, [pills([
+      p.owner,
+      p.lessons ? `${p.lessons} bài` : null,
+      p.tests ? `${p.tests} đề` : null,
+      size(p.size_bytes),
+      `Bản ${p.version}`,
+      ASK_LABEL[p.ask_status],
+    ])], actions);
   });
   fill("userList", null, d.users, u => row(u.name, [pills([u.admin && "Admin", `${size(u.used)} / ${size(u.quota)}`])]));
   fill("logList", "logEmpty", d.log, x => row(LOG_LABEL[x.action] || x.action, [pills([x.actor, when(x.at)]), el("p", "fb-body", [x.target, x.detail].filter(Boolean).join(" · "))]));
@@ -155,13 +166,42 @@ async function openReview(id) {
   $("reviewError").hidden = true;
   const body = $("reviewBody");
   body.textContent = "";
-  d.lessons.forEach(l => {
+  (d.lessons || []).forEach(l => {
     const box = el("article", "fb-card");
     box.append(el("h3", "stream-title", l.title));
     box.append(section("Tóm tắt", l.summary));
     box.append(section("Thẻ", l.cards.map(c => `${c.q} → ${c.a}`)));
     if (l.quiz.length) box.append(section("Quiz", l.quiz.map(q => [q.q, `Lựa chọn: ${q.options.join("; ")}`, `Đáp án: ${q.options[q.answer]}`, q.why && `Giải thích: ${q.why}`].filter(Boolean).join("\n"))));
     box.append(section("Nội dung AI đọc", [l.content || "Bài này không có content.md."]));
+    body.append(box);
+  });
+  (d.tests || []).forEach(t => {
+    const box = el("article", "fb-card");
+    box.append(el("h3", "stream-title", `Bộ đề: ${t.title}`));
+    const testMeta = [];
+    if (t.description) testMeta.push(`Mô tả: ${t.description}`);
+    testMeta.push(`Số câu: ${t.items ? t.items.length : 0}`);
+    if (t.time_limit_minutes) testMeta.push(`Thời gian: ${t.time_limit_minutes} phút`);
+    testMeta.push(`Ngưỡng đậu: ${t.pass_percent || 70}%`);
+    box.append(section("Thông tin đề", testMeta));
+
+    (t.items || []).forEach((it, idx) => {
+      const lines = [];
+      lines.push(`Câu ${idx + 1} (${it.id}${it.domain ? ` · ${it.domain}` : ""}): ${it.question}`);
+      const opts = (it.options || []).map(o => {
+        const isCor = it.correct && it.correct.includes(o.id);
+        let s = `${o.id}. ${o.text}${isCor ? " [ĐÁP ÁN ĐÚNG]" : ""}`;
+        if (o.why) s += ` (Vì sao: ${o.why})`;
+        return s;
+      });
+      lines.push("Lựa chọn:\n" + opts.join("\n"));
+      const corText = (it.options || []).filter(o => it.correct && it.correct.includes(o.id)).map(o => `${o.id}. ${o.text}`).join("; ");
+      lines.push(`Đáp án đúng: ${corText}`);
+      if (it.explanation) lines.push(`Lời giải: ${it.explanation}`);
+      if (it.best_practice) lines.push(`Best practice: ${it.best_practice}`);
+      if (it.docs && it.docs.length) lines.push(`Tài liệu: ${it.docs.join("; ")}`);
+      box.append(section(`Câu ${idx + 1}`, lines));
+    });
     body.append(box);
   });
   $("reviewApprove").hidden = d.ask_status !== "pending";

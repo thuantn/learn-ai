@@ -484,6 +484,40 @@
     <div class="lesson-dialog-buttons"><button type="button" class="btn-studio-secondary" data-act="fb-list-close">Đóng</button></div>
   </div>
 </dialog>
+
+<dialog class="lesson-dialog" id="testAskDialog" aria-labelledby="testAskTitle">
+  <div class="lesson-dialog-form">
+    <div class="ask-dock-header">
+      <h2 class="display-font ask-title" id="testAskTitle">Hỏi về câu này</h2>
+      <div class="ask-header-controls">
+        <button type="button" class="btn-expand-ask" id="testAskClear" data-act="test-ask-clear" hidden>Xóa</button>
+        <button type="button" class="ask-close-mobile" data-act="test-ask-close" aria-label="Đóng ô hỏi">✕</button>
+      </div>
+    </div>
+    <p class="ask-context" id="testAskContext">Đang hỏi về câu này. Câu hỏi được lưu để bạn xem lại và hỏi tiếp; tác giả đề không xem được.</p>
+    <div class="ask-thread" id="testAskThread" aria-live="polite"></div>
+    <form id="testAskForm">
+      <label class="sr-only" for="testAskInput">Nhập câu hỏi</label>
+      <textarea id="testAskInput" class="ask-dock-textarea" maxlength="2000" placeholder="Hỏi về câu này..."></textarea>
+      <p class="studio-alert error" id="testAskError" role="alert" hidden></p>
+      <div class="lesson-dialog-buttons">
+        <button type="button" class="btn-studio-secondary" data-act="test-ask-close">Đóng</button>
+        <button type="submit" class="btn-studio-primary" id="testAskSend">Gửi câu hỏi</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog class="lesson-dialog" id="testStatsDialog" aria-labelledby="testStatsTitle">
+  <div class="lesson-dialog-form">
+    <div>
+      <p class="dock-note">Thống kê bộ đề</p>
+      <h2 class="fc-title" id="testStatsTitle"></h2>
+    </div>
+    <div class="test-stats-list" id="testStatsList"></div>
+    <div class="lesson-dialog-buttons"><button type="button" class="btn-studio-secondary" data-act="test-stats-close">Đóng</button></div>
+  </div>
+</dialog>
 <aside class="mobile-nav-drawer" id="navDrawer" aria-label="Menu">
   <div>
     <div class="drawer-top-bar">

@@ -3,6 +3,7 @@
 """
 import argparse
 import base64
+import http.server
 import json
 import os
 import pathlib
@@ -11,6 +12,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 
@@ -28,6 +30,28 @@ NEW_PW = "ngựa vàng chạy qua cầu mây"
 FAILS = []
 SHOTS = pathlib.Path(tempfile.gettempdir()) / "learn-ai-practice-shots"
 XSS = "<img src=x onerror=window.__xss=1>"
+SEEN = []
+
+LAUNCH = """
+import sys, uvicorn
+from app import ai
+ai.PROVIDERS["openrouter"]["base"] = sys.argv[1]
+uvicorn.run("app.main:app", port=int(sys.argv[2]), log_level="warning")
+"""
+
+
+class FakeAI(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        SEEN.append({"auth": self.headers.get("Authorization"), "body": body})
+        out = json.dumps({"choices": [{"message": {"content": "<style>*{display:none !important}</style>\n\n**Trả lời câu hỏi** \\(x^2\\)"}}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def log_message(self, *a):
+        pass
 
 
 def check(name, ok, info=""):
@@ -61,6 +85,7 @@ def login_first(pg, base, name, temp, path="/"):
     pg.fill("#pass1", NEW_PW)
     pg.fill("#pass2", NEW_PW)
     pg.click("#submitBtn")
+    pg.wait_for_selector("#screen-home.active")
 
 
 def call(pg, method, url, body=None):
@@ -98,12 +123,13 @@ def find_test(pg, title):
 
 def run(br, base, temp, work):
     errs = []
+    boss = new_page(br, errs)
     an = new_page(br, errs)
     binh = new_page(br, errs)
+    login_first(boss, base, "boss@example.com", temp["boss@example.com"])
     login_first(an, base, "an@example.com", temp["an@example.com"])
-    an.wait_for_url(base + "/**")
     login_first(binh, base, "binh@example.com", temp["binh@example.com"])
-    binh.wait_for_url(base + "/**")
+    call(boss, "PUT", "/api/admin/ai", {"provider": "openrouter", "model": "any", "key": "sk-test-abcd1234"})
 
     # 1. dán JSON có bọc khối code
     # hộp dán nhận ```json ...``` kèm câu dẫn, tới bước xác nhận; question có khối code bên trong vẫn nguyên sau khi cài
@@ -542,6 +568,212 @@ def run(br, base, temp, work):
           in_test_before and not in_test_after and dock_visible and not submits and rev_state != "submitted",
           f"in_test_after={in_test_after}, dock={dock_visible}, submits={submits}, status={rev_state}")
 
+    # ---------- Task 8 Checks ----------
+    # Test and item ids allow letters, digits and dashes only (no underscore).
+    it8_1 = make_item(id="q-1", question="Thủ đô của Việt Nam là gì?", options=("A", "B", "C", "D"), correct=("A",), explanation="Hà Nội là thủ đô của Việt Nam.")
+    it8_2 = make_item(id="q-2", question="Dãy núi nào cao nhất thế giới?", options=("A", "B", "C", "D"), correct=("B",), explanation="Himalaya là dãy núi cao nhất thế giới.")
+    t8_test = make_test(title="Đề Thi Task Tám", items=[it8_1, it8_2])
+    pkg_t8 = one_file({"t-main": t8_test}, slug="de-t8")
+    pkg_t8["title"] = "Gói Task Tám"  # the admin queue shows package titles
+
+    an.goto(base + "/#library")
+    an.wait_for_selector("#screen-library.active")
+    open_upload(an)
+    an.fill("#upJsonText", json.dumps(pkg_t8))
+    an.click("[data-act=up-paste-send]")
+    an.wait_for_selector("#upConfirm:not([hidden])")
+    an.check("#upAttest")
+    an.click("#upCommit")
+    an.wait_for_selector("#uploadDialog", state="hidden")
+
+    t8_item = find_test(an, "Đề Thi Task Tám")
+    t8_key = t8_item["key"]
+    t8_pid = t8_item["package_id"]
+
+    # Author requests Ask approval for pkg_t8
+    call(an, "POST", f"/api/packages/{t8_pid}/ask-request")
+
+    # Admin (boss) reviews and approves
+    boss.goto(base + "/admin")
+    boss.wait_for_selector("#pendingList .stream-row")
+    boss.click("#pendingList .stream-row:has-text('Gói Task Tám') [type=button]")
+    boss.wait_for_selector("#reviewDialog[open]")
+    poll(lambda: "Đề Thi Task Tám" in boss.inner_text("#reviewBody"))
+    boss_rev_text = boss.inner_text("#reviewBody")
+    check("admin duyệt thấy đề",
+          "Bộ đề: Đề Thi Task Tám" in boss_rev_text and
+          "Thủ đô của Việt Nam là gì?" in boss_rev_text and
+          "Đáp án đúng" in boss_rev_text and
+          "Lời giải" in boss_rev_text)
+    boss.screenshot(path=str(SHOTS / "admin-review-1280.png"))
+    boss.set_viewport_size({"width": 360, "height": 740})
+    boss.wait_for_timeout(200)
+    boss.screenshot(path=str(SHOTS / "admin-review-360.png"))
+    boss.set_viewport_size({"width": 1280, "height": 900})
+    boss.click("#reviewApprove")
+    boss.wait_for_selector("#reviewDialog", state="hidden")
+
+    # 1. không có nút Hỏi khi đang Thi thử
+    an.goto(f"{base}/#test={t8_key}")
+    an.wait_for_selector("#screen-test-detail.active")
+    an.click("#testDetailActions [data-act=attempt-start][data-mode=exam]")
+    an.wait_for_selector("#screen-test-run.active")
+    an.wait_for_selector(".test-option-btn")
+    exam_ask_count = an.locator("[data-act=test-item-ask]").count()
+    check("không có nút Hỏi khi đang Thi thử", exam_ask_count == 0)
+
+    # 2. báo sai tới tác giả kèm câu
+    # Nút báo sai ở mọi câu, kể cả đang Thi thử
+    fb_q = next(q for q in ("Thủ đô của Việt Nam là gì?", "Dãy núi nào cao nhất thế giới?") if q in an.inner_text("#testQuestionBox"))
+    an.click("[data-act=test-item-feedback]")
+    an.wait_for_selector("#feedbackDialog[open]")
+    an.fill("#fbText", "Câu hỏi thủ đô có thể gây nhầm lẫn")
+    an.click("#fbSend")
+    an.wait_for_selector("#feedbackDialog", state="hidden")
+
+    # Assert report reached API and database
+    fb_res = json.loads(call(an, "GET", f"/api/packages/{t8_pid}/feedback")["text"])["feedback"]
+    rep = next((f for f in fb_res if "gây nhầm lẫn" in f["body"]), None)
+    an.goto(base + "/#library")
+    an.wait_for_selector("#screen-library.active")
+    an.click("#libMine .stream-row:has-text('Gói Task Tám') [data-act=lib-feedback]")
+    an.wait_for_selector("#feedbackListDialog[open]")
+    poll(lambda: "gây nhầm lẫn" in an.inner_text("#fbList"))
+    fb_list_screen = an.inner_text("#fbList")
+    an.click("[data-act=fb-list-close]")
+    an.wait_for_selector("#feedbackListDialog", state="hidden")
+    check("báo sai tới tác giả kèm câu",
+          rep is not None and
+          rep["target_type"] == "test_item" and
+          rep["lesson_title"] == "Đề Thi Task Tám" and
+          fb_q in (rep["target_text"] or "") and
+          fb_q in fb_list_screen and
+          "Đề Thi Task Tám" in fb_list_screen)
+
+    # 3. Hỏi về câu chạy sau khi kiểm tra, còn sau khi tải lại
+    # 4. câu trả lời có <style> không làm hỏng trang
+    an.goto(f"{base}/#test={t8_key}")
+    an.wait_for_selector("#screen-test-detail.active")
+    an.click("#testDetailActions [data-act=attempt-start][data-mode=practice]")
+    an.wait_for_selector("#screen-test-run.active")
+    an.wait_for_selector(".test-option-btn")
+    # Check item
+    ask_q = next(q for q in ("Thủ đô của Việt Nam là gì?", "Dãy núi nào cao nhất thế giới?") if q in an.inner_text("#testQuestionBox"))
+    other_q = ({"Thủ đô của Việt Nam là gì?", "Dãy núi nào cao nhất thế giới?"} - {ask_q}).pop()
+    an.locator(".test-option-btn").first.click()
+    an.click("#btnTestCheck")
+    an.wait_for_selector("#testQuestionBox .test-checked-banner")
+    an.wait_for_selector("[data-act=test-item-ask]")
+
+    # Open Ask dialog
+    an.click("[data-act=test-item-ask]")
+    an.wait_for_selector("#testAskDialog[open]")
+    an.fill("#testAskInput", "Giải thích vì sao câu này đúng?")
+    seen_len_before = len(SEEN)
+    an.click("#testAskSend")
+    poll(lambda: an.locator("#testAskThread .md-answer").count() > 0)
+    poll(lambda: "Đang trả lời" not in an.inner_text("#testAskThread"))
+
+    # Assert model received only that one item's question and none of the other items
+    assert len(SEEN) == seen_len_before + 1
+    model_sys_prompt = SEEN[-1]["body"]["messages"][0]["content"]
+    check("model chỉ nhận câu đang hỏi", ask_q in model_sys_prompt and other_q not in model_sys_prompt, ask_q)
+
+    # Assert style tag was stripped and didn't break the page
+    ask_send_btn_vis = an.locator("#testAskSend").is_visible()
+    ask_dia_vis = an.locator("#testAskDialog").is_visible()
+    bold = an.locator("#testAskThread .md-answer strong")
+    answer_bold_rendered = bold.count() > 0 and bold.first.inner_text() == "Trả lời câu hỏi"
+    styles_in_thread = an.locator("#testAskThread style").count()
+    check("câu trả lời có <style> không làm hỏng trang", ask_send_btn_vis and ask_dia_vis and answer_bold_rendered and styles_in_thread == 0,
+          f"bold={answer_bold_rendered}, styles={styles_in_thread}, text={an.inner_text('#testAskThread')[:120]!r}")
+
+    # Screenshots of ask dialog
+    an.screenshot(path=str(SHOTS / "practice-ask-1280.png"))
+    an.set_viewport_size({"width": 360, "height": 740})
+    an.wait_for_timeout(200)
+    an.screenshot(path=str(SHOTS / "practice-ask-360.png"))
+    an.set_viewport_size({"width": 1280, "height": 900})
+
+    # Reload and verify conversation survives
+    an.reload()
+    an.wait_for_selector("#screen-test-run.active")
+    an.wait_for_selector("[data-act=test-item-ask]")
+    an.click("[data-act=test-item-ask]")
+    an.wait_for_selector("#testAskDialog[open]")
+    poll(lambda: an.locator("#testAskThread .is-question").count() > 0)
+    thread_q = an.inner_text("#testAskThread .is-question")
+    thread_a = an.inner_text("#testAskThread .md-answer")
+    check("Hỏi về câu chạy sau khi kiểm tra, còn sau khi tải lại",
+          "Giải thích vì sao" in thread_q and "Trả lời câu hỏi" in thread_a)
+    an.click("[data-act=test-ask-close]:visible")
+    an.wait_for_selector("#testAskDialog", state="hidden")
+
+    # 5. thống kê ẩn dưới 3 người, hiện khi đủ
+    an.goto(base + "/#library")
+    an.wait_for_selector("#screen-library.active")
+    an.click("#libMine .stream-row:has-text('Gói Task Tám') [data-act=lib-test-stats]")
+    an.wait_for_selector("#testStatsDialog[open]")
+    poll(lambda: "chưa đủ 3 người" in an.inner_text("#testStatsList").lower())
+    stats_screen_1 = an.inner_text("#testStatsList")
+    api_stat_1 = json.loads(call(an, "GET", f"/api/packages/{t8_pid}/test-stats")["text"])["tests"][0]
+    hidden_under_3 = api_stat_1["hidden"] == 2 and len(api_stat_1["items"]) == 0 and "2 câu chưa đủ 3 người" in stats_screen_1 and "Thủ đô của Việt Nam" not in stats_screen_1
+    an.click("[data-act=test-stats-close]")
+    an.wait_for_selector("#testStatsDialog", state="hidden")
+
+    # Share with 3 accounts and answer question q-1
+    call(an, "POST", f"/api/packages/{t8_pid}/share", {"email": "u1@example.com"})
+    call(an, "POST", f"/api/packages/{t8_pid}/share", {"email": "u2@example.com"})
+    call(an, "POST", f"/api/packages/{t8_pid}/share", {"email": "u3@example.com"})
+
+    for u_name in ("u1@example.com", "u2@example.com", "u3@example.com"):
+        u_pg = new_page(br, errs)
+        login_first(u_pg, base, u_name, temp[u_name])
+        r_start = call(u_pg, "POST", f"/api/tests/{t8_key}/attempts", {"mode": "practice", "restart": False})
+        u_att_id = json.loads(r_start["text"])["id"]
+        # All 3 users pick choice "C" (wrong) for item q-1
+        call(u_pg, "POST", f"/api/attempts/{u_att_id}/items/q-1/check", {"chosen": ["C"]})
+        u_pg.context.close()
+
+    # Now verify stats show question q-1
+    api_stat_2 = json.loads(call(an, "GET", f"/api/packages/{t8_pid}/test-stats")["text"])["tests"][0]
+    an.goto(base + "/#library")
+    an.wait_for_selector("#screen-library.active")
+    an.click("#libMine .stream-row:has-text('Gói Task Tám') [data-act=lib-test-stats]")
+    an.wait_for_selector("#testStatsDialog[open]")
+    poll(lambda: "3 người làm" in an.inner_text("#testStatsList"))
+    stats_screen_2 = an.inner_text("#testStatsList")
+
+    an.screenshot(path=str(SHOTS / "practice-stats-1280.png"))
+    an.set_viewport_size({"width": 360, "height": 740})
+    an.wait_for_timeout(200)
+    an.screenshot(path=str(SHOTS / "practice-stats-360.png"))
+    an.set_viewport_size({"width": 1280, "height": 900})
+    an.click("[data-act=test-stats-close]")
+    an.wait_for_selector("#testStatsDialog", state="hidden")
+
+    q1_stat = api_stat_2["items"][0] if api_stat_2["items"] else {}
+    shown_with_3 = (
+        len(api_stat_2["items"]) == 1 and
+        q1_stat.get("id") == "q-1" and
+        q1_stat.get("people") == 3 and
+        q1_stat.get("wrong_percent") == 100 and
+        q1_stat.get("top_wrong") is not None and
+        api_stat_2["hidden"] == 1 and
+        "3 người làm" in stats_screen_2 and
+        "100%" in stats_screen_2 and
+        "Thủ đô của Việt Nam là gì?" in stats_screen_2 and
+        "1 câu chưa đủ 3 người" in stats_screen_2
+    )
+    check("thống kê ẩn dưới 3 người, hiện khi đủ", hidden_under_3 and shown_with_3)
+
+    # library pills stay on one line at 1280 px even with the extra Stats button
+    an.set_viewport_size({"width": 1280, "height": 900})
+    an.wait_for_timeout(200)
+    pill_heights = an.evaluate("[...document.querySelectorAll('#libMine .meta-pill')].map(e => e.getBoundingClientRect().height)")
+    an.screenshot(path=str(SHOTS / "practice-library-1280.png"), full_page=True)
+    check("thẻ trong Thư viện không vỡ chữ ở 1280 px", pill_heights and max(pill_heights) < 32, f"max={max(pill_heights or [0])}")
+
     # 19. console sạch
     check("console sạch", not errs, errs[:4])
 
@@ -552,7 +784,8 @@ def main():
     args = parser.parse_args()
     SHOTS.mkdir(exist_ok=True)
     work = pathlib.Path(tempfile.mkdtemp(prefix="learn-practice-"))
-    port = free_port()
+    port, ai_port = free_port(), free_port()
+    threading.Thread(target=http.server.ThreadingHTTPServer(("127.0.0.1", ai_port), FakeAI).serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{port}"
     env = dict(
         os.environ,
@@ -564,18 +797,25 @@ def main():
         PYTHONUTF8="1",
         KEY_ENCRYPTION_KEY=base64.urlsafe_b64encode(b"e" * 32).decode(),
     )
-    env.pop("AI_API_KEY", None)
+    for name in ("AI_API_KEY", "AI_BASE_URL"):
+        env.pop(name, None)
 
-    def add_user(name):
-        out = subprocess.run(
-            [sys.executable, "-m", "app.cli", "add-user", name],
+    def cli(*a):
+        return subprocess.run(
+            [sys.executable, "-m", "app.cli", *a],
             cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8"
         )
+
+    def add_user(name):
+        out = cli("add-user", name)
         return out.stdout.rsplit(": ", 1)[1].strip()
 
-    temp = {n: add_user(n) for n in ("an@example.com", "binh@example.com")}
+    user_names = ("boss@example.com", "an@example.com", "binh@example.com", "u1@example.com", "u2@example.com", "u3@example.com")
+    temp = {n: add_user(n) for n in user_names}
+    cli("set-admin", "boss@example.com", "on")
+
     srv = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port), "--log-level", "warning"],
+        [sys.executable, "-c", LAUNCH, f"http://127.0.0.1:{ai_port}/v1", str(port)],
         cwd=ROOT, env=env
     )
     try:
