@@ -1638,7 +1638,79 @@ a.stage-tab, a.drawer-nav-item { display: flex; align-items: center; text-decora
   }
 }
 
+.lesson-bar-show {
+  display: none;
+}
+
 @media (max-width: 1023px) {
+  .lesson-top-bar {
+    gap: 0.375rem;
+    min-height: 44px;
+    padding: 2px 0.5rem;
+    transition: margin-top 0.15s, visibility 0.15s;
+  }
+
+  .lesson-top-left {
+    gap: 0.5rem;
+  }
+
+  .lesson-top-right {
+    gap: 0.25rem;
+  }
+
+  .lesson-top-bar .btn-studio-secondary,
+  .lesson-top-bar .btn-studio-primary {
+    min-height: 40px;
+    padding: 0 0.625rem;
+    font-size: 0.8125rem;
+    white-space: nowrap;
+  }
+
+  .lesson-title {
+    font-size: 0.8125rem;
+  }
+
+  .lesson-iframe {
+    min-height: calc(100vh - 44px);
+    min-height: calc(100dvh - 44px);
+  }
+
+  .bar-hidden .lesson-top-bar {
+    margin-top: -44px;
+    visibility: hidden;
+  }
+
+  .bar-hidden .lesson-iframe {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  /* Larger than it looks: the visible tab is small so it covers little of the page. */
+  .bar-hidden .lesson-bar-show {
+    display: block;
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 31;
+    width: 56px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+  }
+
+  .lesson-bar-show::before {
+    content: "";
+    display: block;
+    width: 32px;
+    height: 6px;
+    margin: 0 8px 0 auto;
+    border-radius: 0 0 6px 6px;
+    background: var(--text-sub);
+    opacity: 0.8;
+  }
+
   .lesson-host .ask-dock.mobile-open {
     display: flex;
     position: fixed;

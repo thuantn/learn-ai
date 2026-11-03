@@ -17,6 +17,8 @@
   let askTimes = [];
   let aiEnabled = false;
   let lastQuizId = null;
+  let barHeldUntil = 0;
+  const narrow = window.matchMedia("(max-width: 1023px)");
 
   const send = (method, body, extra) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}), ...extra });
 
@@ -28,13 +30,24 @@
     return d;
   }
 
+  // A page can ask for this too, for ever. So only on a phone, never over something to read, and the handle outside
+  // the frame brings the bar back and holds it long enough to reach "Về app".
+  function setBarHidden(hide) {
+    const blocked = !narrow.matches || askOpen || dialogOpen || Date.now() < barHeldUntil
+      || $("lessonNotice").textContent || $("lessonAskNotice").textContent || !$("lessonCover").hidden;
+    document.body.classList.toggle("bar-hidden", hide && !blocked);
+  }
+  narrow.addEventListener("change", () => setBarHidden(false));
+
   function setNotice(text) {
     $("lessonNotice").textContent = text;
+    if (text) setBarHidden(false);
   }
 
   let askNoticeTimer;
   function showAskNotice() {
     $("lessonAskNotice").textContent = "Bài này chưa bật ô Hỏi.";
+    setBarHidden(false);
     clearTimeout(askNoticeTimer);
     askNoticeTimer = setTimeout(() => { $("lessonAskNotice").textContent = ""; }, 5000);
   }
@@ -44,6 +57,7 @@
     $("lessonReloadBtn").hidden = actionBtn !== "reload";
     $("lessonExpiredReloadBtn").hidden = actionBtn !== "expired";
     $("lessonCover").hidden = false;
+    setBarHidden(false);
     if (iframe) {
       iframe.remove();
       iframe = null;
@@ -225,6 +239,11 @@
           reply(id, true, { data: null });
           return;
         }
+        case "bar.set": {
+          setBarHidden(a.hidden === true);
+          reply(id, true, { data: null });
+          return;
+        }
         case "media.error": {
           checkExpired();
           reply(id, true, { data: null });
@@ -303,6 +322,7 @@
       textEl.textContent = url.href;
       okBtn.hidden = false;
       dialogOpen = true;
+      setBarHidden(false);
       dialog.showModal();
       dialog.addEventListener("close", function handler() {
         dialog.removeEventListener("close", handler);
@@ -333,6 +353,7 @@
   function openAsk(open) {
     askOpen = open;
     if (open) {
+      setBarHidden(false);
       $("askDock").classList.toggle("mobile-open", true);
       $("askBackdrop").classList.toggle("open", true);
       if (!$("askInput").disabled) $("askInput").focus();
@@ -373,6 +394,7 @@
     if (!el) return;
     const act = el.dataset.act;
     if (act === "ask-open") { openAsk(true); }
+    else if (act === "bar-show") { barHeldUntil = Date.now() + 10000; setBarHidden(false); }
     else if (act === "ask-close") { openAsk(false); }
     else if (act === "ask-expand") {
       const on = !document.body.classList.contains("ask-expanded");

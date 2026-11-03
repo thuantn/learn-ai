@@ -111,10 +111,44 @@
     const a = event.target.closest("a[href]");
     if (!a) return;
     const href = a.getAttribute("href") || "";
-    if (href.startsWith("#")) return;
     event.preventDefault();
+    if (href.startsWith("#")) {
+      // WebKit reloads a sandboxed page on a link within it, and the host closes a page that reloads.
+      const target = href === "#" ? document.documentElement : document.getElementById(href.slice(1));
+      if (target) target.scrollIntoView();
+      return;
+    }
     window.LearnBridge.call("link.open", { url: a.href }).catch(() => {});
   }, true);
+
+  // On a phone the app bar and the lesson's menu leave while reading down and return on the way up.
+  const NARROW = "(max-width: 1023px)";
+  const narrow = window.matchMedia(NARROW);
+  const style = document.createElement("style");
+  style.textContent = `@media ${NARROW}{nav.top{transition:transform .15s}html[data-learn-reading] nav.top{transform:translateY(-100%)}}`;
+  (document.head || document.documentElement).append(style);
+  let lastY = 0;
+  let reading = false;
+  let settleUntil = 0;
+
+  function setReading(on) {
+    if (on === reading) return;
+    reading = on;
+    // The frame changes height with the bar, and at the end of the page the browser then moves the scroll by itself.
+    settleUntil = performance.now() + 300;
+    document.documentElement.toggleAttribute("data-learn-reading", on);
+    window.LearnBridge.call("bar.set", { hidden: on }).catch(() => {});
+  }
+
+  window.addEventListener("scroll", function () {
+    const y = Math.max(0, Math.min(window.scrollY, document.documentElement.scrollHeight - window.innerHeight));
+    if (!narrow.matches || y < 64) setReading(false);
+    else if (performance.now() >= settleUntil) {
+      if (Math.abs(y - lastY) < 12) return;
+      setReading(y > lastY);
+    }
+    lastY = y;
+  }, { passive: true });
 
   document.addEventListener("error", function (event) {
     if (!(event.target instanceof Element)) return;

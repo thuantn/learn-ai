@@ -54,7 +54,7 @@ Trang nói chuyện với app qua `window.LearnBridge`, có sẵn khi nạp `/st
 
 `id` truyền vào `quiz.answer` là `id` của câu trong `lesson.json`. Đáp án đúng chỉ nằm trong `lesson.json`, trang không cần biết; phần giải thích `why` có thể nằm trong trang. Khung bài mẫu trong skill dùng sẵn các lệnh này.
 
-Link `<a href>` ra ngoài tự đi qua `link.open`. Câu kiểm tra nhanh không cần ghi nhận có thể tự chấm trong trang; người học đọc mã nguồn sẽ thấy đáp án nên đừng dùng cách này cho quiz cuối bài. Công thức dùng `/static/vendor/tex-svg.min.js` (MathJax) cùng `/static/mathjax-config.js`.
+Link `<a href>` ra ngoài tự đi qua `link.open`. Link trong trang (`#muc`) chỉ cuộn tới mục đó, không đổi `location.hash` và không kích hoạt `:target`, vì WebKit nạp lại trang sandbox khi gặp loại link này. Trên màn hình dưới 1024 px, thanh của app và `nav.top` của trang ẩn khi cuộn xuống, hiện lại khi cuộn lên; menu của trang nên đặt trong `nav.top` để được hưởng việc này. Câu kiểm tra nhanh không cần ghi nhận có thể tự chấm trong trang; người học đọc mã nguồn sẽ thấy đáp án nên đừng dùng cách này cho quiz cuối bài. Công thức dùng `/static/vendor/tex-svg.min.js` (MathJax) cùng `/static/mathjax-config.js`.
 
 ## Khung nội dung đầy đủ
 
