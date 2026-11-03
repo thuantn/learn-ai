@@ -35,7 +35,7 @@ Tải zip lên ở màn hình Thư viện. Server chạy lại đúng bộ kiể
 
 ## Giới hạn
 
-Zip tối đa 90 MB. Mỗi tài khoản có hạn mức 1 GB tính trên dung lượng đã giải nén. Góp ý tối đa 2.000 ký tự.
+Zip tối đa 300 MB. Mỗi tài khoản có hạn mức 1 GB tính trên dung lượng đã giải nén. Góp ý tối đa 2.000 ký tự.
 
 ## Trang bài
 

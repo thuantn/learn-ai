@@ -9,8 +9,10 @@ import os
 import pathlib
 import secrets
 import time
+import struct
 import urllib.error
 import zipfile
+import zlib
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -983,6 +985,24 @@ async def start_parts_upload(request: Request):
     size = data.get("size") if isinstance(data, dict) else None
     if not isinstance(size, int) or isinstance(size, bool) or size < 1 or size > bundle.MAX_ZIP:
         return bad(413, "too_large", "File tải lên quá lớn.")
+
+    cd_offset = data.get("cd_offset") if isinstance(data, dict) else None
+    cd_size = data.get("cd_size") if isinstance(data, dict) else None
+
+    if cd_offset is not None or cd_size is not None:
+        if (
+            cd_offset is None
+            or cd_size is None
+            or isinstance(cd_offset, bool)
+            or not isinstance(cd_offset, int)
+            or isinstance(cd_size, bool)
+            or not isinstance(cd_size, int)
+            or cd_offset < 0
+            or cd_size <= 0
+            or cd_offset + cd_size > size
+        ):
+            return bad(400, "input", "Dữ liệu không hợp lệ.")
+
     if await asyncio.to_thread(uploads.disk_low):
         return bad(507, "disk", "Máy chủ sắp hết dung lượng. Báo quản trị.")
 
@@ -1005,6 +1025,7 @@ async def start_parts_upload(request: Request):
     await asyncio.to_thread(_create_empty, raw_path, size)
 
     parts = (size + uploads.PART_SIZE - 1) // uploads.PART_SIZE
+    now = time.time()
     uploads.part_sessions[session] = {
         "session": session,
         "user": user,
@@ -1013,8 +1034,14 @@ async def start_parts_upload(request: Request):
         "parts": parts,
         "part_size": uploads.PART_SIZE,
         "received": set(),
-        "created": time.time(),
+        "created": now,
+        "touched": now,
+        "cd_offset": cd_offset,
+        "cd_size": cd_size,
+        "needed": None,
+        "reuse": {},
     }
+    log.info("parts start user=%r size=%d parts=%d plan=%s", user, size, parts, cd_offset is not None)
     return {"session": session, "part_size": uploads.PART_SIZE, "parts": parts}
 
 
@@ -1036,6 +1063,12 @@ async def upload_part(session: str, index: str, request: Request):
     else:
         expected_size = ps["part_size"]
 
+    if ps.get("needed") is not None:
+        if idx not in ps["needed"]:
+            return bad(400, "input", "Dữ liệu không hợp lệ.")
+        if idx in ps["received"]:
+            return {"ok": True}  # a retry after a lost reply; the planned bytes stay as they were
+
     offset = idx * ps["part_size"]
     try:
         written = await uploads.receive(request.stream(), ps["path"], limit=expected_size, offset=offset)
@@ -1045,12 +1078,213 @@ async def upload_part(session: str, index: str, request: Request):
     except uploads.TooLarge:
         ps["received"].discard(idx)
         return bad(400, "input", "Dữ liệu không hợp lệ.")
-    except (ClientDisconnect, asyncio.TimeoutError):
+    except (ClientDisconnect, asyncio.TimeoutError) as exc:
         ps["received"].discard(idx)
+        log.warning("parts interrupted user=%r part=%d/%d %s", user, idx, ps["parts"], type(exc).__name__)
         return bad(400, "interrupted", "Tải lên bị ngắt giữa chừng. Thử lại.")
 
     ps["received"].add(idx)
+    ps["touched"] = time.time()
     return {"ok": True}
+
+
+class RebuildError(Exception):
+    def __init__(self, message: str):
+        self.message = message
+
+
+def _file_crc32(path: pathlib.Path) -> int:
+    crc = 0
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            crc = zlib.crc32(chunk, crc)
+    return crc
+
+
+def _compute_plan(ps: dict, user: str) -> dict:
+    raw_path = ps["path"]
+    parts_count = ps["parts"]
+    part_size = ps["part_size"]
+    cd_offset = ps["cd_offset"]
+
+    all_parts = list(range(parts_count))
+
+    try:
+        zf = zipfile.ZipFile(raw_path, "r")
+    except (zipfile.BadZipFile, struct.error, OSError):
+        ps["needed"] = set(all_parts)
+        ps["reuse"] = {}
+        return {"needed": all_parts, "reused": 0, "reused_bytes": 0}
+
+    try:
+        with zf:
+            infos = zf.infolist()
+            if len(infos) > bundle.MAX_FILES:
+                ps["needed"] = set(all_parts)
+                ps["reuse"] = {}
+                return {"needed": all_parts, "reused": 0, "reused_bytes": 0}
+
+            candidates = {}
+            with db.connect() as c:
+                rows = c.execute("SELECT id, version FROM packages WHERE owner=?", (user,)).fetchall()
+            for r in rows:
+                p_dir = catalog._package_dir(r["id"], r["version"])
+                if not p_dir.is_dir():
+                    continue
+                for p in p_dir.rglob("*"):
+                    if p.is_file() and not p.is_symlink():
+                        try:
+                            rel = p.relative_to(p_dir).as_posix()
+                            candidates[(rel, p.stat().st_size)] = p
+                        except OSError:
+                            pass
+
+            crc_cache = {}
+            reuse = {}
+            for info in infos:
+                if info.is_dir() or info.filename.endswith("/"):
+                    continue
+                cand = candidates.get((info.filename, info.file_size))
+                if cand is not None:
+                    if cand not in crc_cache:
+                        try:
+                            crc_cache[cand] = _file_crc32(cand)
+                        except OSError:
+                            crc_cache[cand] = None
+                    if crc_cache[cand] is not None and crc_cache[cand] == info.CRC:
+                        reuse[info.filename] = str(cand.resolve())
+
+            sorted_infos = sorted(infos, key=lambda x: x.header_offset)
+            needed = set()
+            cd_parts = set(range(cd_offset // part_size, parts_count))
+            needed.update(cd_parts)
+
+            for idx, info in enumerate(sorted_infos):
+                if info.filename in reuse:
+                    continue
+                start_offset = info.header_offset
+                if idx + 1 < len(sorted_infos):
+                    end_offset = sorted_infos[idx + 1].header_offset
+                else:
+                    end_offset = cd_offset
+
+                if end_offset > start_offset:
+                    start_part = start_offset // part_size
+                    end_part = (end_offset - 1) // part_size
+                    for p_idx in range(start_part, end_part + 1):
+                        if 0 <= p_idx < parts_count:
+                            needed.add(p_idx)
+
+            ps["reuse"] = reuse
+            ps["needed"] = needed
+            reused_count = len(reuse)
+            reused_bytes = sum(info.compress_size for info in infos if info.filename in reuse)
+
+            return {
+                "needed": sorted(list(needed)),
+                "reused": reused_count,
+                "reused_bytes": reused_bytes,
+            }
+    except (zipfile.BadZipFile, struct.error, OSError):
+        ps["needed"] = set(all_parts)
+        ps["reuse"] = {}
+        return {"needed": all_parts, "reused": 0, "reused_bytes": 0}
+
+
+@app.post("/api/uploads/parts/{session}/plan")
+async def plan_parts_upload(session: str, request: Request):
+    user = request.state.user
+    ps = uploads.get_parts_session(session, user)
+    if not ps:
+        return bad(404, "upload", "Bản tải lên đã hết hạn. Tải lại file.")
+    if ps.get("cd_offset") is None:
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+
+    cd_start_part = ps["cd_offset"] // ps["part_size"]
+    cd_parts = list(range(cd_start_part, ps["parts"]))
+    missing_cd = [i for i in cd_parts if i not in ps["received"]]
+    if missing_cd:
+        return JSONResponse({"code": "missing", "missing": missing_cd}, status_code=409)
+
+    ps["touched"] = time.time()
+    result = await asyncio.to_thread(_compute_plan, ps, user)
+    return result
+
+
+def _rebuild_zip(session_path: pathlib.Path, rebuilt_path: pathlib.Path, reuse: dict):
+    try:
+        with zipfile.ZipFile(session_path, "r") as zin:
+            with zipfile.ZipFile(rebuilt_path, "w", zipfile.ZIP_DEFLATED, allowZip64=False) as zout:
+                infos = zin.infolist()
+                if len(infos) > bundle.MAX_FILES or len({i.filename for i in infos}) != len(infos):
+                    raise RebuildError("File zip bị hỏng.")
+                total_bytes = 0
+                for info in infos:
+                    if info.is_dir():
+                        continue  # extraction creates folders as needed
+                    ratio_bad = not info.filename.lower().endswith(".mp3") and info.file_size > bundle.MAX_RATIO * max(info.compress_size, 1)
+                    if info.file_size > bundle.MAX_UNPACKED or (info.filename not in reuse and ratio_bad):
+                        raise RebuildError("File zip bị hỏng.")
+                    if info.filename in reuse:
+                        cand_path = pathlib.Path(reuse[info.filename])
+                        try:
+                            st = cand_path.stat()
+                        except OSError:
+                            raise RebuildError("File cũ đã đổi trong lúc tải. Tải lại file.")
+                        if st.st_size != info.file_size:
+                            raise RebuildError("File cũ đã đổi trong lúc tải. Tải lại file.")
+                        try:
+                            crc = _file_crc32(cand_path)
+                        except OSError:
+                            raise RebuildError("File cũ đã đổi trong lúc tải. Tải lại file.")
+                        if crc != info.CRC:
+                            raise RebuildError("File cũ đã đổi trong lúc tải. Tải lại file.")
+                        total_bytes += info.file_size
+                        if total_bytes > bundle.MAX_UNPACKED:
+                            raise RebuildError("File zip bị hỏng.")
+
+                        target_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+                        if info.filename.lower().endswith(".mp3"):
+                            target_info.compress_type = zipfile.ZIP_STORED
+                        else:
+                            target_info.compress_type = zipfile.ZIP_DEFLATED
+
+                        try:
+                            with open(cand_path, "rb") as src, zout.open(target_info, "w") as dst:
+                                while True:
+                                    chunk = src.read(1024 * 1024)
+                                    if not chunk:
+                                        break
+                                    dst.write(chunk)
+                        except OSError:
+                            raise RebuildError("File cũ đã đổi trong lúc tải. Tải lại file.")
+                    else:
+                        target_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+                        if info.filename.lower().endswith(".mp3") or info.filename.endswith("/"):
+                            target_info.compress_type = zipfile.ZIP_STORED
+                        else:
+                            target_info.compress_type = zipfile.ZIP_DEFLATED
+
+                        entry_bytes = 0
+                        with zin.open(info) as src, zout.open(target_info, "w") as dst:
+                            while True:
+                                chunk = src.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                entry_bytes += len(chunk)
+                                total_bytes += len(chunk)
+                                if entry_bytes > info.file_size or total_bytes > bundle.MAX_UNPACKED:
+                                    raise RebuildError("File zip bị hỏng.")
+                                dst.write(chunk)
+    except RebuildError:
+        raise
+    except (zipfile.BadZipFile, zlib.error, EOFError, struct.error):
+        raise RebuildError("File zip bị hỏng.")
+    except Exception:
+        raise RebuildError("File zip bị hỏng.")
 
 
 @app.post("/api/uploads/parts/{session}/finish")
@@ -1059,13 +1293,43 @@ async def finish_parts_upload(session: str, request: Request):
     ps = uploads.get_parts_session(session, user)
     if not ps:
         return bad(404, "upload", "Bản tải lên đã hết hạn. Tải lại file.")
-    missing = [i for i in range(ps["parts"]) if i not in ps["received"]]
+
+    if ps.get("needed") is not None:
+        missing = [i for i in sorted(ps["needed"]) if i not in ps["received"]]
+    else:
+        missing = [i for i in range(ps["parts"]) if i not in ps["received"]]
     if missing:
+        log.warning("parts finish missing user=%r missing=%d", user, len(missing))
         return JSONResponse({"code": "missing", "missing": missing}, status_code=409)
+    log.info("parts finish user=%r received=%d/%d reused=%d", user, len(ps["received"]), ps["parts"], len(ps.get("reuse") or {}))
+
     if not uploads.begin(user):
         return bad(429, "busy", "Đang có file khác được tải lên. Thử lại sau.")
+
     uploads.part_sessions.pop(session, None)
-    return await stage_upload(user, ps["path"], "zip", already_begun=True)
+    reuse = ps.get("reuse") or {}
+
+    if not reuse:
+        return await stage_upload(user, ps["path"], "zip", already_begun=True)
+
+    rebuilt_path = uploads.staging_dir() / f"{secrets.token_hex(12)}.zip"
+    staged = False  # stage_upload ends the slot itself
+    try:
+        try:
+            await asyncio.to_thread(_rebuild_zip, ps["path"], rebuilt_path, reuse)
+        except RebuildError as exc:
+            return JSONResponse(
+                {"code": "invalid", "problems": [{"path": "upload.zip", "message": exc.message}]},
+                status_code=400,
+            )
+        finally:
+            ps["path"].unlink(missing_ok=True)
+        staged = True
+        return await stage_upload(user, rebuilt_path, "zip", already_begun=True)
+    finally:
+        if not staged:
+            uploads.end(user)
+        rebuilt_path.unlink(missing_ok=True)
 
 
 @app.delete("/api/uploads/parts/{session}")
@@ -1074,6 +1338,7 @@ async def cancel_parts_upload(session: str, request: Request):
     ps = uploads.get_parts_session(session, user)
     if not ps:
         return bad(404, "upload", "Bản tải lên đã hết hạn. Tải lại file.")
+    log.info("parts cancel user=%r received=%d/%d", user, len(ps["received"]), ps["parts"])
     uploads.drop_parts_session(session)
     return {"ok": True}
 

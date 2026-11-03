@@ -657,3 +657,310 @@ def test_invalid_finish_ends_the_session_and_removes_the_file(ctx, capsys):
         assert finish_parts(c, s).status_code == 400
         assert finish_parts(c, s).status_code == 404
         assert not any(p.endswith(".zip") for p in staging(ctx))
+
+
+def eocd(body: bytes):
+    size = len(body)
+    tail_size = min(size, 65536 + 22)
+    tail = body[size - tail_size:]
+    for i in range(tail_size - 22, -1, -1):
+        if tail[i:i + 4] == b"PK\x05\x06":
+            cd_size = int.from_bytes(tail[i + 12:i + 16], "little")
+            cd_offset = int.from_bytes(tail[i + 16:i + 20], "little")
+            if cd_size == 0xFFFFFFFF or cd_offset == 0xFFFFFFFF or cd_offset + cd_size > size or cd_size <= 0 or cd_offset < 0:
+                return None
+            return cd_offset, cd_size
+    return None
+
+
+def test_delta_upload_rebuilds_and_installs(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        root = _make_package(ctx.tmp / "pkg_delta", cards=CARDS)
+        filler1 = os.urandom(4_500_000)
+        (root / "lessons" / "demo" / "page" / "filler1.mp3").write_bytes(filler1)
+        body1 = zip_of(root)
+        parts1 = [body1[i:i + part_size] for i in range(0, len(body1), part_size)]
+        assert len(parts1) == 3
+
+        r1 = start_parts(c, len(body1))
+        assert r1.status_code == 200
+        s1 = r1.json()["session"]
+        for i, chunk in enumerate(parts1):
+            assert put_part(c, s1, i, chunk).status_code == 200
+        fin1 = finish_parts(c, s1)
+        assert fin1.status_code == 200
+        commit_res = commit(c, fin1.json()["upload_id"])
+        assert commit_res.status_code == 200
+        pkg_id = commit_res.json()["package_id"]
+        assert commit_res.json()["version"] == 1
+
+        # Build v2 = same files plus one new filler mp3, re-zipped
+        filler2 = os.urandom(2_500_000)
+        (root / "lessons" / "demo" / "page" / "filler2.mp3").write_bytes(filler2)
+        body2 = zip_of(root)
+        parts2 = [body2[i:i + part_size] for i in range(0, len(body2), part_size)]
+        assert len(parts2) >= 4
+
+        cd_offset, cd_size = eocd(body2)
+        assert cd_offset is not None and cd_size is not None
+        r2 = c.post("/api/uploads/parts", json={"size": len(body2), "cd_offset": cd_offset, "cd_size": cd_size})
+        assert r2.status_code == 200
+        s2 = r2.json()["session"]
+
+        # Send the CD parts
+        cd_start = cd_offset // part_size
+        cd_parts = list(range(cd_start, len(parts2)))
+        for i in cd_parts:
+            assert put_part(c, s2, i, parts2[i]).status_code == 200
+
+        # Call plan: reused > 0, needed is a strict subset of all parts and excludes unchanged filler parts
+        r_plan = c.post(f"/api/uploads/parts/{s2}/plan")
+        assert r_plan.status_code == 200
+        plan_data = r_plan.json()
+        assert plan_data["reused"] > 0
+        needed = set(plan_data["needed"])
+        all_parts = set(range(len(parts2)))
+        assert needed < all_parts
+
+        with zipfile.ZipFile(io.BytesIO(body2)) as zf:
+            info1 = zf.getinfo("lessons/demo/page/filler1.mp3")
+            f1_start = info1.header_offset
+            sorted_infos = sorted(zf.infolist(), key=lambda x: x.header_offset)
+            idx1 = next(idx for idx, x in enumerate(sorted_infos) if x.filename == info1.filename)
+            f1_end = sorted_infos[idx1 + 1].header_offset if idx1 + 1 < len(sorted_infos) else cd_offset
+            f1_middle_part = (f1_start + f1_end) // (2 * part_size)
+            if f1_start <= f1_middle_part * part_size and (f1_middle_part + 1) * part_size <= f1_end:
+                assert f1_middle_part not in needed
+
+        # Send only needed parts that have not been sent yet
+        for i in needed:
+            if i not in cd_parts:
+                assert put_part(c, s2, i, parts2[i]).status_code == 200
+
+        fin2 = finish_parts(c, s2)
+        assert fin2.status_code == 200
+        res_c2 = commit(c, fin2.json()["upload_id"])
+        assert res_c2.status_code == 200 and res_c2.json()["version"] == 2
+
+        # Installed files are byte-identical to the v2 zip's content
+        inst_dir = ctx.main.catalog._package_dir(pkg_id, 2)
+        reused_file = (inst_dir / "lessons" / "demo" / "page" / "filler1.mp3").read_bytes()
+        new_file = (inst_dir / "lessons" / "demo" / "page" / "filler2.mp3").read_bytes()
+        with zipfile.ZipFile(io.BytesIO(body2)) as zf:
+            assert reused_file == zf.read("lessons/demo/page/filler1.mp3")
+            assert new_file == zf.read("lessons/demo/page/filler2.mp3")
+
+
+def test_plan_before_cd_parts_arrive_409(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    with c:
+        body = multipart_package(ctx, "pkg_cd_miss")
+        cd_offset, cd_size = eocd(body)
+        r = c.post("/api/uploads/parts", json={"size": len(body), "cd_offset": cd_offset, "cd_size": cd_size})
+        assert r.status_code == 200
+        s = r.json()["session"]
+
+        r_plan = c.post(f"/api/uploads/parts/{s}/plan")
+        assert r_plan.status_code == 409
+        d = r_plan.json()
+        assert d["code"] == "missing"
+        expected_cd = list(range(cd_offset // ctx.main.uploads.PART_SIZE, r.json()["parts"]))
+        assert d["missing"] == expected_cd
+
+
+def test_plan_on_other_user_session_and_no_cross_user_reuse(ctx, capsys):
+    a = _ready_client(ctx, capsys, "an")
+    b = _ready_client(ctx, capsys, "binh")
+    part_size = ctx.main.uploads.PART_SIZE
+    with a, b:
+        root = _make_package(ctx.tmp / "pkg_user_a", cards=CARDS)
+        (root / "lessons" / "demo" / "page" / "filler.mp3").write_bytes(os.urandom(3_000_000))
+        body = zip_of(root)
+        cd_offset, cd_size = eocd(body)
+
+        r_a = a.post("/api/uploads/parts", json={"size": len(body), "cd_offset": cd_offset, "cd_size": cd_size})
+        s_a = r_a.json()["session"]
+
+        assert b.post(f"/api/uploads/parts/{s_a}/plan").status_code == 404
+
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        for i, chunk in enumerate(parts):
+            assert put_part(a, s_a, i, chunk).status_code == 200
+        fin_a = finish_parts(a, s_a)
+        assert fin_a.status_code == 200
+        assert commit(a, fin_a.json()["upload_id"]).status_code == 200
+
+        r_b = b.post("/api/uploads/parts", json={"size": len(body), "cd_offset": cd_offset, "cd_size": cd_size})
+        s_b = r_b.json()["session"]
+        cd_parts = list(range(cd_offset // part_size, len(parts)))
+        for i in cd_parts:
+            assert put_part(b, s_b, i, parts[i]).status_code == 200
+
+        plan_b = b.post(f"/api/uploads/parts/{s_b}/plan").json()
+        assert plan_b["reused"] == 0
+        assert plan_b["needed"] == list(range(len(parts)))
+
+
+def test_file_changed_on_disk_between_plan_and_finish_400(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        root = _make_package(ctx.tmp / "pkg_tamper", cards=CARDS)
+        filler1 = os.urandom(3_000_000)
+        (root / "lessons" / "demo" / "page" / "filler1.mp3").write_bytes(filler1)
+        body1 = zip_of(root)
+        parts1 = [body1[i:i + part_size] for i in range(0, len(body1), part_size)]
+
+        r1 = start_parts(c, len(body1))
+        s1 = r1.json()["session"]
+        for i, chunk in enumerate(parts1):
+            put_part(c, s1, i, chunk)
+        fin1 = finish_parts(c, s1)
+        commit_res = commit(c, fin1.json()["upload_id"]).json()
+        pkg_id = commit_res["package_id"]
+
+        (root / "lessons" / "demo" / "page" / "filler2.mp3").write_bytes(os.urandom(1_000_000))
+        body2 = zip_of(root)
+        parts2 = [body2[i:i + part_size] for i in range(0, len(body2), part_size)]
+        cd_offset, cd_size = eocd(body2)
+
+        r2 = c.post("/api/uploads/parts", json={"size": len(body2), "cd_offset": cd_offset, "cd_size": cd_size})
+        s2 = r2.json()["session"]
+        cd_parts = list(range(cd_offset // part_size, len(parts2)))
+        for i in cd_parts:
+            put_part(c, s2, i, parts2[i])
+
+        plan_res = c.post(f"/api/uploads/parts/{s2}/plan")
+        assert plan_res.status_code == 200
+        assert plan_res.json()["reused"] > 0
+        needed = set(plan_res.json()["needed"])
+        for i in needed:
+            if i not in cd_parts:
+                put_part(c, s2, i, parts2[i])
+
+        # Modify existing file on disk in v1
+        installed_f1 = ctx.main.catalog._package_dir(pkg_id, 1) / "lessons" / "demo" / "page" / "filler1.mp3"
+        installed_f1.write_bytes(os.urandom(3_000_000))
+
+        fin2 = finish_parts(c, s2)
+        assert fin2.status_code == 400
+        d = fin2.json()
+        assert d["code"] == "invalid"
+        assert d["problems"][0]["path"] == "upload.zip"
+        assert "File cũ đã đổi trong lúc tải. Tải lại file." in d["problems"][0]["message"]
+
+
+def test_zip_without_cd_offset_works_with_all_parts(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        body = multipart_package(ctx, "pkg_no_cd")
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        r = start_parts(c, len(body))
+        s = r.json()["session"]
+
+        assert c.post(f"/api/uploads/parts/{s}/plan").status_code == 400
+
+        for i, chunk in enumerate(parts):
+            assert put_part(c, s, i, chunk).status_code == 200
+        fin = finish_parts(c, s)
+        assert fin.status_code == 200
+
+
+def test_start_bad_cd_values_400(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    with c:
+        assert c.post("/api/uploads/parts", json={"size": 1000, "cd_offset": 600, "cd_size": 500}).status_code == 400
+        assert c.post("/api/uploads/parts", json={"size": 1000, "cd_offset": -1, "cd_size": 100}).status_code == 400
+        assert c.post("/api/uploads/parts", json={"size": 1000, "cd_offset": 0, "cd_size": 0}).status_code == 400
+        assert c.post("/api/uploads/parts", json={"size": 1000, "cd_offset": 100}).status_code == 400
+        assert c.post("/api/uploads/parts", json={"size": 1000, "cd_size": 100}).status_code == 400
+
+
+def test_start_size_300mb(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    with c:
+        limit = 300 * 1024 * 1024
+        assert start_parts(c, limit).status_code == 200
+        assert start_parts(c, limit + 1).status_code == 413
+
+
+def test_parts_expiry_uses_touched(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    with c:
+        r1 = start_parts(c, 1000)
+        s1 = r1.json()["session"]
+        now = time.time()
+        ctx.main.uploads.part_sessions[s1]["touched"] = now - ctx.main.uploads.STAGE_TTL - 10
+        ctx.main.uploads.expire(now=now)
+        assert s1 not in ctx.main.uploads.part_sessions
+
+        r2 = start_parts(c, 1000)
+        s2 = r2.json()["session"]
+        ctx.main.uploads.part_sessions[s2]["created"] = now - ctx.main.uploads.STAGE_TTL - 100
+        ctx.main.uploads.part_sessions[s2]["touched"] = now
+        ctx.main.uploads.expire(now=now)
+        assert s2 in ctx.main.uploads.part_sessions
+
+
+def test_rebuild_rejects_duplicate_names_and_counts_reused_bytes(ctx, tmp_path, monkeypatch):
+    import warnings
+    old = tmp_path / "old.mp3"
+    old.write_bytes(os.urandom(300_000))
+    crc_old = ctx.main._file_crc32(old)
+
+    def session_zip(names):
+        p = tmp_path / f"s{len(names)}.zip"
+        with warnings.catch_warnings(), zipfile.ZipFile(p, "w") as z:
+            warnings.simplefilter("ignore")  # duplicate names on purpose
+            for n in names:
+                z.writestr(n, old.read_bytes())
+        return p
+
+    dup = session_zip(["a.mp3", "a.mp3"])
+    with pytest.raises(ctx.main.RebuildError):
+        ctx.main._rebuild_zip(dup, tmp_path / "out1.zip", {"a.mp3": str(old)})
+
+    many = session_zip([f"{i}.mp3" for i in range(4)])
+    assert zipfile.ZipFile(many).infolist()[0].CRC == crc_old
+    monkeypatch.setattr(ctx.main.bundle, "MAX_UNPACKED", 1_000_000)  # 4 reused copies of 300 KB exceed it
+    with pytest.raises(ctx.main.RebuildError):
+        ctx.main._rebuild_zip(many, tmp_path / "out2.zip", {f"{i}.mp3": str(old) for i in range(4)})
+
+
+def test_parts_are_frozen_after_plan(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        root = _make_package(ctx.tmp / "pkg_freeze", cards=CARDS)
+        (root / "lessons" / "demo" / "page" / "filler1.mp3").write_bytes(os.urandom(4_500_000))
+        body1 = zip_of(root)
+        s1 = start_parts(c, len(body1)).json()["session"]
+        for i in range(0, len(body1), part_size):
+            assert put_part(c, s1, i // part_size, body1[i:i + part_size]).status_code == 200
+        assert commit(c, finish_parts(c, s1).json()["upload_id"]).status_code == 200
+
+        (root / "lessons" / "demo" / "page" / "filler2.mp3").write_bytes(os.urandom(1_000_000))
+        body2 = zip_of(root)
+        parts2 = [body2[i:i + part_size] for i in range(0, len(body2), part_size)]
+        cd_offset, cd_size = eocd(body2)
+        s2 = c.post("/api/uploads/parts", json={"size": len(body2), "cd_offset": cd_offset, "cd_size": cd_size}).json()["session"]
+        cd_parts = list(range(cd_offset // part_size, len(parts2)))
+        for i in cd_parts:
+            assert put_part(c, s2, i, parts2[i]).status_code == 200
+        needed = set(c.post(f"/api/uploads/parts/{s2}/plan").json()["needed"])
+        skipped = sorted(set(range(len(parts2))) - needed)
+        assert skipped
+        # a part the plan does not need is refused
+        assert put_part(c, s2, skipped[0], parts2[skipped[0]]).status_code == 400
+        # rewriting a received CD part after plan is a no-op, so the planned layout stands
+        last = cd_parts[-1]
+        assert put_part(c, s2, last, b"\0" * len(parts2[last])).status_code == 200
+        for i in sorted(needed - set(cd_parts)):
+            assert put_part(c, s2, i, parts2[i]).status_code == 200
+        fin = finish_parts(c, s2)
+        assert fin.status_code == 200, fin.text
+        assert commit(c, fin.json()["upload_id"]).json()["version"] == 2
+        assert not any(p.endswith(".zip") for p in staging(ctx))

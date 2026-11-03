@@ -1,6 +1,8 @@
 "use strict";
 // Library, upload, share and the author's feedback list. Text from packages only ever goes in with textContent.
-const MAX_ZIP = 90 * 1024 * 1024;
+const MAX_ZIP = 300 * 1024 * 1024;
+// Up to about 5 minutes of waiting per part: office and home networks drop for longer than a few seconds.
+const PART_TRIES = 12;
 let upload = { xhr: null, controller: null, session: null, id: null, removed: [] };
 let sharing = null;
 
@@ -129,6 +131,10 @@ function openUpload() {
   $("upPickError").hidden = true;
   const copied = $("upPromptCopied");
   if (copied) copied.hidden = true;
+  if ($("upReuseStatus")) {
+    $("upReuseStatus").hidden = true;
+    $("upReuseStatus").textContent = "";
+  }
   uploadStep("upPick");
   $("uploadDialog").showModal();
 }
@@ -155,23 +161,92 @@ function sleep(ms, signal) {
     }
   });
 }
+// fetch has no upload progress, and a 2 MB part over a slow tunnel takes a minute: XHR shows the bytes as they go.
+async function putPart(url, chunk, signal, onProgress) {
+  // WebKit sent the start of the file for a sliced Blob body (seen with multi-part zips): send the bytes, not the slice.
+  const bytes = await chunk.arrayBuffer();
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = e => onProgress(e.loaded);
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (_) {}
+      resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, json: async () => data || {} });
+    };
+    xhr.onerror = () => reject(new TypeError("network"));
+    xhr.ontimeout = () => reject(new TypeError("timeout"));
+    const stop = () => { xhr.abort(); reject(new DOMException("Aborted", "AbortError")); };
+    if (signal.aborted) return stop();
+    signal.addEventListener("abort", stop, { once: true });
+    xhr.send(bytes);
+  });
+}
 async function sendPartsFile(file, name) {
   uploadStep("upBusy");
   $("upBusyName").textContent = name || file.name || "package.zip";
   $("upBusyText").textContent = "Đang tải lên";
   $("upPercent").textContent = "0%";
   $("upMeter").style.width = "0%";
+  if ($("upReuseStatus")) {
+    $("upReuseStatus").hidden = true;
+    $("upReuseStatus").textContent = "";
+  }
 
   const controller = new AbortController();
   upload.controller = controller;
   upload.session = null;
+
+  let cdOffset = null, cdSize = null;
+  try {
+    const tailSize = Math.min(file.size, 65536 + 22);
+    const tailSlice = file.slice(file.size - tailSize, file.size);
+    const tailBuffer = await tailSlice.arrayBuffer();
+    const view = new DataView(tailBuffer);
+    let eocdOffset = -1;
+    for (let i = tailSize - 22; i >= 0; i--) {
+      if (view.getUint32(i, true) === 0x06054b50) {
+        const commentLen = view.getUint16(i + 20, true);
+        if (i + 22 + commentLen === tailSize) {
+          eocdOffset = i;
+          break;
+        }
+      }
+    }
+    if (eocdOffset === -1) {
+      for (let i = tailSize - 22; i >= 0; i--) {
+        if (view.getUint32(i, true) === 0x06054b50) {
+          eocdOffset = i;
+          break;
+        }
+      }
+    }
+    if (eocdOffset !== -1) {
+      const s = view.getUint32(eocdOffset + 12, true);
+      const o = view.getUint32(eocdOffset + 16, true);
+      if (s !== 0xFFFFFFFF && o !== 0xFFFFFFFF && o >= 0 && s > 0 && o + s <= file.size) {
+        cdOffset = o;
+        cdSize = s;
+      }
+    }
+  } catch (_) {
+    cdOffset = null;
+    cdSize = null;
+  }
+
+  const postBody = { size: file.size };
+  if (cdOffset !== null && cdSize !== null) {
+    postBody.cd_offset = cdOffset;
+    postBody.cd_size = cdSize;
+  }
 
   let sessionData;
   try {
     const res = await fetch("/api/uploads/parts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ size: file.size }),
+      body: JSON.stringify(postBody),
       signal: controller.signal,
     });
     let d = {};
@@ -191,13 +266,21 @@ async function sendPartsFile(file, name) {
   const { session, part_size, parts } = sessionData;
   upload.session = session;
 
+  function getPartSize(i) {
+    return (i === parts - 1) ? (file.size - i * part_size) : part_size;
+  }
+
+  const sentParts = new Set();
   let acknowledgedBytes = 0;
-  let nextIndex = 0;
+  let totalProgressBytes = file.size;
   let fatalError = null;
   const retryingParts = new Set();
 
+  const inFlight = new Map();
   function updateProgress() {
-    const percent = Math.min(100, Math.round(acknowledgedBytes / file.size * 100));
+    let moving = 0;
+    inFlight.forEach(n => { moving += n; });
+    const percent = totalProgressBytes ? Math.min(100, Math.floor((acknowledgedBytes + moving) / totalProgressBytes * 100)) : 0;
     $("upPercent").textContent = percent + "%";
     $("upMeter").style.width = percent + "%";
   }
@@ -207,11 +290,12 @@ async function sendPartsFile(file, name) {
       const n = retryingParts.values().next().value;
       $("upBusyText").textContent = `Đang gửi lại phần ${n}`;
     } else {
-      $("upBusyText").textContent = acknowledgedBytes >= file.size ? "Đang kiểm tra" : "Đang tải lên";
+      $("upBusyText").textContent = acknowledgedBytes >= totalProgressBytes ? "Đang kiểm tra" : "Đang tải lên";
     }
   }
 
   async function uploadPart(i) {
+    if (sentParts.has(i)) return;
     let attempt = 0;
     while (true) {
       if (controller.signal.aborted || fatalError) throw new DOMException("Aborted", "AbortError");
@@ -220,27 +304,29 @@ async function sendPartsFile(file, name) {
       const chunk = file.slice(startByte, endByte);
       let res;
       try {
-        res = await fetch(`/api/uploads/parts/${session}/${i}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: chunk,
-          signal: controller.signal,
+        res = await putPart(`/api/uploads/parts/${session}/${i}`, chunk, controller.signal, sent => {
+          inFlight.set(i, sent);
+          updateProgress();
         });
       } catch (netErr) {
+        inFlight.delete(i);
+        updateProgress();
         if (controller.signal.aborted || fatalError) throw netErr;
         attempt++;
-        if (attempt > 6) {
+        if (attempt > PART_TRIES) {
           throw new Error("Mất kết nối giữa chừng. Bài đang chạy không bị ảnh hưởng, hãy thử lại.");
         }
         retryingParts.add(i + 1);
         updateBusyText();
-        await sleep(2000 * attempt, controller.signal);
+        await sleep(Math.min(2000 * attempt, 30000), controller.signal);
         retryingParts.delete(i + 1);
         updateBusyText();
         continue;
       }
 
+      inFlight.delete(i);
       if (res.ok) {
+        sentParts.add(i);
         acknowledgedBytes += chunk.size;
         updateProgress();
         updateBusyText();
@@ -249,19 +335,19 @@ async function sendPartsFile(file, name) {
 
       let body = null;
       if (res.status === 400) {
-        try { body = await res.clone().json(); } catch (_) {}
+        try { body = await res.json(); } catch (_) {}
       }
       // "interrupted" is the server timing out a slow part: the same cut the retries are for.
       if (res.status === 408 || res.status === 429 || res.status >= 500 || (body && body.code === "interrupted")) {
         attempt++;
-        if (attempt > 6) {
+        if (attempt > PART_TRIES) {
           let d = {};
           try { d = await res.json(); } catch (_) {}
           throw new Error(d.error || `Tải lên phần ${i + 1} không thành công sau nhiều lần thử.`);
         }
         retryingParts.add(i + 1);
         updateBusyText();
-        await sleep(2000 * attempt, controller.signal);
+        await sleep(Math.min(2000 * attempt, 30000), controller.signal);
         retryingParts.delete(i + 1);
         updateBusyText();
         continue;
@@ -275,28 +361,92 @@ async function sendPartsFile(file, name) {
     }
   }
 
-  async function worker() {
-    while (nextIndex < parts) {
-      if (controller.signal.aborted || fatalError) break;
-      const idx = nextIndex++;
-      try {
-        await uploadPart(idx);
-      } catch (err) {
-        if (!fatalError && err.name !== "AbortError") {
-          fatalError = err;
-          controller.abort();
+  async function uploadPartsList(list) {
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < list.length) {
+        if (controller.signal.aborted || fatalError) break;
+        const idx = list[nextIndex++];
+        try {
+          await uploadPart(idx);
+        } catch (err) {
+          if (!fatalError && err.name !== "AbortError") {
+            fatalError = err;
+            controller.abort();
+          }
+          break;
         }
-        break;
       }
     }
+    const workerCount = Math.min(3, list.length);
+    const workers = [];
+    for (let w = 0; w < workerCount; w++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
   }
 
-  const workerCount = Math.min(3, parts);
-  const workers = [];
-  for (let w = 0; w < workerCount; w++) {
-    workers.push(worker());
+  if (cdOffset !== null) {
+    const cdStartPart = Math.floor(cdOffset / part_size);
+    const cdParts = [];
+    for (let i = cdStartPart; i < parts; i++) cdParts.push(i);
+    totalProgressBytes = file.size;
+    await uploadPartsList(cdParts);
+
+    if (fatalError) {
+      upload.controller = null;
+      upload.session = null;
+      if (fatalError.problems) return showUploadProblems(fatalError.problems);
+      return showUploadProblems([{ path: "", message: fatalError.message || "Tải lên chưa được. Thử lại sau." }]);
+    }
+    if (controller.signal.aborted) return;
+
+    $("upBusyText").textContent = "Đang kiểm tra";
+    let planData = {};
+    try {
+      const planRes = await fetch(`/api/uploads/parts/${session}/plan`, {
+        method: "POST",
+        signal: controller.signal,
+      });
+      try { planData = await planRes.json(); } catch (_) {}
+      if (!planRes.ok) {
+        upload.controller = null;
+        upload.session = null;
+        if (planData.problems) return showUploadProblems(planData.problems);
+        return showUploadProblems([{ path: "", message: planData.error || "Tải lên chưa được. Thử lại sau." }]);
+      }
+    } catch (planErr) {
+      if (controller.signal.aborted) return;
+      upload.controller = null;
+      upload.session = null;
+      return showUploadProblems([{ path: "", message: "Mất kết nối giữa chừng. Bài đang chạy không bị ảnh hưởng, hãy thử lại." }]);
+    }
+
+    const { needed, reused, reused_bytes } = planData;
+    const neededPartsBytes = needed.reduce((sum, i) => sum + getPartSize(i), 0);
+    totalProgressBytes = neededPartsBytes;
+    acknowledgedBytes = needed.filter(i => sentParts.has(i)).reduce((sum, i) => sum + getPartSize(i), 0);
+    updateProgress();
+
+    if (reused > 0) {
+      const msg = `Dùng lại ${reused} file đã có (${size(reused_bytes)}), chỉ gửi ${size(neededPartsBytes)}`;
+      if ($("upReuseStatus")) {
+        $("upReuseStatus").textContent = msg;
+        $("upReuseStatus").hidden = false;
+      }
+    }
+
+    const remainingParts = needed.filter(i => !sentParts.has(i));
+    if (remainingParts.length > 0) {
+      $("upBusyText").textContent = "Đang tải lên";
+      await uploadPartsList(remainingParts);
+    }
+  } else {
+    const allParts = [];
+    for (let i = 0; i < parts; i++) allParts.push(i);
+    totalProgressBytes = file.size;
+    await uploadPartsList(allParts);
   }
-  await Promise.all(workers);
 
   if (fatalError) {
     upload.controller = null;
@@ -335,7 +485,7 @@ function sendFile(file, contentType, name) {
   const type = isJson ? "application/json" : "application/zip";
   const limit = isJson ? MAX_TESTS_TOTAL : MAX_ZIP;
   if (file.size > limit) {
-    $("upPickError").textContent = isJson ? "File JSON quá lớn, tối đa 16 MB." : "File zip quá lớn, tối đa 90 MB.";
+    $("upPickError").textContent = isJson ? "File JSON quá lớn, tối đa 16 MB." : "File zip quá lớn, tối đa 300 MB.";
     $("upPickError").hidden = false;
     return;
   }

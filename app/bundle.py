@@ -8,8 +8,8 @@ import zipfile
 from .contract import Problem, check_package, errors
 
 log = logging.getLogger("learn")
-MAX_ZIP = 90 * 1024 * 1024
-MAX_UNPACKED = 400 * 1024 * 1024
+MAX_ZIP = 300 * 1024 * 1024
+MAX_UNPACKED = 600 * 1024 * 1024
 MAX_FILES = 2000
 MAX_RATIO = 100
 MAX_NON_MP3 = 32 * 1024 * 1024

@@ -164,7 +164,8 @@ def expire(now=None) -> None:
         if now - stage["created"] > STAGE_TTL and not stage["committing"]:
             drop(upload_id)
     for session_id, ps in list(part_sessions.items()):
-        if now - ps["created"] > STAGE_TTL:
+        touched = ps.get("touched", ps.get("created", 0))
+        if now - touched > STAGE_TTL:
             drop_parts_session(session_id)
 
 

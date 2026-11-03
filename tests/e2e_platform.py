@@ -35,7 +35,7 @@ def free_port():
         return s.getsockname()[1]
 
 
-def make_zip(dest, slug, title, tracks=None, cards=CARDS, content=None):
+def make_zip(dest, slug, title, tracks=None, cards=CARDS, content=None, extra_files=None):
     """Starts from the bridge sample, so the page and its quiz are real."""
     work = pathlib.Path(tempfile.mkdtemp())
     root = work / "p"
@@ -53,6 +53,11 @@ def make_zip(dest, slug, title, tracks=None, cards=CARDS, content=None):
         (root / "lessons" / "sample" / "audio").mkdir(exist_ok=True)
         for t in tracks.values():
             shutil.copy(ROOT / "tests" / "fixtures" / "tone.mp3", root / "lessons" / "sample" / "audio" / t["file"])
+    if extra_files:
+        for rel_path, data in extra_files.items():
+            target = root / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(root.rglob("*")):
             if f.is_file():
@@ -86,14 +91,20 @@ def main():
             except OSError:
                 import time
                 time.sleep(0.25)
-        good = make_zip(work / "good.zip", "bai-mau", f"Bài {XSS}")
+        filler1 = os.urandom(4_500_000)
+        filler2 = os.urandom(2_500_000)
+        good = make_zip(work / "good.zip", "bai-mau", f"Bài {XSS}", extra_files={"lessons/sample/page/filler1.mp3": filler1})
+        good2 = make_zip(work / "good2.zip", "bai-mau", f"Bài {XSS}", extra_files={
+            "lessons/sample/page/filler1.mp3": filler1,
+            "lessons/sample/page/filler2.mp3": filler2,
+        })
         audio = make_zip(work / "audio.zip", "co-audio", "Bài có audio", tracks={"short": {"file": "s.mp3", "label": "Ngắn"}})
         bad = work / "bad.zip"
         with zipfile.ZipFile(bad, "w") as z:
             z.writestr("../evil.txt", "x")
         with sync_playwright() as p:
             br = p.webkit.launch() if args.browser == "webkit" else p.chromium.launch(channel="chrome")
-            run(br, base, temp, good, audio, bad)
+            run(br, base, temp, good, audio, bad, good2=good2)
             br.close()
     finally:
         srv.terminate()
@@ -133,7 +144,7 @@ def upload(pg, path):
     pg.set_input_files("#upFile", str(path))
 
 
-def run(br, base, temp, good, audio, bad):
+def run(br, base, temp, good, audio, bad, good2=None):
     errs = []
     a = new_page(br, errs)
     login_first(a, base, "an@example.com", temp["an@example.com"])
@@ -173,7 +184,11 @@ def run(br, base, temp, good, audio, bad):
         route.continue_()
     a.route("**/api/uploads/parts/**", drop_first_part)
     upload(a, good)
-    a.wait_for_selector("#upConfirm:not([hidden])", timeout=30000)
+    try:
+        a.wait_for_selector("#upConfirm:not([hidden])", timeout=30000)
+    except Exception:
+        print("DIALOG:", a.inner_text("#uploadDialog")[:400], "ERRS:", errs[:5], "PUTS:", parts_puts[:6])
+        raise
     a.unroute("**/api/uploads/parts/**")
     part0 = [u for u in parts_puts if u.endswith("/0")]
     check("dialog upload used PUT parts, resent the dropped part and reached confirm", dropped and len(part0) >= 2 and a.locator("#upConfirm").is_visible(), parts_puts)
@@ -191,6 +206,34 @@ def run(br, base, temp, good, audio, bad):
     a.wait_for_selector("#lessonList .stream-row")
     check("package appears on home", a.locator("#lessonList .stream-row").count() == 1)
     check("package title did not run as HTML", a.evaluate("window.__xss") is None)
+
+    # Upload second version of the same package that adds one file
+    if good2 is None:
+        with zipfile.ZipFile(good, "r") as z:
+            f1 = z.read("lessons/sample/page/filler1.mp3") if "lessons/sample/page/filler1.mp3" in z.namelist() else os.urandom(4_500_000)
+        f2 = os.urandom(2_500_000)
+        good2 = make_zip(good.parent / "good2.zip", "bai-mau", f"Bài {XSS}", extra_files={
+            "lessons/sample/page/filler1.mp3": f1,
+            "lessons/sample/page/filler2.mp3": f2,
+        })
+    a.goto(base + "/#library")
+    a.wait_for_selector("#libMine .stream-row")
+    v2_puts = []
+    a.on("request", lambda r: v2_puts.append(r) if r.method == "PUT" and "/api/uploads/parts/" in r.url else None)
+    upload(a, good2)
+    a.wait_for_selector("#upConfirm:not([hidden])", timeout=30000)
+    check("dialog showed the reuse line", "Dùng lại" in a.locator("#upReuseStatus").text_content())
+    v2_put_bytes = sum(len(r.post_data_buffer or b"") for r in v2_puts)
+    v2_zip_size = good2.stat().st_size
+    check("fewer PUT bytes were sent than the zip size", v2_put_bytes < v2_zip_size, f"{v2_put_bytes} < {v2_zip_size}")
+    check("confirm screen appears", a.locator("#upConfirm").is_visible())
+    a.check("#upAttest")
+    a.click("#upCommit")
+    a.wait_for_selector("#uploadDialog", state="hidden")
+    v2_version = a.evaluate("async () => (await (await fetch('/api/packages')).json()).mine[0].version")  # newest update first
+    check("after commit the package has the new version", v2_version == 2, v2_version)
+    a.goto(base + "/#home")
+    a.wait_for_selector("#lessonList .stream-row")
 
     # No audio: the session has no Listen step, and no Ask box without approval.
     check("no audio hides Listen", not a.locator(".stage-tab[data-nav=listen]").is_visible())
