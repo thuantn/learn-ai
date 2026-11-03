@@ -93,3 +93,107 @@ async def discard_attempt(attempt_id: str, request: Request):
         return {"ok": True}
 
     return _with_attempt(request.state.user, attempt_id, work)
+
+
+@router.get("/api/attempts/{attempt_id}/items/{item_id}/ask")
+async def get_item_ask(attempt_id: str, item_id: str, request: Request):
+    user = request.state.user
+    with db.connect() as c:
+        try:
+            target = practice.ask_target(c, user, attempt_id, item_id)
+        except practice.Refused as e:
+            return bad(e.status, e.code, e.message)
+        if not target:
+            if not practice.load(c, user, attempt_id):
+                return bad(404, "attempt", "Không có lượt làm này.")
+            return bad(404, "item", "Không có câu hỏi này.")
+        thread_key, _, _, _ = target
+        from . import main
+        rows = c.execute(
+            "SELECT role, body FROM ask_message WHERE user=? AND lesson=? ORDER BY id DESC LIMIT ?",
+            (user, thread_key, main.ASK_SHOW),
+        ).fetchall()
+    return {"messages": [{"role": r["role"], "text": r["body"]} for r in reversed(rows)]}
+
+
+@router.post("/api/attempts/{attempt_id}/items/{item_id}/ask")
+async def post_item_ask(attempt_id: str, item_id: str, request: Request):
+    user = request.state.user
+    with db.connect() as c:
+        try:
+            target = practice.ask_target(c, user, attempt_id, item_id)
+        except practice.Refused as e:
+            return bad(e.status, e.code, e.message)
+        if not target:
+            if not practice.load(c, user, attempt_id):
+                return bad(404, "attempt", "Không có lượt làm này.")
+            return bad(404, "item", "Không có câu hỏi này.")
+        thread_key, item, test_title, ask_status = target
+        if ask_status != "approved":
+            return bad(503, "disabled", "Ô Hỏi chưa được bật.")
+    from . import main
+    if main.ai.current() is None:
+        return bad(503, "disabled", "Ô Hỏi chưa được bật.")
+    data = await read_json(request, main.ASK_INPUT_MAX * 4)
+    question = (data or {}).get("question")
+    if not isinstance(question, str):
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+    question = question.strip()
+    if not 0 < len(question) <= main.QUESTION_MAX:
+        return bad(400, "input", "Câu hỏi quá dài hoặc đang trống.")
+    system = practice.item_context(test_title, item)
+    return await main.run_ask(
+        user, thread_key, system, question,
+        lambda conn: practice.item_still_allowed(conn, user, attempt_id, item_id),
+    )
+
+
+@router.delete("/api/attempts/{attempt_id}/items/{item_id}/ask")
+async def delete_item_ask(attempt_id: str, item_id: str, request: Request):
+    user = request.state.user
+    with db.connect() as c:
+        try:
+            target = practice.ask_target(c, user, attempt_id, item_id)
+        except practice.Refused as e:
+            return bad(e.status, e.code, e.message)
+        if not target:
+            if not practice.load(c, user, attempt_id):
+                return bad(404, "attempt", "Không có lượt làm này.")
+            return bad(404, "item", "Không có câu hỏi này.")
+        thread_key, _, _, _ = target
+        c.execute("DELETE FROM ask_message WHERE user=? AND lesson=?", (user, thread_key))
+    return {"ok": True}
+
+
+@router.post("/api/attempts/{attempt_id}/items/{item_id}/feedback")
+async def post_item_feedback(attempt_id: str, item_id: str, request: Request):
+    user = request.state.user
+    data = await read_json(request) or {}
+    with db.connect() as c:
+        row = practice.load(c, user, attempt_id)
+        if not row:
+            return bad(404, "attempt", "Không có lượt làm này.")
+        item = practice.item_in(c, row, item_id)
+        if not item:
+            return bad(404, "item", "Không có câu hỏi này.")
+        rev = c.execute("SELECT package_id FROM test_revision WHERE id=?", (row["revision_id"],)).fetchone()
+        if not rev:
+            return bad(404, "package", "Không có package này.")
+        from . import main
+        refused = main.save_feedback(
+            c, user, rev["package_id"], row["test_key"], "test_item", item_id,
+            data.get("kind"), data.get("text"),
+        )
+        if refused:
+            return refused
+    return {"ok": True}
+
+
+@router.get("/api/packages/{package_id}/test-stats")
+async def get_test_stats(package_id: str, request: Request):
+    user = request.state.user
+    with db.connect() as c:
+        row = c.execute("SELECT * FROM packages WHERE id=?", (package_id,)).fetchone()
+        if not row or row["owner"] != user:
+            return bad(404, "package", "Không có package này.")
+        return {"tests": practice.stats(c, package_id, user)}
