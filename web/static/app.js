@@ -9,8 +9,16 @@ const audio = new Audio();
 audio.preload = "none";
 let lastSaved = 0, pendingSeek = null;
 
+// Leaving the page cuts in-flight requests; WebKit then logs a page error for each one even when
+// the caller catches it. Aborting them first turns that into a plain AbortError.
+let leaving = new AbortController();
+window.addEventListener("beforeunload", () => {
+  leaving.abort();
+  // a download link or a cancelled unload keeps the page: later requests get a fresh signal
+  setTimeout(() => { leaving = new AbortController(); }, 0);
+});
 async function api(url, opts) {
-  const r = await fetch(url, opts);
+  const r = await fetch(url, { signal: leaving.signal, ...opts });
   if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
   const d = await r.json().catch(() => ({}));
   if (r.status === 403 && d.code === "must_change") { location.href = "/change-password"; throw new Error("password"); }
@@ -574,7 +582,7 @@ document.addEventListener("click", e => {
   const el = e.target.closest("[data-act]");
   if (!el) return;
   if (el.tagName === "A") e.preventDefault();
-  Promise.resolve(ACTIONS[el.dataset.act](el)).catch(err => { if (err && err.message !== "login" && err.message !== "password") console.error(err); });
+  Promise.resolve(ACTIONS[el.dataset.act](el)).catch(err => { if (err && err.name !== "AbortError" && err.message !== "login" && err.message !== "password") console.error(err); });
 });
 document.addEventListener("input", e => {
   if (!e.target.matches("[data-scrub]")) return;
@@ -669,4 +677,4 @@ document.addEventListener("DOMContentLoaded", () => (async function init() {
   joinFromLink();
   await refresh();
   if (!(window.testRoute && window.testRoute())) go(location.hash.slice(1) || "home", true);
-})().catch(err => { if (err.message !== "login" && err.message !== "password") console.error(err); }));
+})().catch(err => { if (err.name !== "AbortError" && err.message !== "login" && err.message !== "password") console.error(err); }));
