@@ -819,6 +819,20 @@ async def delete_package(package_id: str, request: Request):
 
 # ---------- Feedback ----------
 
+def save_feedback(c, user, package_id, lesson, target_type, target_id, kind, text) -> dict | None:
+    """The rate limit and the INSERT, shared by the lesson and the test item feedback routes."""
+    if kind not in FEEDBACK_KINDS or not isinstance(text, str) or not 0 < len(text.strip()) <= FEEDBACK_MAX:
+        return bad(400, "input", "Góp ý đang trống hoặc quá dài.")
+    hour_ago = time.time() - 3600
+    if c.execute("SELECT count(*) n FROM feedback WHERE author=? AND created_at>?", (user, hour_ago)).fetchone()["n"] >= FEEDBACK_PER_HOUR:
+        return bad(429, "rate_limited", "Bạn đã gửi nhiều góp ý. Thử lại sau.")
+    c.execute(
+        "INSERT INTO feedback(package_id, lesson, target_type, target_id, kind, author, body, created_at) VALUES(?,?,?,?,?,?,?,?)",
+        (package_id, lesson, target_type, "" if target_type == "lesson" else target_id, kind, user, text.strip(), time.time()),
+    )
+    return None
+
+
 @app.post("/api/lessons/{lesson_id}/feedback")
 async def send_feedback(lesson_id: str, request: Request):
     user = request.state.user
@@ -828,19 +842,12 @@ async def send_feedback(lesson_id: str, request: Request):
         if not lesson:
             return bad(404, "lesson", "Không có bài này.")
         kind, target_type, target_id = data.get("kind"), data.get("target_type"), str(data.get("target_id") or "")
-        text = data.get("text")
-        if kind not in FEEDBACK_KINDS or not isinstance(text, str) or not 0 < len(text.strip()) <= FEEDBACK_MAX:
-            return bad(400, "input", "Góp ý đang trống hoặc quá dài.")
         pools = {"lesson": None, "card": lesson["cards"], "quiz": lesson["quiz"]}
         if not isinstance(target_type, str) or target_type not in pools or (pools[target_type] is not None and target_id not in {x["id"] for x in pools[target_type]}):
             return bad(400, "input", "Dữ liệu không hợp lệ.")
-        hour_ago = time.time() - 3600
-        if c.execute("SELECT count(*) n FROM feedback WHERE author=? AND created_at>?", (user, hour_ago)).fetchone()["n"] >= FEEDBACK_PER_HOUR:
-            return bad(429, "rate_limited", "Bạn đã gửi nhiều góp ý. Thử lại sau.")
-        c.execute(
-            "INSERT INTO feedback(package_id, lesson, target_type, target_id, kind, author, body, created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (lesson["package_id"], lesson_id, target_type, "" if target_type == "lesson" else target_id, kind, user, text.strip(), time.time()),
-        )
+        refused = save_feedback(c, user, lesson["package_id"], lesson_id, target_type, target_id, kind, data.get("text"))
+        if refused:
+            return refused
     return {"ok": True}
 
 
@@ -850,17 +857,31 @@ async def package_feedback(package_id: str, request: Request):
         if not owned_package(c, package_id, request.state.user):
             return bad(404, "package", "Không có package này.")
         lessons = {r["key"]: json.loads(r["data"]) for r in c.execute("SELECT key, data FROM package_lessons WHERE package_id=?", (package_id,))}
+        tests = {r["key"]: r for r in c.execute("SELECT key, title, revision_id FROM package_tests WHERE package_id=?", (package_id,))}
         rows = c.execute("SELECT * FROM feedback WHERE package_id=? ORDER BY created_at DESC, id DESC LIMIT 200", (package_id,)).fetchall()
-    out = []
-    for r in rows:
-        lesson = lessons.get(r["lesson"]) or {}
-        pool = {"card": lesson.get("cards", []), "quiz": lesson.get("quiz", [])}.get(r["target_type"], [])
-        out.append({
-            "id": r["id"], "lesson_title": lesson.get("title"), "target_type": r["target_type"], "target_id": r["target_id"],
-            "target_text": next((x["q"] for x in pool if x["id"] == r["target_id"]), None),
-            "kind": r["kind"], "author": None if r["kind"] == "abuse" else r["author"], "body": r["body"], "created_at": r["created_at"],
-        })
-    return {"feedback": out}
+        test_data = {}
+        out = []
+        for r in rows:
+            lesson_title, target_text = None, None
+            if r["target_type"] == "test_item":
+                trow = tests.get(r["lesson"])
+                if trow:
+                    lesson_title = trow["title"]
+                    if trow["revision_id"] not in test_data:
+                        test_data[trow["revision_id"]] = catalog.revision_data(c, trow["revision_id"]) or {}
+                    data = test_data[trow["revision_id"]]
+                    target_text = next((x["question"] for x in data.get("items", []) if x["id"] == r["target_id"]), None)
+            else:
+                lesson = lessons.get(r["lesson"]) or {}
+                pool = {"card": lesson.get("cards", []), "quiz": lesson.get("quiz", [])}.get(r["target_type"], [])
+                lesson_title = lesson.get("title")
+                target_text = next((x["q"] for x in pool if x["id"] == r["target_id"]), None)
+            out.append({
+                "id": r["id"], "lesson_title": lesson_title, "target_type": r["target_type"], "target_id": r["target_id"],
+                "target_text": target_text,
+                "kind": r["kind"], "author": None if r["kind"] == "abuse" else r["author"], "body": r["body"], "created_at": r["created_at"],
+            })
+        return {"feedback": out}
 
 
 # ---------- Upload ----------
@@ -981,11 +1002,13 @@ def earlier_turns(c, user, lesson_key):
     return turns[1:] if turns and turns[0]["role"] == "assistant" else turns
 
 
-def keep_turn(user, lesson_key, question, answer):
-    """Only if the learner still has the lesson: access or the package may have gone during the call."""
+def keep_turn(user, lesson_key, question, answer, still_allowed=None):
+    """Only if the learner still has the target: access or the package may have gone during the call."""
+    if still_allowed is None:
+        still_allowed = lambda c: bool(catalog.lesson_for(c, user, lesson_key))  # noqa: E731
     now = time.time()
     with db.connect() as c:
-        if not catalog.lesson_for(c, user, lesson_key):
+        if not still_allowed(c):
             return
         c.executemany(
             "INSERT INTO ask_message(user, lesson, role, body, at) VALUES(?,?,?,?,?)",
@@ -1040,6 +1063,33 @@ def take_quota(user):
     return bool(taken)
 
 
+async def run_ask(user, thread_key, system, question, still_allowed):
+    """The shared part of both ask routes: the per minute and daily limits, the call itself, keeping the turn."""
+    if ai.current() is None:
+        return bad(503, "disabled", "Ô Hỏi chưa được bật.")
+    if not isinstance(question, str) or not 0 < len(question.strip()) <= QUESTION_MAX:
+        return bad(400, "input", "Câu hỏi quá dài hoặc đang trống.")
+    question = question.strip()
+    with db.connect() as c:
+        earlier = earlier_turns(c, user, thread_key)
+    messages = [{"role": "system", "content": system}, *earlier, {"role": "user", "content": question}]
+    if AI_SLOTS.locked():
+        return bad(429, "busy", "Ô Hỏi đang bận. Thử lại sau ít phút.")
+    if not take_minute_slot(user) or not await asyncio.to_thread(take_quota, user):
+        return bad(429, "rate_limited", "Đã hết lượt hỏi. Thử lại sau.")
+    try:
+        async with AI_SLOTS:
+            text = await asyncio.to_thread(ai.call, messages)
+    except urllib.error.HTTPError as e:
+        log.warning("ai http %s", e.code)
+        return bad(502, "ai", "Dịch vụ AI đang lỗi. Thử lại sau.")
+    except ai.CALL_ERRORS as e:
+        log.warning("ai failed %s", type(e).__name__)
+        return bad(502, "ai", "Dịch vụ AI đang lỗi. Thử lại sau.")
+    await asyncio.to_thread(keep_turn, user, thread_key, question, text, still_allowed)
+    return {"text": text}
+
+
 @app.post("/api/ask")
 async def ask(request: Request):
     if ai.current() is None:
@@ -1059,24 +1109,10 @@ async def ask(request: Request):
     question = question.strip()
     if not 0 < len(question) <= QUESTION_MAX:
         return bad(400, "input", "Câu hỏi quá dài hoặc đang trống.")
-    with db.connect() as c:
-        earlier = earlier_turns(c, user, lesson_key)
-    messages = [{"role": "system", "content": lesson_context(lesson)}, *earlier, {"role": "user", "content": question}]
-    if AI_SLOTS.locked():
-        return bad(429, "busy", "Ô Hỏi đang bận. Thử lại sau ít phút.")
-    if not take_minute_slot(user) or not await asyncio.to_thread(take_quota, user):
-        return bad(429, "rate_limited", "Đã hết lượt hỏi. Thử lại sau.")
-    try:
-        async with AI_SLOTS:
-            text = await asyncio.to_thread(ai.call, messages)
-    except urllib.error.HTTPError as e:
-        log.warning("ai http %s", e.code)
-        return bad(502, "ai", "Dịch vụ AI đang lỗi. Thử lại sau.")
-    except ai.CALL_ERRORS as e:
-        log.warning("ai failed %s", type(e).__name__)
-        return bad(502, "ai", "Dịch vụ AI đang lỗi. Thử lại sau.")
-    await asyncio.to_thread(keep_turn, user, lesson_key, question, text)
-    return {"text": text}
+    return await run_ask(
+        user, lesson_key, lesson_context(lesson), question,
+        lambda c: bool(catalog.lesson_for(c, user, lesson_key)),
+    )
 
 
 # ---------- Static files ----------
