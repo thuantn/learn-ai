@@ -95,6 +95,53 @@ def _record_first_answer(c, user: str, package_id: str, test_key: str, item_id: 
     )
 
 
+def apply_to_pool(c, row, item_id: str, chosen: list[str], correct: bool, now: float) -> None:
+    if not chosen:
+        return
+    pt = c.execute("SELECT package_id, revision_id FROM package_tests WHERE key=?", (row["test_key"],)).fetchone()
+    if not pt:
+        return
+    cur_data = catalog.revision_data(c, pt["revision_id"])
+    if not cur_data:
+        return
+    cur_item = next((x for x in cur_data["items"] if x["id"] == item_id), None)
+    if not cur_item:
+        return
+    cur_hash = catalog.answer_hash(cur_item)
+    if pt["revision_id"] != row["revision_id"]:
+        att_data = catalog.revision_data(c, row["revision_id"])
+        att_item = next((x for x in (att_data["items"] if att_data else ()) if x["id"] == item_id), None)
+        if not att_item or catalog.answer_hash(att_item) != cur_hash:
+            return
+    if not correct:
+        c.execute(
+            """INSERT INTO test_pool(user, package_id, test_key, item, answer_hash, streak, last_correct_at, added_at)
+               VALUES(?,?,?,?,?,0,NULL,?)
+               ON CONFLICT(user, test_key, item) DO UPDATE SET
+                 answer_hash=excluded.answer_hash,
+                 streak=0,
+                 last_correct_at=NULL""",
+            (row["user"], pt["package_id"], row["test_key"], item_id, cur_hash, now),
+        )
+        return
+    pool_row = c.execute(
+        "SELECT streak, last_correct_at FROM test_pool WHERE user=? AND test_key=? AND item=?",
+        (row["user"], row["test_key"], item_id),
+    ).fetchone()
+    if not pool_row:
+        return
+    if pool_row["streak"] == 0:
+        c.execute(
+            "UPDATE test_pool SET streak=1, last_correct_at=? WHERE user=? AND test_key=? AND item=?",
+            (now, row["user"], row["test_key"], item_id),
+        )
+    elif pool_row["last_correct_at"] is not None and now - pool_row["last_correct_at"] >= 12 * 3600:
+        c.execute(
+            "DELETE FROM test_pool WHERE user=? AND test_key=? AND item=?",
+            (row["user"], row["test_key"], item_id),
+        )
+
+
 def _finalize(c, row, data: dict, at: float) -> None:
     if row["mode"] == "review":
         c.execute("UPDATE test_attempt SET submitted_at=? WHERE id=?", (at, row["id"]))
@@ -126,6 +173,7 @@ def _finalize(c, row, data: dict, at: float) -> None:
             score += 1
         if row["mode"] == "exam" and chosen:
             _record_first_answer(c, row["user"], pkg_id, row["test_key"], entry["id"], ahash, chosen, is_correct, at)
+            apply_to_pool(c, row, entry["id"], chosen, is_correct, at)
     c.execute(
         "UPDATE test_attempt SET submitted_at=?, score=?, total=? WHERE id=?",
         (at, score, len(layout), row["id"]),
@@ -275,6 +323,46 @@ def _make_layout(items: list[dict]) -> list[dict]:
     return layout
 
 
+def _start_review(c, user: str, key: str, trow, existing, restart: bool) -> dict | None:
+    if existing and not restart and existing["revision_id"] == trow["revision_id"]:
+        graded = {
+            r["item"]: r["correct"]
+            for r in c.execute("SELECT item, correct FROM test_answer WHERE attempt=?", (existing["id"],))
+        }
+        pool = {r["item"] for r in c.execute("SELECT item FROM test_pool WHERE user=? AND test_key=?", (user, key))}
+        layout = json.loads(existing["layout"])
+        if any(graded.get(e["id"]) is None and e["id"] in pool for e in layout):
+            return view(c, user, existing)
+    if existing:
+        c.execute("DELETE FROM test_attempt WHERE id=?", (existing["id"],))
+    data = catalog.revision_data(c, trow["revision_id"])
+    cur_items = {x["id"]: x for x in data["items"]}
+    avail = [
+        cur_items[r["item"]]
+        for r in c.execute("SELECT item FROM test_pool WHERE user=? AND test_key=? ORDER BY item", (user, key))
+        if r["item"] in cur_items
+    ]
+    if not avail:
+        raise Refused("empty", 400, "Chưa có câu nào cần ôn.")
+    layout = _make_layout(avail)
+    attempt_id = "a" + secrets.token_hex(12)
+    now = clock()
+    try:
+        c.execute(
+            """INSERT INTO test_attempt(id, user, test_key, revision_id, mode, layout, started_at)
+               VALUES(?,?,?,?,?,?,?)""",
+            (attempt_id, user, key, trow["revision_id"], "review", json.dumps(layout), now),
+        )
+    except sqlite3.IntegrityError:
+        row = c.execute(
+            "SELECT * FROM test_attempt WHERE user=? AND test_key=? AND mode='review' AND submitted_at IS NULL",
+            (user, key),
+        ).fetchone()
+        return view(c, user, row)
+    row = c.execute("SELECT * FROM test_attempt WHERE id=?", (attempt_id,)).fetchone()
+    return view(c, user, row)
+
+
 def start(c, user: str, key: str, mode: str, restart: bool = False) -> dict | None:
     if mode not in ("exam", "practice", "review"):
         raise Refused("mode", 400, "Chế độ không hợp lệ.")
@@ -286,6 +374,8 @@ def start(c, user: str, key: str, mode: str, restart: bool = False) -> dict | No
         "SELECT * FROM test_attempt WHERE user=? AND test_key=? AND mode=? AND submitted_at IS NULL",
         (user, key, mode),
     ).fetchone()
+    if mode == "review":
+        return _start_review(c, user, key, trow, existing, restart)
     if existing and not restart:
         return view(c, user, existing)
     if existing and restart:
@@ -396,6 +486,7 @@ def check(c, row, item_id: str, chosen) -> dict:
     if row["mode"] != "review" and chosen:
         pkg_id = c.execute("SELECT package_id FROM test_revision WHERE id=?", (row["revision_id"],)).fetchone()["package_id"]
         _record_first_answer(c, row["user"], pkg_id, row["test_key"], item_id, ahash, chosen, is_correct, now)
+    apply_to_pool(c, row, item_id, chosen, is_correct, now)
 
     layout = json.loads(row["layout"])
     order = next((e["options"] for e in layout if e["id"] == item_id), None)
