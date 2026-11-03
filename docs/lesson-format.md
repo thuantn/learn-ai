@@ -1,6 +1,6 @@
 # Định dạng bài học
 
-Contract v1 là định dạng duy nhất server nhận. Máy kiểm tra bằng `app/contract.py`.
+Contract v1 là định dạng duy nhất server nhận. Máy kiểm tra bằng `app/contract.py`. Với bộ đề trắc nghiệm luyện thi, xem [Định dạng bộ đề](practice-test-format.md).
 
 ## Một package
 

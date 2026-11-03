@@ -25,6 +25,8 @@ A package is a zip holding `package.json` and `lessons/<id>/`; the format is in 
 
 An author can download a Claude skill from the upload dialog. The zip holds one `creating-learn-packages/` folder with the instructions, a lesson template and the checker, and needs only Python unless the lesson has audio. It can be uploaded to Claude app or web, or unpacked into `~/.claude/skills/` for Claude Code.
 
+Practice tests can be included in a package or uploaded directly as a single `.json` file (`docs/practice-test-format.md`). Learners can take timed exams or practice with immediate feedback, review missed questions, and ask AI questions about revealed items.
+
 `tests/e2e_platform.py` runs upload, share, revoke and feedback in a real browser, `tests/e2e_admin.py` the admin page and Ask approval against a fake provider. `tests/e2e_browser.py PACKAGE_DIR` and `tests/e2e_sandbox.py PACKAGE_DIR` run the study session and the sandbox against an unpacked package (need `playwright`).
 
 ## Deploy

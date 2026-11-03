@@ -258,6 +258,7 @@ TOOLKIT_FILES = {
     for inside, source in {
         "app/__init__.py": "app/__init__.py", "app/bundle.py": "app/bundle.py", "app/contract.py": "app/contract.py",
         "scripts/learnpkg.py": "scripts/learnpkg.py", "references/lesson-format.md": "docs/lesson-format.md",
+        "references/practice-test-format.md": "docs/practice-test-format.md",
         "SKILL.md": f"{_SKILL}/SKILL.md", "template/package.json": f"{_SKILL}/template/package.json",
         "template/lessons/bai-mau/lesson.json": f"{_SKILL}/template/lessons/bai-mau/lesson.json",
         "template/lessons/bai-mau/content.md": f"{_SKILL}/template/lessons/bai-mau/content.md",
