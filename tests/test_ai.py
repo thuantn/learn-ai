@@ -226,4 +226,56 @@ def test_empty_answer_is_a_failure_not_a_success(ctx, ai, monkeypatch):
     monkeypatch.setattr(ai, "_open", lambda req, timeout: Reply())
     with pytest.raises(ValueError):
         ai.call([{"role": "user", "content": "x"}])
+    assert ai.test() == {"ok": False, "code": "no_answer"}
+
+
+def _reply_with(body):
+    class Reply:
+        def read(self):
+            return json.dumps(body).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    return lambda req, timeout: Reply()
+
+
+@pytest.mark.parametrize("content", ["", "  \n"])
+def test_blank_answer_is_a_failure_too(ctx, ai, monkeypatch, content):
+    ai.save("openrouter", "", KEY, "admin")
+    monkeypatch.setattr(ai, "_open", _reply_with({"choices": [{"message": {"content": content}}]}))
+    assert ai.test() == {"ok": False, "code": "no_answer"}
+
+
+def test_a_broken_reply_is_not_reported_as_no_answer(ctx, ai, monkeypatch):
+    ai.save("openrouter", "", KEY, "admin")
+    monkeypatch.setattr(ai, "_open", _reply_with({"error": "x"}))
     assert ai.test() == {"ok": False, "code": "unreachable"}
+
+
+def test_thinking_is_off_only_where_the_field_exists(ctx, ai, monkeypatch):
+    # A thinking model spent the whole budget on thinking and answered nothing, on the test call and on real questions.
+    sent = []
+    monkeypatch.setattr(ai, "_open", _fake_reply(sent))
+    ai.save("openrouter", "", KEY, "admin")
+    ai.call([{"role": "user", "content": "x"}])
+    ai.test()
+    ai.save("opencode", "", KEY, "admin")
+    ai.call([{"role": "user", "content": "x"}])
+    bodies = [json.loads(r.data) for r in sent]
+    assert bodies[0]["reasoning"] == {"enabled": False} and bodies[1]["reasoning"] == {"enabled": False}
+    assert "reasoning" not in bodies[2]
+    assert bodies[0]["max_tokens"] == 3000
+    assert bodies[1]["max_tokens"] >= 32
+
+
+def test_a_cut_off_answer_says_so(ctx, ai, monkeypatch):
+    ai.save("openrouter", "", KEY, "admin")
+    monkeypatch.setattr(ai, "_open", _reply_with({"choices": [{"finish_reason": "length", "message": {"content": "phần đầu"}}]}))
+    text = ai.call([{"role": "user", "content": "x"}])
+    assert text.startswith("phần đầu") and "bị cắt" in text
+    monkeypatch.setattr(ai, "_open", _reply_with({"choices": [{"finish_reason": "stop", "message": {"content": "đủ"}}]}))
+    assert ai.call([{"role": "user", "content": "x"}]) == "đủ"

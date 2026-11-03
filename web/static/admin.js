@@ -19,7 +19,8 @@ const TEST_RESULT = {
   ok: "Kết nối được, model chạy được.",
   auth: "Nhà cung cấp từ chối khóa này.",
   zdr_no_endpoint: "Model này không chạy được theo yêu cầu ZDR, hoặc không tồn tại. Chọn model khác.",
-  refused: "Nhà cung cấp từ chối yêu cầu. Kiểm tra số dư và hạn mức.",
+  refused: "Nhà cung cấp từ chối yêu cầu. Kiểm tra số dư, hạn mức và tên model.",
+  no_answer: "Khóa đúng và có kết nối, nhưng model không trả lời được chữ nào. Chọn model khác.",
   unreachable: "Không kết nối được tới nhà cung cấp.",
   no_config: "Chưa có khóa để thử.",
 };

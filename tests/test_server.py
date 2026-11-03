@@ -432,7 +432,7 @@ def test_ask_sends_zdr_and_reports_failure_without_retry(ctx, capsys, monkeypatc
     with c:
         r = c.post("/api/ask", json={"lesson": key, "question": "x"})
         assert r.status_code == 502 and "khoa-bi-mat" not in r.text
-    assert len(seen) == 1 and seen[0]["provider"] == {"zdr": True} and seen[0]["max_tokens"] == 1500
+    assert len(seen) == 1 and seen[0]["provider"] == {"zdr": True} and seen[0]["max_tokens"] == 3000
 
 
 def test_stranger_gets_404(ctx, capsys, monkeypatch):

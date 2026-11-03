@@ -140,19 +140,24 @@ def save(provider: str, model: str, key: str | None, actor: str) -> None:
 def _post(cfg, messages, max_tokens, timeout):
     body = {"model": cfg["model"], "messages": messages, "max_tokens": max_tokens}
     if cfg["zdr"]:
+        # Thinking counts against max_tokens: with it on, a real question spent all 5000 tokens and got no answer.
         body["provider"] = {"zdr": True}
+        body["reasoning"] = {"enabled": False}
     req = urllib.request.Request(
         cfg["base"] + "/chat/completions", data=json.dumps(body).encode(),
         headers={"Authorization": "Bearer " + cfg["key"], "Content-Type": "application/json"},
     )
     with _open(req, timeout) as r:
-        text = json.loads(r.read())["choices"][0]["message"]["content"]
-    if not isinstance(text, str):
+        choice = json.loads(r.read())["choices"][0]
+    text = choice["message"]["content"]
+    if not isinstance(text, str) or not text.strip():
         raise ValueError("no_answer")
+    if choice.get("finish_reason") == "length":
+        text += "\n\n(Câu trả lời bị cắt vì quá dài. Hãy hỏi hẹp hơn.)"
     return text
 
 
-def call(messages, max_tokens=1500) -> str:
+def call(messages, max_tokens=3000) -> str:
     """One request to the provider in use. A failure raises; there is no other provider to fall back to, on purpose."""
     cfg = current()
     if not cfg:
@@ -166,12 +171,12 @@ def test() -> dict:
     if not cfg:
         return {"ok": False, "code": "no_config"}
     try:
-        _post(cfg, [{"role": "user", "content": "Trả lời đúng một chữ: OK"}], 5, 30)
+        _post(cfg, [{"role": "user", "content": "Trả lời đúng một chữ: OK"}], 32, 30)
     except urllib.error.HTTPError as e:
         log.warning("ai test http %s", e.code)
         code = {401: "auth", 403: "auth", 404: "zdr_no_endpoint"}.get(e.code, "refused")
         return {"ok": False, "code": code}
     except CALL_ERRORS as e:
         log.warning("ai test failed %s", type(e).__name__)
-        return {"ok": False, "code": "unreachable"}
+        return {"ok": False, "code": "no_answer" if str(e) == "no_answer" else "unreachable"}
     return {"ok": True, "code": "ok"}
