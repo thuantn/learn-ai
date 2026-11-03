@@ -250,27 +250,36 @@ async def change_password(request: Request):
     return resp
 
 
-_SKILL = "skills/creating-learn-packages"
-TOOLKIT_FILES = (
-    "app/__init__.py", "app/bundle.py", "app/contract.py", "scripts/learnpkg.py", "docs/lesson-format.md",
-    f"{_SKILL}/SKILL.md", f"{_SKILL}/template/package.json", f"{_SKILL}/template/lessons/bai-mau/lesson.json",
-    f"{_SKILL}/template/lessons/bai-mau/content.md", f"{_SKILL}/template/lessons/bai-mau/page/index.html",
-    f"{_SKILL}/template/lessons/bai-mau/page/bai.css", f"{_SKILL}/template/lessons/bai-mau/page/bai.js",
-)
+_SKILL_NAME = "creating-learn-packages"
+_SKILL = f"skills/{_SKILL_NAME}"
+# Name in the zip -> file here. Claude app and web need one folder at the root, named as the skill, holding all it uses.
+TOOLKIT_FILES = {
+    f"{_SKILL_NAME}/{inside}": source
+    for inside, source in {
+        "app/__init__.py": "app/__init__.py", "app/bundle.py": "app/bundle.py", "app/contract.py": "app/contract.py",
+        "scripts/learnpkg.py": "scripts/learnpkg.py", "references/lesson-format.md": "docs/lesson-format.md",
+        "SKILL.md": f"{_SKILL}/SKILL.md", "template/package.json": f"{_SKILL}/template/package.json",
+        "template/lessons/bai-mau/lesson.json": f"{_SKILL}/template/lessons/bai-mau/lesson.json",
+        "template/lessons/bai-mau/content.md": f"{_SKILL}/template/lessons/bai-mau/content.md",
+        "template/lessons/bai-mau/page/index.html": f"{_SKILL}/template/lessons/bai-mau/page/index.html",
+        "template/lessons/bai-mau/page/bai.css": f"{_SKILL}/template/lessons/bai-mau/page/bai.css",
+        "template/lessons/bai-mau/page/bai.js": f"{_SKILL}/template/lessons/bai-mau/page/bai.js",
+    }.items()
+}
 
 
 def toolkit_zip():
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for name in TOOLKIT_FILES:
-            z.write(WEB.parent / name, name)
+        for name, source in TOOLKIT_FILES.items():
+            z.write(WEB.parent / source, name)
     return out.getvalue()
 
 
 @app.get("/api/toolkit.zip")
 async def toolkit():
     data = await asyncio.to_thread(toolkit_zip)
-    return Response(data, media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="learn-ai-toolkit.zip"'})
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="creating-learn-packages.zip"'})
 
 
 @app.get("/api/me")

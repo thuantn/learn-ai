@@ -227,7 +227,8 @@
     <div class="lesson-dialog-form" id="upPick">
       <p class="dock-note">Chọn file zip đã đóng gói theo khung bài học, tối đa 90 MB. Tải lại cùng một bài sẽ thành bản mới, tiến độ của người học vẫn giữ.</p>
       <label class="btn-studio-secondary file-pick">Chọn file zip<input type="file" id="upFile" accept=".zip,application/zip"></label>
-      <a class="btn-link-quiet" href="/api/toolkit.zip" download>Chưa có bài? Tải bộ công cụ tác giả</a>
+      <a class="btn-link-quiet" href="/api/toolkit.zip" download>Chưa có bài? Tải skill tạo bài cho Claude</a>
+      <p class="dock-note">Claude app, web: bật Code execution trong Settings, Capabilities, rồi vào Customize, Skills, nút +, Create skill, Upload a skill và chọn file zip này. Claude Code: giải nén vào <code>~/.claude/skills/</code>.</p>
       <p class="studio-alert error" id="upPickError" role="alert" hidden></p>
       <div class="lesson-dialog-buttons"><button type="button" class="btn-studio-secondary" data-act="up-close">Hủy</button></div>
     </div>

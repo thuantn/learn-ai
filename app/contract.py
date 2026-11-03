@@ -1,11 +1,15 @@
-"""Lesson contract v1 checker. Uses only the standard library and mutagen."""
+"""Lesson contract v1 checker. Uses only the standard library, and mutagen for lessons with audio."""
 from dataclasses import dataclass
 from html.parser import HTMLParser
 import json
 import pathlib
 import re
 
-from mutagen.mp3 import MP3
+# The skill runs this where nothing may install. Without it, audio is refused, never let through unchecked.
+try:
+    from mutagen.mp3 import MP3
+except ImportError:
+    MP3 = None
 
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\Z")
@@ -357,7 +361,9 @@ def _check_lesson(lesson_dir, lesson_id, profile, seen_ids):
                     problems.append(Problem(f"lessons/{lesson_id}/audio/{fname}", "track_missing", f"Không tìm thấy file audio: {fname}."))
                 else:
                     seconds = audio_seconds(audio_path)
-                    if seconds is None or seconds == 0:
+                    if MP3 is None:
+                        problems.append(Problem(f"lessons/{lesson_id}/audio/{fname}", "track_bad", "Cần mutagen để kiểm tra audio: chạy pip install mutagen rồi kiểm tra lại."))
+                    elif seconds is None or seconds == 0:
                         problems.append(Problem(f"lessons/{lesson_id}/audio/{fname}", "track_bad", f"File mp3 không đọc được hoặc thời lượng bằng 0: {fname}."))
 
     page_path = lesson_dir / "page" / "index.html"

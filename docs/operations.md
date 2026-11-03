@@ -103,7 +103,7 @@ Chưa có tùy chọn Internet; điều kiện là kiểm tra được ZDR với
 - Cookie là `__Host-session`, `Secure`, `HttpOnly`, `SameSite=Strict`.
 - Audio trả `206`, tua được.
 - Tài khoản thường mở `/admin` nhận 404.
-- Tải bộ công cụ ở hộp thoại Tải lên, giải nén, chạy `scripts/learnpkg.py validate` với khung mẫu.
+- Tải skill ở hộp thoại Tải lên, giải nén, chạy `creating-learn-packages/scripts/learnpkg.py validate` với `template/`.
 - Trang bài hiện công thức và báo đã lưu vào tài khoản.
 - `docker port` của app không có gì. App khác trên VM vẫn healthy. Đo `docker stats`.
 - Hai tài khoản thử trên bản thật: tải lên, share, học, thu hồi, góp ý. Xóa tài khoản xong, kiểm tra thư mục package biến mất.

@@ -25,3 +25,5 @@
 
 - 03/11/2026 — On Windows, upload tests can fail at random with `Lỗi khi giải nén`. The log shows `[WinError 5] Access is denied` when a just-unpacked folder is renamed, and main fails the same way. It looks like a file scanner holding the folder, though that is not proven. Read the log before treating it as new. Linux CI decides.
 - 03/11/2026 — A browser test killed by `timeout` can leave its `uvicorn` running on a fixed port, and the next run then logs in to the old server and fails. Check the port first.
+- 03/11/2026 — Claude app and web limit a skill description to 200 characters and need the skill folder at the zip root, per the help center. `tests/test_toolkit.py` pins both, and runs the checker with `python -S` so a new dependency shows up. Upload to claude.ai itself is not covered by any test.
+

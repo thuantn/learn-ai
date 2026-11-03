@@ -23,7 +23,7 @@ export DATA_DIR=./data PACKAGES_DIR=./packages LINK_SECRET=local-only-secret-loc
 
 A package is a zip holding `package.json` and `lessons/<id>/`; the format is in `docs/lesson-format.md`. Check one with `scripts/learnpkg.py validate DIR [--profile full]`, zip it with `scripts/learnpkg.py pack DIR OUT.zip`, then upload it from the Library screen. The server runs the same check on every upload. `scripts/convert_legacy.py` turns an old lesson folder into a package.
 
-An author can download a toolkit from the upload dialog: the `skills/creating-learn-packages` Claude skill, a lesson template and the checker.
+An author can download a Claude skill from the upload dialog. The zip holds one `creating-learn-packages/` folder with the instructions, a lesson template and the checker, and needs only Python unless the lesson has audio. It can be uploaded to Claude app or web, or unpacked into `~/.claude/skills/` for Claude Code.
 
 `tests/e2e_platform.py` runs upload, share, revoke and feedback in a real browser, `tests/e2e_admin.py` the admin page and Ask approval against a fake provider. `tests/e2e_browser.py PACKAGE_DIR` and `tests/e2e_sandbox.py PACKAGE_DIR` run the study session and the sandbox against an unpacked package (need `playwright`).
 
