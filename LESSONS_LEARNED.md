@@ -21,3 +21,7 @@
 
 - 03/11/2026 — In WebKit runs, `/api/lessons due to access control checks` is a home-screen request cut off by the test leaving the page. It happens on main too. `e2e_platform` and `e2e_sandbox` count it as a page error, so read the message before treating that failure as new.
 - 03/11/2026 — Ask threads live on the server and the browser cannot supply earlier turns, so a page or a request cannot put words in the model's history. A failed call is not kept.
+- 03/11/2026 — The Ask box exists on two pages. A change to one needs the same check on the other, or the server remembers a thread that one page never shows.
+
+- 03/11/2026 — On Windows, upload tests can fail at random with `Lỗi khi giải nén`. The log shows `[WinError 5] Access is denied` when a just-unpacked folder is renamed, and main fails the same way. It looks like a file scanner holding the folder, though that is not proven. Read the log before treating it as new. Linux CI decides.
+- 03/11/2026 — A browser test killed by `timeout` can leave its `uvicorn` running on a fixed port, and the next run then logs in to the old server and fails. Check the port first.

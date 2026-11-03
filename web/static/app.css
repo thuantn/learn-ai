@@ -1413,6 +1413,9 @@ a.stage-tab, a.drawer-nav-item { display: flex; align-items: center; text-decora
 .ask-title { font-size: 1.125rem; }
 .ask-context { font-size: 0.8125rem; color: var(--text-sub); }
 .ask-bubble.is-question { font-weight: 600; }
+/* A long thread scrolls under the input, which stays in reach. */
+#askForm { position: sticky; bottom: 0; background: var(--bg-panel); padding-top: 0.625rem; }
+.ask-thread .ask-bubble { flex-shrink: 0; }
 .ask-bubble.is-error { color: var(--danger, #ef4444); }
 .ask-bubble mjx-container { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 .nav-sub { font-size: 0.75rem; opacity: 0.7; }

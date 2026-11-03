@@ -58,6 +58,7 @@ function openAsk(open) {
   $("askDock").classList.toggle("mobile-open", open);
   $("askBackdrop").classList.toggle("open", open);
   if (open && !$("askInput").disabled) $("askInput").focus();
+  if (open) AskThread.showEnd();
 }
 
 // ---------- Rendering ----------
@@ -409,7 +410,7 @@ function askBubble(cls) {
   const b = document.createElement("div");
   b.className = "ask-bubble " + cls;
   $("askThread").append(b);
-  b.scrollIntoView({ block: "nearest" });
+  AskThread.showEnd();
   return b;
 }
 async function sendAsk(question) {
@@ -420,15 +421,20 @@ async function sendAsk(question) {
   const out = askBubble("md-answer");
   out.textContent = "Đang trả lời...";
   $("askSend").disabled = true;
+  AskThread.sending = true;
   try {
     const d = await api("/api/ask", send("POST", { lesson: state.lesson.id, question }));
+    AskThread.saved += 2;
     out.innerHTML = renderAnswer(d.text);
     if (window.MathJax && MathJax.typesetPromise) await MathJax.typesetPromise([out]).catch(() => {});
-    out.scrollIntoView({ block: "nearest" });
+    AskThread.showEnd();
   } catch (e) {
     out.textContent = e.message;
     out.classList.add("is-error");
+    // It was not kept, so the learner should not have to type it again.
+    if (!$("askInput").value) $("askInput").value = question;
   }
+  AskThread.sending = false;
   $("askSend").disabled = false;
 }
 $("askForm").addEventListener("submit", e => { e.preventDefault(); sendAsk($("askInput").value); });
@@ -445,6 +451,7 @@ function setLesson(id) {
   audio.removeAttribute("src");
   pendingSeek = null;
   state.lesson = l;
+  syncAsk();
   state.track = l.track in l.tracks ? l.track : (Object.keys(l.tracks)[0] || null);
   renderLesson();
 }
@@ -497,6 +504,7 @@ const ACTIONS = {
   "nav-close": closeNav,
   "ask-open": () => openAsk(true),
   "ask-close": () => openAsk(false),
+  "ask-clear": () => AskThread.clear(api).catch(e => { askBubble("is-error").textContent = e.message; }),
   "ask-chip": el => { openAsk(true); sendAsk(el.textContent); },
   "ask-expand": el => {
     const on = !$("workbenchGrid").classList.contains("ask-expanded");
@@ -563,11 +571,17 @@ async function refresh() {
   }
   renderLesson();
   renderList();
+  syncAsk();
+}
+function syncAsk() {
   const askOn = state.lesson && state.lesson.ask;
   $("askInput").disabled = !askOn;
   $("askSend").disabled = !askOn;
   $("askInput").placeholder = askOn ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
+  AskThread.sync(askOn ? state.lesson.id : null, api).catch(() => {});
 }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncAsk(); });
+window.addEventListener("pageshow", e => { if (e.persisted) syncAsk(); });
 // A share link arrives as #join=<token>: the fragment stays out of server logs and survives the login redirects.
 function joinFromLink() {
   const m = location.hash.match(/^#join=([\w.-]+)$/);

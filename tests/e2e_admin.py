@@ -208,6 +208,39 @@ def run(br, base, temp, work):
         binh.wait_for_timeout(100)
     sent = SEEN[-1]["body"]["messages"]
     check("follow-up carries the earlier turn", [m["role"] for m in sent] == ["system", "user", "assistant", "user"] and sent[1]["content"] == "Vì sao?", [m["role"] for m in sent])
+
+    # The app page shows the same thread, and what is asked there shows on the lesson page.
+    binh.goto(f"{base}/#home", wait_until="networkidle")
+    binh.wait_for_selector("#askThread .is-question", state="attached")
+    check("app page shows the thread from the lesson page", binh.locator("#askThread .is-question").all_inner_texts() == ["Vì sao?", "Còn gì nữa?"], binh.locator("#askThread").inner_text())
+    if not binh.locator("#askForm").is_visible():
+        binh.click(".capsule-ask-btn")
+    binh.fill("#askInput", "Từ trang app")
+    binh.click("#askSend")
+    binh.wait_for_selector("#askThread .md-answer >> nth=2")
+    for _ in range(50):
+        if "Đang trả lời" not in binh.locator("#askThread").inner_text():
+            break
+        binh.wait_for_timeout(100)
+    sent = SEEN[-1]["body"]["messages"]
+    check("app page follows on from the lesson page", len(sent) == 6 and sent[1]["content"] == "Vì sao?", [m["role"] for m in sent])
+    binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
+    binh.wait_for_selector("#askThread .is-question >> nth=2", state="attached")
+    check("lesson page shows what was asked on the app page", binh.locator("#askThread .is-question").nth(2).inner_text() == "Từ trang app")
+
+    # A thread too long for the panel on a phone: the input stays on screen, the panel opens on the last answer.
+    binh.set_viewport_size({"width": 390, "height": 500})
+    binh.wait_for_timeout(300)
+    if not binh.locator("#askForm").is_visible():
+        binh.click("#lessonAskBtn")
+    binh.wait_for_timeout(400)
+    spot = binh.evaluate("""() => {
+        const b = id => document.getElementById(id).getBoundingClientRect();
+        const dock = b('askDock'), last = document.getElementById('askThread').lastElementChild.getBoundingClientRect();
+        return {input: b('askInput').bottom, send: b('askSend').bottom, bottom: dock.bottom, top: dock.top, last: last.top};
+    }""")
+    check("input stays on screen in a long thread", spot["input"] <= spot["bottom"] and spot["send"] <= spot["bottom"] + 1, spot)
+    check("panel opens on the last answer", spot["top"] <= spot["last"] < spot["bottom"], spot)
     binh.set_viewport_size({"width": 390, "height": 844})
     binh.wait_for_timeout(300)
     if not binh.locator("#askForm").is_visible():
@@ -222,7 +255,7 @@ def run(br, base, temp, work):
         binh.click("#lessonAskBtn")
     binh.click("#askClear")
     binh.wait_for_timeout(200)
-    check("dismissing the question keeps the thread", binh.locator("#askThread .is-question").count() == 2)
+    check("dismissing the question keeps the thread", binh.locator("#askThread .is-question").count() == 3)
     binh.evaluate("window.confirm = window.realConfirm")
     binh.click("#askClear")
     binh.wait_for_selector("#askThread .is-question", state="detached")

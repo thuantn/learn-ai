@@ -129,7 +129,7 @@
       $("askInput").placeholder = aiEnabled ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
       createIframe(frameInfo.url, frameInfo.title);
       showFrame();
-      if (aiEnabled) loadThread().catch(() => {});
+      syncThread();
     } catch (e) {
       if (e.message === "login") return;
       setCover("Không kết nối được. Thử lại sau.", "reload");
@@ -305,7 +305,10 @@
   window.addEventListener("pagehide", () => flushDocBeforeLeave(true));
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) flushDocBeforeLeave(true);
-    else checkExpired();
+    else {
+      checkExpired();
+      syncThread();
+    }
   });
 
   function openLink(raw) {
@@ -347,52 +350,12 @@
     const b = document.createElement("div");
     b.className = "ask-bubble " + cls;
     $("askThread").append(b);
-    b.scrollIntoView({ block: "nearest" });
+    AskThread.showEnd();
     return b;
   }
 
-  function showLastBubble() {
-    const last = $("askThread").lastElementChild;
-    if (last) last.scrollIntoView({ block: "nearest" });
-    $("askClear").hidden = !last;
-  }
-
-  // Added in front, so a question sent before this returns stays where it is.
-  let threadLoaded = false;
-  async function loadThread() {
-    if (threadLoaded) return;
-    const { messages } = await api(`/api/lessons/${lessonId}/ask`, { method: "GET" });
-    threadLoaded = true;
-    const bubbles = messages.map(m => {
-      const b = document.createElement("div");
-      if (m.role === "user") {
-        b.className = "ask-bubble is-question";
-        b.textContent = m.text;
-      } else {
-        b.className = "ask-bubble md-answer";
-        b.innerHTML = renderAnswer(m.text);
-      }
-      return b;
-    });
-    $("askThread").prepend(...bubbles);
-    showLastBubble();
-    if (window.MathJax && MathJax.startup) {
-      await MathJax.startup.promise;
-      await MathJax.typesetPromise(bubbles).catch(() => {});
-      showLastBubble();
-    }
-  }
-
-  async function clearThread() {
-    if (!confirm("Xóa toàn bộ câu hỏi của bạn trong bài này?")) return;
-    try {
-      await api(`/api/lessons/${lessonId}/ask`, { method: "DELETE" });
-      $("askThread").textContent = "";
-      showLastBubble();
-    } catch (e) {
-      if (e.status === 404) lostAccess();
-      else askBubble("is-error").textContent = e.message;
-    }
+  function syncThread() {
+    AskThread.sync(aiEnabled ? lessonId : null, api).catch(() => {});
   }
 
   function openAsk(open) {
@@ -402,7 +365,7 @@
       $("askDock").classList.toggle("mobile-open", true);
       $("askBackdrop").classList.toggle("open", true);
       if (!$("askInput").disabled) $("askInput").focus();
-      showLastBubble();
+      AskThread.showEnd();
     } else {
       $("askDock").classList.remove("mobile-open");
       $("askBackdrop").classList.remove("open");
@@ -417,18 +380,22 @@
     const out = askBubble("md-answer");
     out.textContent = "Đang trả lời…";
     $("askSend").disabled = true;
+    AskThread.sending = true;
     try {
       const d = await api("/api/ask", send("POST", { lesson: lessonId, question }));
+      AskThread.saved += 2;
       out.innerHTML = renderAnswer(d.text);
       if (window.MathJax && MathJax.typesetPromise) await MathJax.typesetPromise([out]).catch(() => {});
-      showLastBubble();
+      AskThread.showEnd();
     } catch (e) {
+      AskThread.sending = false;
       if (e.status === 404) { lostAccess(); return; }
       out.textContent = e.message;
       out.classList.add("is-error");
       // It was not kept, so the learner should not have to type it again.
       if (!$("askInput").value) $("askInput").value = question;
     }
+    AskThread.sending = false;
     $("askSend").disabled = false;
   }
 
@@ -444,7 +411,12 @@
     if (act === "ask-open") { openAsk(true); }
     else if (act === "bar-show") { barHeldUntil = Date.now() + 10000; setBarHidden(false); }
     else if (act === "ask-close") { openAsk(false); }
-    else if (act === "ask-clear") { clearThread(); }
+    else if (act === "ask-clear") {
+      AskThread.clear(api).catch(e => {
+        if (e.status === 404) lostAccess();
+        else askBubble("is-error").textContent = e.message;
+      });
+    }
     else if (act === "ask-expand") {
       const on = !document.body.classList.contains("ask-expanded");
       document.body.classList.toggle("ask-expanded", on);
