@@ -574,6 +574,19 @@ def test_thread_goes_with_the_package_and_the_account(ctx, capsys, monkeypatch):
         assert conn.execute("SELECT count(*) n FROM ask_message").fetchone()["n"] == 0
 
 
+def test_app_icons_are_served_without_a_session(ctx, capsys):
+    main, cli, tmp = ctx
+    with client(main) as c:
+        manifest = c.get("/static/manifest.webmanifest").json()
+        paths = [i["src"] for i in manifest["icons"]]
+        assert {"192x192", "512x512"} <= {i["sizes"] for i in manifest["icons"]}
+        assert any(i["purpose"] == "maskable" for i in manifest["icons"])
+        for path in paths + ["/static/apple-touch-icon.png"]:
+            r = c.get(path)
+            assert r.status_code == 200 and r.headers["content-type"].startswith("image/"), path
+        assert 'rel="apple-touch-icon"' in c.get("/login").text
+
+
 def test_cli_reset_and_remove(ctx, capsys):
     main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)

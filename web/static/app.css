@@ -340,6 +340,22 @@
       white-space: nowrap;
     }
 
+    .brand-logo {
+      width: 28px;
+      height: 28px;
+      flex-shrink: 0;
+    }
+
+    .auth-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      font-family: 'Space Grotesk', 'Be Vietnam Pro', sans-serif;
+      font-size: 1.0625rem;
+      font-weight: 700;
+    }
+
     .studio-led {
       width: 9px;
       height: 9px;

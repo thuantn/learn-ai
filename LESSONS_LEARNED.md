@@ -27,3 +27,4 @@
 - 03/11/2026 — A browser test killed by `timeout` can leave its `uvicorn` running on a fixed port, and the next run then logs in to the old server and fails. Check the port first.
 - 03/11/2026 — Claude app and web limit a skill description to 200 characters and need the skill folder at the zip root, per the help center. `tests/test_toolkit.py` pins both, and runs the checker with `python -S` so a new dependency shows up. Upload to claude.ai itself is not covered by any test.
 
+- 03/11/2026 — iOS ignores an SVG icon when adding to the home screen, so `apple-touch-icon.png` is needed beside `icon.svg`. The PNGs are screenshots of the SVG; redraw them if the SVG changes.
