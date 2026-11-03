@@ -225,9 +225,130 @@
         <p class="dock-note" id="testHistoryEmpty" hidden>Chưa có lượt làm nào.</p>
       </section>
 
-      <section id="screen-test-run" class="screen" aria-label="Làm bài thi"></section>
+      <section id="screen-test-run" class="screen" aria-label="Làm bài thi">
+        <div class="test-run-bar">
+          <div class="test-run-info">
+            <span class="status-pill" id="testRunModePill"></span>
+            <span class="test-run-counter" id="testRunCounter"></span>
+          </div>
+          <div class="test-run-meta">
+            <span class="test-save-indicator" id="testSave">Đã lưu</span>
+            <div class="test-timer-box" id="testTimerBox">
+              <span class="console-clock test-timer" id="testTimer">0:00</span>
+            </div>
+            <button type="button" class="btn-studio-secondary test-btn-pause" data-act="test-pause" id="btnTestPause" aria-label="Tạm dừng">Tạm dừng</button>
+            <button type="button" class="btn-studio-secondary test-btn-grid-toggle" data-act="test-toggle-grid" id="btnTestGridToggle" aria-label="Lưới câu hỏi">Lưới câu</button>
+          </div>
+        </div>
 
-      <section id="screen-test-result" class="screen" aria-label="Kết quả bài thi"></section>
+        <div class="test-toolbar">
+          <div class="test-font-controls" role="group" aria-label="Cỡ chữ">
+            <span class="test-tool-label">Cỡ chữ:</span>
+            <button type="button" class="btn-tool-sm" data-act="test-font-dec" aria-label="Giảm cỡ chữ">A-</button>
+            <button type="button" class="btn-tool-sm" data-act="test-font-inc" aria-label="Tăng cỡ chữ">A+</button>
+          </div>
+          <div class="test-tts-controls" id="testTtsBox">
+            <button type="button" class="btn-tool-sm" data-act="test-speech" id="btnTestSpeech" aria-label="Đọc câu hỏi">Đọc</button>
+            <span class="test-tool-note" id="testSpeechNote" hidden></span>
+          </div>
+        </div>
+
+        <div class="test-run-layout">
+          <div class="test-stage">
+            <div class="test-paused-pane hero-banner" id="testPausedPane" hidden>
+              <h2 class="hero-title small-title">Bài thi đang tạm dừng</h2>
+              <p class="hero-note">Thời gian đã dừng lại. Bấm tiếp tục để làm tiếp bài thi.</p>
+              <div class="cta-cluster">
+                <button type="button" class="btn-studio-primary" data-act="test-pause">Tiếp tục làm bài</button>
+              </div>
+            </div>
+
+            <div class="test-question-box" id="testQuestionBox"></div>
+
+            <div class="test-nav-actions" id="testNavActions">
+              <div class="test-nav-left">
+                <button type="button" class="btn-studio-secondary" data-act="test-prev" id="btnTestPrev">← Câu trước</button>
+                <button type="button" class="btn-studio-secondary" data-act="test-flag" id="btnTestFlag">Gắn cờ</button>
+                <button type="button" class="btn-studio-primary" data-act="test-check" id="btnTestCheck" hidden>Kiểm tra</button>
+              </div>
+              <div class="test-nav-right">
+                <button type="button" class="btn-studio-secondary" data-act="test-next" id="btnTestNext">Câu sau →</button>
+                <button type="button" class="btn-studio-primary" data-act="test-submit" id="btnTestSubmit">Nộp bài</button>
+              </div>
+            </div>
+          </div>
+
+          <aside class="test-grid-pane" id="testGridPane">
+            <div class="test-grid-head">
+              <span class="test-grid-title">Lưới câu hỏi</span>
+              <button type="button" class="btn-tool-sm test-grid-close" data-act="test-close-grid" aria-label="Đóng lưới">✕</button>
+            </div>
+            <div class="test-grid" id="testGrid"></div>
+            <div class="test-grid-legend">
+              <span class="legend-item"><span class="legend-dot is-answered"></span> Đã làm</span>
+              <span class="legend-item"><span class="legend-dot is-flagged"></span> Gắn cờ</span>
+              <span class="legend-item"><span class="legend-dot is-current"></span> Đang xem</span>
+            </div>
+          </aside>
+        </div>
+
+        <dialog class="lesson-dialog" id="testSubmitDialog" aria-labelledby="testSubmitDialogTitle">
+          <div class="lesson-dialog-form">
+            <h2 class="fc-title" id="testSubmitDialogTitle">Xác nhận nộp bài</h2>
+            <div class="test-submit-summary" id="testSubmitSummary"></div>
+            <p class="studio-alert error" id="testSubmitAlert" role="alert" hidden></p>
+            <div class="lesson-dialog-buttons">
+              <button type="button" class="btn-studio-secondary" data-act="test-cancel-submit">Làm tiếp</button>
+              <button type="button" class="btn-studio-primary" data-act="test-confirm-submit" id="btnConfirmSubmit">Nộp bài</button>
+            </div>
+          </div>
+        </dialog>
+      </section>
+
+      <section id="screen-test-result" class="screen" aria-label="Kết quả bài thi">
+        <div class="flow-strip">
+          <button type="button" class="btn-studio-secondary" data-act="test-back">← Danh sách đề</button>
+          <button type="button" class="btn-studio-secondary" id="btnResultDetail">Chi tiết đề</button>
+        </div>
+        <div class="hero-banner result-banner">
+          <div class="status-pill" id="testResultPill"></div>
+          <h1 id="testResultTitle" class="hero-title small-title"></h1>
+          <div class="meta-pills" id="testResultPills"></div>
+          <div class="result-score-block">
+            <div class="result-score-num" id="testResultScore"></div>
+            <div class="result-pass-status" id="testResultStatus"></div>
+          </div>
+          <div class="cta-cluster" id="testResultActions"></div>
+        </div>
+
+        <div class="result-domains-section" id="testResultDomainsSection">
+          <h2 class="list-heading">Kết quả theo lĩnh vực</h2>
+          <div class="result-table-wrap">
+            <table class="result-domain-table" id="testResultDomainTable">
+              <thead>
+                <tr>
+                  <th scope="col">Lĩnh vực</th>
+                  <th scope="col">Đúng / Tổng</th>
+                  <th scope="col">Tỉ lệ</th>
+                </tr>
+              </thead>
+              <tbody id="testResultDomainBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="result-review-section">
+          <div class="result-review-header">
+            <h2 class="list-heading">Xem lại bài làm</h2>
+            <div class="result-filter-tabs" role="group" aria-label="Lọc câu hỏi">
+              <button type="button" class="filter-tab active" data-act="result-filter" data-filter="all">Tất cả</button>
+              <button type="button" class="filter-tab" data-act="result-filter" data-filter="wrong">Câu sai</button>
+              <button type="button" class="filter-tab" data-act="result-filter" data-filter="flagged">Câu gắn cờ</button>
+            </div>
+          </div>
+          <div class="result-items-list" id="testResultItemsList"></div>
+        </div>
+      </section>
     </main>
   </div>
 

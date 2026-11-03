@@ -19,9 +19,10 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 try:
-    from tests.practice_fixtures import make_item, make_test, one_file
+    from tests.practice_fixtures import make_item, make_test, one_file, SENTINELS
 except ImportError:
-    from practice_fixtures import make_item, make_test, one_file
+    from practice_fixtures import make_item, make_test, one_file, SENTINELS
+import sqlite3
 
 NEW_PW = "ngựa vàng chạy qua cầu mây"
 FAILS = []
@@ -183,6 +184,8 @@ def run(br, base, temp, work):
     # người thứ hai mở #join=..., xác nhận, thấy bộ đề
     row_ba.locator("[data-act=lib-share]").click()
     an.wait_for_selector("#shareDialog[open]")
+    # the link state loads after the dialog opens
+    poll(lambda: an.locator("#shareLinkOff").is_visible() or an.locator("#shareLinkOn").is_visible())
     if an.locator("#shareLinkOff").is_visible():
         an.click("#shareLinkOff [data-act=share-new]")
     an.wait_for_selector("#shareLinkOn:not([hidden])")
@@ -250,7 +253,297 @@ def run(br, base, temp, work):
     check("đề độc không chạy", xss_val is None and btn_vis, f"xss={xss_val}, btn_vis={btn_vis}")
     an.screenshot(path=str(SHOTS / "practice-detail.png"))
 
-    check("no page errors or CSP violations", not errs, errs[:4])
+    # ---------- Task 7 Checks ----------
+    q1 = make_item("q1", domain="An ninh", options=("A", "B", "C", "D"), correct=("A",))
+    q2 = make_item("q2", type="multi", domain="Phát triển", options=("A", "B", "C", "D"), correct=("A", "B"))
+    q3 = make_item("q3", domain="Vận hành", options=("A", "B", "C", "D"), correct=("C",))
+    t_exam = make_test(title="Đề Thi Thử T7", items=[q1, q2, q3])
+    t_timed = make_test(title="Đề Có Giờ", items=[make_item("qt1"), make_item("qt2")], time_limit_minutes=1)
+    pkg_t7 = one_file({"exam": t_exam, "timed": t_timed}, slug="de-t7")
+
+    an.goto(base + "/#library")
+    an.wait_for_selector("#screen-library.active")
+    open_upload(an)
+    an.fill("#upJsonText", json.dumps(pkg_t7))
+    an.click("[data-act=up-paste-send]")
+    an.wait_for_selector("#upConfirm:not([hidden])")
+    an.check("#upAttest")
+    an.click("#upCommit")
+    an.wait_for_selector("#uploadDialog", state="hidden")
+
+    t7_test = find_test(an, "Đề Thi Thử T7")
+    exam_key = t7_test["key"]
+    timed_test = find_test(an, "Đề Có Giờ")
+    timed_key = timed_test["key"]
+
+    # 1. Thi thử không có đáp án trong trang
+    an.goto(f"{base}/#test={exam_key}")
+    an.wait_for_selector("#screen-test-detail.active")
+    an.click("#testDetailActions [data-act=attempt-start][data-mode=exam]")
+    an.wait_for_selector("#screen-test-run.active")
+    an.wait_for_selector(".test-option-btn")
+    exam_aid = an.evaluate("location.hash").split("#attempt=")[1]
+
+    exam_responses = []
+    def on_resp(r):
+        if "/api/" in r.url:
+            try:
+                exam_responses.append(r.text())
+            except Exception:
+                pass
+    an.on("response", on_resp)
+
+    an.locator(".test-option-btn").first.click()
+    poll(lambda: "Đã lưu" in an.inner_text("#testSave"))
+    page_content = an.content()
+    leaked_in_page = [s for s in SENTINELS if s in page_content]
+    leaked_in_resp = [s for s in SENTINELS if any(s in r for r in exam_responses)]
+    an.remove_listener("response", on_resp)
+    check("Thi thử không có đáp án trong trang", not leaked_in_page and not leaked_in_resp, f"page={leaked_in_page}, resp={leaked_in_resp}")
+
+    # 2. tải lại vẫn đúng câu và thứ tự
+    q_before = an.inner_text("#testQuestionBox .test-q-text")
+    opts_before = an.locator(".test-option-btn .test-opt-text").all_inner_texts()
+    an.reload()
+    an.wait_for_selector("#screen-test-run.active")
+    an.wait_for_selector(".test-option-btn")
+    q_after = an.inner_text("#testQuestionBox .test-q-text")
+    opts_after = an.locator(".test-option-btn .test-opt-text").all_inner_texts()
+    check("tải lại vẫn đúng câu và thứ tự", q_before == q_after and opts_before == opts_after and len(opts_before) > 0)
+
+    # 3. hai máy: máy cũ thấy câu máy kia lưu
+    ctx2 = br.new_context(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+    pg2 = ctx2.new_page()
+    pg2.on("pageerror", lambda e: errs.append("js: " + str(e)[:160]))
+    pg2.on("console", lambda m: errs.append("csp: " + m.text[:160]) if m.type == "error" and "Content Security Policy" in m.text else None)
+    pg2.on("dialog", lambda d: d.accept())
+    pg2.goto(base + "/login")
+    pg2.fill("#loginUser", "an@example.com")
+    pg2.fill("#loginPass", NEW_PW)
+    pg2.click("#submitBtn")
+    pg2.wait_for_selector("#screen-home.active")
+
+    pg2.goto(f"{base}/#attempt={exam_aid}")
+    pg2.wait_for_selector("#screen-test-run.active")
+    pg2.wait_for_selector(".test-option-btn")
+
+    an.click("#btnTestNext")
+    an.wait_for_timeout(200)
+    an.locator(".test-option-btn").first.click()
+    poll(lambda: "Đã lưu" in an.inner_text("#testSave"))
+
+    pg2.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    pg2.wait_for_timeout(500)
+    pg2.click("#btnTestNext")
+    pg2.wait_for_timeout(200)
+    is_sel = pg2.locator(".test-option-btn").first.evaluate("el => el.classList.contains('is-selected')")
+    check("hai máy: máy cũ thấy câu máy kia lưu", is_sel)
+    ctx2.close()
+
+    # 4. Kiểm tra chấm đúng lựa chọn đang hiện
+    an.goto(f"{base}/#test={exam_key}")
+    an.wait_for_selector("#screen-test-detail.active")
+    an.click("#testDetailActions [data-act=attempt-start][data-mode=practice]")
+    an.wait_for_selector("#screen-test-run.active")
+    an.wait_for_selector(".test-option-btn")
+    prac_aid = an.evaluate("location.hash").split("#attempt=")[1]
+
+    single_idx = an.evaluate("() => _currentAttempt.items.findIndex(it => it.type === 'single')")
+    an.click(f"#testGrid [data-act=test-jump][data-idx='{single_idx}']")
+    an.wait_for_timeout(100)
+
+    def delay_put(route):
+        time.sleep(0.5)
+        route.continue_()
+    an.route("**/api/attempts/*/items/*", delay_put)
+
+    an.locator(".test-option-btn").nth(0).click()
+    an.locator(".test-option-btn").nth(1).click()
+    an.click("#btnTestCheck")
+    an.unroute("**/api/attempts/*/items/*")
+    an.wait_for_selector("#testQuestionBox .test-checked-banner")
+
+    opt1_sel = an.locator(".test-option-btn").nth(1).evaluate("el => el.classList.contains('is-selected')")
+    opt0_sel = an.locator(".test-option-btn").nth(0).evaluate("el => el.classList.contains('is-selected')")
+    # the server graded the option shown second, not the first click that was still in flight
+    graded = json.loads(call(an, "GET", f"/api/attempts/{prac_aid}")["text"])["items"][single_idx]
+    shown_second = graded["options"][1]["id"]
+    check("Kiểm tra chấm đúng lựa chọn đang hiện",
+          opt1_sel and not opt0_sel and graded["checked"] and graded["chosen"] == [shown_second]
+          and graded["is_correct"] == (graded["correct"] == [shown_second]),
+          f"chosen={graded['chosen']}, shown_second={shown_second}")
+
+    # 5. mất mạng hiện Chưa lưu và chặn nộp
+    multi_idx = an.evaluate("() => _currentAttempt.items.findIndex(it => it.type === 'multi')")
+    an.click(f"#testGrid [data-act=test-jump][data-idx='{multi_idx}']")
+    an.wait_for_timeout(100)
+
+    an.context.set_offline(True)
+    an.locator(".test-option-btn").first.click()
+    poll(lambda: "Chưa lưu" in an.inner_text("#testSave"), timeout=8)
+    an.click("#btnTestSubmit")
+    an.wait_for_timeout(400)
+    blocked = an.evaluate("location.hash").startswith("#attempt=") and not an.locator("#testSubmitDialog[open]").count()
+    # back online, a newer choice made before the retry fires must win over the failed one
+    an.context.set_offline(False)
+    an.locator(".test-option-btn").nth(1).click()
+    an.wait_for_timeout(4000)
+    poll(lambda: "Đã lưu" in an.inner_text("#testSave"), timeout=8)
+    multi_now = json.loads(call(an, "GET", f"/api/attempts/{prac_aid}")["text"])["items"][multi_idx]
+    shown = [o["id"] for o in multi_now["options"]]
+    check("lựa chọn mới không bị lần gửi lại cũ ghi đè", sorted(multi_now["chosen"]) == sorted(shown[:2]),
+          f"chosen={multi_now['chosen']}, expected={shown[:2]}")
+    an.click("#btnTestSubmit")
+    an.wait_for_selector("#testSubmitDialog[open]")
+    an.click("#btnConfirmSubmit")
+    poll(lambda: an.evaluate("location.hash").startswith("#result="), timeout=8)
+    check("mất mạng hiện Chưa lưu và chặn nộp", blocked and an.evaluate("location.hash").startswith("#result="))
+
+    # 6. hết giờ tự nộp
+    an.goto(f"{base}/#test={timed_key}")
+    an.wait_for_selector("#screen-test-detail.active")
+    an.click("#testDetailActions [data-act=attempt-start][data-mode=exam]")
+    an.wait_for_selector("#screen-test-run.active")
+    timed_aid = an.evaluate("location.hash").split("#attempt=")[1]
+
+    db_file = work / "data" / "learn.db"
+    with sqlite3.connect(db_file) as conn:
+        conn.execute("UPDATE test_attempt SET started_at = started_at - 120 WHERE id = ?", (timed_aid,))
+    an.reload()
+    poll(lambda: an.evaluate("location.hash").startswith("#result="), timeout=10)
+    check("hết giờ tự nộp", an.evaluate("location.hash").startswith("#result="))
+
+    # 7. đóng máy rồi mở lại thấy kết quả
+    an.goto(f"{base}/#attempt={timed_aid}")
+    poll(lambda: an.evaluate("location.hash").startswith("#result="), timeout=10)
+    check("đóng máy rồi mở lại thấy kết quả", an.evaluate("location.hash").startswith("#result="))
+
+    # 8. Tạm dừng che đề
+    r_new = call(an, "POST", f"/api/tests/{exam_key}/attempts", {"mode": "practice", "restart": True})
+    new_aid = json.loads(r_new["text"])["id"]
+    an.goto(f"{base}/#attempt={new_aid}")
+    an.wait_for_selector("#screen-test-run.active")
+    an.wait_for_selector(".test-option-btn")
+    q_open_text = an.inner_text("#testQuestionBox")
+    an.click("#btnTestPause")
+    an.wait_for_selector("#testPausedPane:not([hidden])")
+    q_paused_empty = an.inner_text("#testQuestionBox") == ""
+    an.screenshot(path=str(SHOTS / "practice-paused-1280.png"))
+    an.click("#testPausedPane [data-act=test-pause]")
+    an.wait_for_selector("#testPausedPane", state="hidden")
+    check("Tạm dừng che đề", q_open_text != "" and q_paused_empty)
+
+    # 9. Luyện tập hiện đúng sai và why
+    s_idx = an.evaluate("() => _currentAttempt.items.findIndex(it => it.type === 'single')")
+    an.click(f"#testGrid [data-act=test-jump][data-idx='{s_idx}']")
+    an.wait_for_timeout(100)
+    an.locator(".test-option-btn").first.click()
+    an.click("#btnTestCheck")
+    an.wait_for_selector("#testQuestionBox .test-checked-banner")
+    box_text = an.inner_text("#testQuestionBox")
+    check("Luyện tập hiện đúng sai và why", SENTINELS[1] in box_text, box_text[:100])
+
+    # 10. chọn nhiều cần đủ số
+    m_idx = an.evaluate("() => _currentAttempt.items.findIndex(it => it.type === 'multi')")
+    an.click(f"#testGrid [data-act=test-jump][data-idx='{m_idx}']")
+    an.wait_for_timeout(100)
+    an.locator(".test-option-btn").first.click()
+    an.click("#btnTestCheck")
+    an.wait_for_timeout(300)
+    no_banner = an.locator("#testQuestionBox .test-checked-banner").count() == 0
+    an.locator(".test-option-btn").nth(1).click()
+    an.click("#btnTestCheck")
+    an.wait_for_selector("#testQuestionBox .test-checked-banner")
+    check("chọn nhiều cần đủ số", no_banner and an.locator("#testQuestionBox .test-checked-banner").is_visible())
+
+    # 11. kết quả có bảng lĩnh vực, lọc câu sai
+    an.click("#btnTestSubmit")
+    an.wait_for_selector("#testSubmitDialog[open]")
+    an.click("#btnConfirmSubmit")
+    poll(lambda: an.evaluate("location.hash").startswith("#result="), timeout=10)
+    an.screenshot(path=str(SHOTS / "practice-result-1280.png"))
+    dom_rows = an.locator("#testResultDomainTable tbody tr").count()
+    res_aid = an.evaluate("location.hash").split("#result=")[1]
+    res_items = json.loads(call(an, "GET", f"/api/attempts/{res_aid}")["text"])["items"]
+    n_wrong = sum(1 for it in res_items if not it["is_correct"])
+    an.click("[data-act=result-filter][data-filter=wrong]")
+    wrong_cards = an.locator("#testResultItemsList .test-result-card")
+    all_wrong = all("Sai" in card.inner_text() for card in wrong_cards.all())
+    check("kết quả có bảng lĩnh vực, lọc câu sai",
+          dom_rows == 3 and n_wrong > 0 and wrong_cards.count() == n_wrong and all_wrong,
+          f"rows={dom_rows}, wrong={n_wrong}, cards={wrong_cards.count()}")
+
+    # 12. Ôn câu sai chỉ có câu sai
+    an.locator("[data-act=attempt-start][data-mode=review]").first.click()
+    poll(lambda: an.evaluate("location.hash").startswith("#attempt="), timeout=10)
+    an.wait_for_selector("#screen-test-run.active")
+    rev_aid = an.evaluate("location.hash").split("#attempt=")[1]
+    mode_pill = an.inner_text("#testRunModePill")
+    rev_ids = {it["id"] for it in json.loads(call(an, "GET", f"/api/attempts/{rev_aid}")["text"])["items"]}
+    with sqlite3.connect(work / "data" / "learn.db") as conn:
+        pool_ids = {r[0] for r in conn.execute("SELECT item FROM test_pool WHERE user=? AND test_key=?", ("an@example.com", exam_key))}
+    check("Ôn câu sai chỉ có câu sai", "Ôn câu sai" in mode_pill and rev_ids and rev_ids == pool_ids,
+          f"pill={mode_pill}, review={sorted(rev_ids)}, pool={sorted(pool_ids)}")
+
+    # 13. nút lựa chọn cao ít nhất 44 px ở 360 px
+    an.set_viewport_size({"width": 360, "height": 740})
+    an.wait_for_timeout(200)
+    opt_btn = an.locator(".test-option-btn").first
+    opt_h = opt_btn.bounding_box()["height"]
+    check("nút lựa chọn cao ít nhất 44 px ở 360 px", opt_h >= 44, f"height={opt_h}")
+
+    # 14. không tràn ngang ở 360 px khi làm bài và ở kết quả
+    w_run_360 = an.evaluate("document.documentElement.scrollWidth")
+    an.screenshot(path=str(SHOTS / "practice-run-360.png"))
+    an.click("#btnTestPause")
+    an.wait_for_timeout(200)
+    an.screenshot(path=str(SHOTS / "practice-paused-360.png"))
+    an.click("#testPausedPane [data-act=test-pause]")
+    an.wait_for_timeout(200)
+    an.goto(f"{base}/#result={prac_aid}")
+    an.wait_for_selector("#screen-test-result.active")
+    w_res_360 = an.evaluate("document.documentElement.scrollWidth")
+    an.screenshot(path=str(SHOTS / "practice-result-360.png"))
+    an.set_viewport_size({"width": 1280, "height": 900})
+    check("không tràn ngang ở 360 px khi làm bài và ở kết quả", w_run_360 <= 360 and w_res_360 <= 360, f"run={w_run_360}, res={w_res_360}")
+
+    # 15. dock nghe không che nút khi làm bài
+    an.goto(f"{base}/#attempt={rev_aid}")
+    an.wait_for_selector("#screen-test-run.active")
+    an.screenshot(path=str(SHOTS / "practice-run-1280.png"))
+    dock_vis = an.locator(".studio-dock").is_visible()
+    capsule_vis = an.locator(".mobile-floating-capsule").is_visible()
+    check("dock nghe không che nút khi làm bài", not dock_vis and not capsule_vis)
+
+    # 16. cỡ chữ còn sau khi tải lại
+    an.click("[data-act=test-font-inc]")
+    saved_font = an.evaluate("() => localStorage.getItem('learn.test-font')")
+    an.reload()
+    an.wait_for_selector("#screen-test-run.active")
+    applied_font = an.locator("#screen-test-run").get_attribute("data-test-font")
+    check("cỡ chữ còn sau khi tải lại", saved_font == applied_font and applied_font != "2", f"saved={saved_font}, applied={applied_font}")
+
+    # 17. nút giọng đọc hoặc lý do ẩn đều hiện đúng
+    btn_speech = an.locator("#btnTestSpeech")
+    note_speech = an.locator("#testSpeechNote")
+    check("nút giọng đọc hoặc lý do ẩn đều hiện đúng", btn_speech.is_visible() or note_speech.is_visible())
+
+    # 18. rời màn làm bài bằng Back dọn sạch
+    in_test_before = an.evaluate("document.body.classList.contains('in-test')")
+    submits = []
+    an.on("request", lambda r: submits.append(r.url) if r.url.endswith("/submit") else None)
+    an.go_back()  # the entry before is the result page opened in check 14
+    an.wait_for_selector("#screen-test-result.active")
+    an.wait_for_timeout(1500)
+    in_test_after = an.evaluate("document.body.classList.contains('in-test')")
+    dock_visible = an.locator(".studio-dock").is_visible()
+    rev_state = json.loads(call(an, "GET", f"/api/attempts/{rev_aid}")["text"])["status"]
+    check("rời màn làm bài bằng Back dọn sạch",
+          in_test_before and not in_test_after and dock_visible and not submits and rev_state != "submitted",
+          f"in_test_after={in_test_after}, dock={dock_visible}, submits={submits}, status={rev_state}")
+
+    # 19. console sạch
+    check("console sạch", not errs, errs[:4])
 
 
 def main():

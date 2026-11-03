@@ -33,6 +33,7 @@ function statusText(l) {
 
 // ---------- Screens ----------
 function go(id, replace, hash) {
+  if (id !== "test-run" && window.leaveAttempt) window.leaveAttempt();
   if (!SCREENS.includes(id)) id = "home";
   if (!state.lesson && ["review", "listen", "flashcard", "finish"].includes(id)) id = "home";
   if (id === "listen" && !hasAudio()) id = "flashcard";
@@ -47,6 +48,7 @@ function go(id, replace, hash) {
   if (id === "library") loadLibrary();
 }
 window.addEventListener("hashchange", () => {
+  if (!location.hash.startsWith("#attempt=") && window.leaveAttempt) window.leaveAttempt();
   if (!joinFromLink() && !(window.testRoute && window.testRoute())) go(location.hash.slice(1), true);
 });
 const hasAudio = () => !!state.lesson && Object.keys(state.lesson.tracks).length > 0;
