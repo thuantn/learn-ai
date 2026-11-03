@@ -21,7 +21,7 @@ from fsrs import Card, Rating, Scheduler
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import ClientDisconnect
 
-from . import admin, ai, auth, bundle, catalog, db, sandbox, uploads
+from . import admin, ai, auth, bundle, catalog, db, practice_api, sandbox, uploads
 from .web_util import JSON_LIMIT, WEB, bad, page, read_json
 
 log = logging.getLogger("learn")
@@ -1140,3 +1140,4 @@ async def sandbox_file(token: str, rel: str, request: Request):
 
 
 app.include_router(admin.router)
+app.include_router(practice_api.router)

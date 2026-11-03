@@ -40,17 +40,23 @@ def _fresh_db_module(tmp_path, monkeypatch, **extra_env):
         "app.uploads",
         "app.ai",
         "app.admin",
+        "app.practice",
+        "app.practice_api",
         "app.web_util",
     ):
         sys.modules.pop(name, None)
+        # `from . import x` reads the package attribute first, so it must go too.
+        if "app" in sys.modules and name in ("app.practice", "app.practice_api"):
+            sys.modules["app"].__dict__.pop(name.split(".")[1], None)
     for k, v in extra_env.items():
         monkeypatch.setenv(k, v)
     db = importlib.import_module("app.db")
     db.init()
     catalog = importlib.import_module("app.catalog")
+    practice = importlib.import_module("app.practice")
     cli = importlib.import_module("app.cli")
     main = importlib.import_module("app.main")
-    return types.SimpleNamespace(main=main, cli=cli, catalog=catalog, db=db, tmp=tmp_path)
+    return types.SimpleNamespace(main=main, cli=cli, catalog=catalog, practice=practice, db=db, tmp=tmp_path)
 
 
 @pytest.fixture

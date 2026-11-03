@@ -175,7 +175,8 @@ def test_token_tampered_or_expired(ctx, capsys):
         assert sandbox.read_token(tampered_sig, time.time()) is None
         assert frame_get(c, f"/s/{tampered_sig}/page/index.html").status_code == 403
         parts = token.split(".")
-        tampered_payload = parts[0][:-1] + ("A" if parts[0][-1] != "A" else "B") + "." + parts[1]
+        # The first character: the last one may carry only padding bits and decode to the same bytes.
+        tampered_payload = ("A" if parts[0][0] != "A" else "B") + parts[0][1:] + "." + parts[1]
         assert frame_get(c, f"/s/{tampered_payload}/page/index.html").status_code == 403
         uid = user_id_from_db(main, "an")
         expired = sandbox.make_token(uid, key, time.time() - 100000)

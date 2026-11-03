@@ -35,9 +35,12 @@ def ctx(tmp_path, monkeypatch):
         "app.catalog",
         "app.sandbox",
         "app.contract",
-        "app.bundle", "app.uploads", "app.ai", "app.admin", "app.web_util",
+        "app.bundle", "app.uploads", "app.ai", "app.admin", "app.practice", "app.practice_api", "app.web_util",
     ):
         sys.modules.pop(name, None)
+        # `from . import x` reads the package attribute first, so it must go too.
+        if "app" in sys.modules and name in ("app.practice", "app.practice_api"):
+            sys.modules["app"].__dict__.pop(name.split(".")[1], None)
     main = importlib.import_module("app.main")
     cli = importlib.import_module("app.cli")
     return main, cli, tmp_path
