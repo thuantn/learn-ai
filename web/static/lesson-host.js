@@ -129,6 +129,7 @@
       $("askInput").placeholder = aiEnabled ? "Hỏi về bài này" : "Ô Hỏi chưa được bật.";
       createIframe(frameInfo.url, frameInfo.title);
       showFrame();
+      if (aiEnabled) loadThread().catch(() => {});
     } catch (e) {
       if (e.message === "login") return;
       setCover("Không kết nối được. Thử lại sau.", "reload");
@@ -350,6 +351,50 @@
     return b;
   }
 
+  function showLastBubble() {
+    const last = $("askThread").lastElementChild;
+    if (last) last.scrollIntoView({ block: "nearest" });
+    $("askClear").hidden = !last;
+  }
+
+  // Added in front, so a question sent before this returns stays where it is.
+  let threadLoaded = false;
+  async function loadThread() {
+    if (threadLoaded) return;
+    const { messages } = await api(`/api/lessons/${lessonId}/ask`, { method: "GET" });
+    threadLoaded = true;
+    const bubbles = messages.map(m => {
+      const b = document.createElement("div");
+      if (m.role === "user") {
+        b.className = "ask-bubble is-question";
+        b.textContent = m.text;
+      } else {
+        b.className = "ask-bubble md-answer";
+        b.innerHTML = renderAnswer(m.text);
+      }
+      return b;
+    });
+    $("askThread").prepend(...bubbles);
+    showLastBubble();
+    if (window.MathJax && MathJax.startup) {
+      await MathJax.startup.promise;
+      await MathJax.typesetPromise(bubbles).catch(() => {});
+      showLastBubble();
+    }
+  }
+
+  async function clearThread() {
+    if (!confirm("Xóa toàn bộ câu hỏi của bạn trong bài này?")) return;
+    try {
+      await api(`/api/lessons/${lessonId}/ask`, { method: "DELETE" });
+      $("askThread").textContent = "";
+      showLastBubble();
+    } catch (e) {
+      if (e.status === 404) lostAccess();
+      else askBubble("is-error").textContent = e.message;
+    }
+  }
+
   function openAsk(open) {
     askOpen = open;
     if (open) {
@@ -357,6 +402,7 @@
       $("askDock").classList.toggle("mobile-open", true);
       $("askBackdrop").classList.toggle("open", true);
       if (!$("askInput").disabled) $("askInput").focus();
+      showLastBubble();
     } else {
       $("askDock").classList.remove("mobile-open");
       $("askBackdrop").classList.remove("open");
@@ -375,11 +421,13 @@
       const d = await api("/api/ask", send("POST", { lesson: lessonId, question }));
       out.innerHTML = renderAnswer(d.text);
       if (window.MathJax && MathJax.typesetPromise) await MathJax.typesetPromise([out]).catch(() => {});
-      out.scrollIntoView({ block: "nearest" });
+      showLastBubble();
     } catch (e) {
       if (e.status === 404) { lostAccess(); return; }
       out.textContent = e.message;
       out.classList.add("is-error");
+      // It was not kept, so the learner should not have to type it again.
+      if (!$("askInput").value) $("askInput").value = question;
     }
     $("askSend").disabled = false;
   }
@@ -396,6 +444,7 @@
     if (act === "ask-open") { openAsk(true); }
     else if (act === "bar-show") { barHeldUntil = Date.now() + 10000; setBarHidden(false); }
     else if (act === "ask-close") { openAsk(false); }
+    else if (act === "ask-clear") { clearThread(); }
     else if (act === "ask-expand") {
       const on = !document.body.classList.contains("ask-expanded");
       document.body.classList.toggle("ask-expanded", on);

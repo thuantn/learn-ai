@@ -49,11 +49,12 @@
     <div class="ask-dock-header">
       <h2 class="display-font ask-title">Ô Hỏi</h2>
       <div class="ask-header-controls">
+        <button type="button" class="btn-expand-ask" id="askClear" data-act="ask-clear" hidden>Xóa</button>
         <button type="button" class="btn-expand-ask" id="btnExpandAsk" data-act="ask-expand" aria-expanded="false">Mở rộng</button>
         <button type="button" class="ask-close-mobile" data-act="ask-close" aria-label="Đóng ô hỏi">✕</button>
       </div>
     </div>
-    <p class="ask-context">Đang hỏi về: <strong id="askLessonShort">bài này</strong></p>
+    <p class="ask-context">Đang hỏi về: <strong id="askLessonShort">bài này</strong>. Câu hỏi được lưu để bạn xem lại và hỏi tiếp; tác giả bài không xem được.</p>
     <div class="ask-thread" id="askThread" aria-live="polite"></div>
   </div>
   <form id="askForm">

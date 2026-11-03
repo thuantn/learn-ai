@@ -20,3 +20,4 @@
 - 03/11/2026 — `wait_for_function` with a string is refused by the app's CSP. Poll from Python instead.
 
 - 03/11/2026 — In WebKit runs, `/api/lessons due to access control checks` is a home-screen request cut off by the test leaving the page. It happens on main too. `e2e_platform` and `e2e_sandbox` count it as a page error, so read the message before treating that failure as new.
+- 03/11/2026 — Ask threads live on the server and the browser cannot supply earlier turns, so a page or a request cannot put words in the model's history. A failed call is not kept.

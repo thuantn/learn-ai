@@ -47,6 +47,8 @@ HEADERS = {
 }
 DOC_LIMIT = 2 * 1024 * 1024
 ASK_INPUT_MAX, QUESTION_MAX = 24000, 2000
+# What the model sees of the thread, what the learner sees, and what is kept. Two rows make one turn.
+ASK_TURNS, ASK_HISTORY_CHARS, ASK_SHOW, ASK_KEEP = 6, 16000, 100, 200
 ASK_PER_MINUTE = 6
 SHARE_PER_MINUTE, JOIN_PER_MINUTE = 30, 10
 FEEDBACK_MAX, FEEDBACK_PER_HOUR = 2000, 20
@@ -780,6 +782,8 @@ async def leave_package(package_id: str, request: Request):
             "UPDATE package_access SET revoked_at=? WHERE package_id=? AND user=? AND revoked_at IS NULL",
             (time.time(), package_id, request.state.user),
         ).rowcount
+        if left:
+            c.execute("DELETE FROM ask_message WHERE user=? AND substr(lesson,1,14)=?", (request.state.user, package_id + "."))
     return {"ok": True} if left else bad(404, "package", "Không có package này.")
 
 
@@ -935,6 +939,60 @@ def lesson_context(lesson):
     )
 
 
+def earlier_turns(c, user, lesson_key):
+    """The newest turns that fit, oldest first. Never starts on an answer whose question was left out."""
+    rows = c.execute(
+        "SELECT role, body FROM ask_message WHERE user=? AND lesson=? ORDER BY id DESC LIMIT ?", (user, lesson_key, ASK_TURNS * 2)
+    ).fetchall()
+    turns, size = [], 0
+    for row in rows:
+        size += len(row["body"])
+        if size > ASK_HISTORY_CHARS:
+            break
+        turns.append({"role": row["role"], "content": row["body"]})
+    turns.reverse()
+    return turns[1:] if turns and turns[0]["role"] == "assistant" else turns
+
+
+def keep_turn(user, lesson_key, question, answer):
+    """Only if the learner still has the lesson: access or the package may have gone during the call."""
+    now = time.time()
+    with db.connect() as c:
+        if not catalog.lesson_for(c, user, lesson_key):
+            return
+        c.executemany(
+            "INSERT INTO ask_message(user, lesson, role, body, at) VALUES(?,?,?,?,?)",
+            [(user, lesson_key, "user", question, now), (user, lesson_key, "assistant", answer, now)],
+        )
+        c.execute(
+            "DELETE FROM ask_message WHERE user=? AND lesson=? AND id NOT IN "
+            "(SELECT id FROM ask_message WHERE user=? AND lesson=? ORDER BY id DESC LIMIT ?)",
+            (user, lesson_key, user, lesson_key, ASK_KEEP),
+        )
+
+
+@app.get("/api/lessons/{lesson_id}/ask")
+async def ask_thread(lesson_id: str, request: Request):
+    user = request.state.user
+    with db.connect() as c:
+        if not catalog.lesson_for(c, user, lesson_id):
+            return bad(404, "lesson", "Không có bài này.")
+        rows = c.execute(
+            "SELECT role, body FROM ask_message WHERE user=? AND lesson=? ORDER BY id DESC LIMIT ?", (user, lesson_id, ASK_SHOW)
+        ).fetchall()
+    return {"messages": [{"role": r["role"], "text": r["body"]} for r in reversed(rows)]}
+
+
+@app.delete("/api/lessons/{lesson_id}/ask")
+async def clear_ask_thread(lesson_id: str, request: Request):
+    user = request.state.user
+    with db.connect() as c:
+        if not catalog.lesson_for(c, user, lesson_id):
+            return bad(404, "lesson", "Không có bài này.")
+        c.execute("DELETE FROM ask_message WHERE user=? AND lesson=?", (user, lesson_id))
+    return {"ok": True}
+
+
 def take_minute_slot(user):
     """Runs on the event loop with no await inside, so parallel requests cannot all pass."""
     now = time.time()
@@ -974,7 +1032,9 @@ async def ask(request: Request):
     question = question.strip()
     if not 0 < len(question) <= QUESTION_MAX:
         return bad(400, "input", "Câu hỏi quá dài hoặc đang trống.")
-    messages = [{"role": "system", "content": lesson_context(lesson)}, {"role": "user", "content": question}]
+    with db.connect() as c:
+        earlier = earlier_turns(c, user, lesson_key)
+    messages = [{"role": "system", "content": lesson_context(lesson)}, *earlier, {"role": "user", "content": question}]
     if AI_SLOTS.locked():
         return bad(429, "busy", "Ô Hỏi đang bận. Thử lại sau ít phút.")
     if not take_minute_slot(user) or not await asyncio.to_thread(take_quota, user):
@@ -988,6 +1048,7 @@ async def ask(request: Request):
     except ai.CALL_ERRORS as e:
         log.warning("ai failed %s", type(e).__name__)
         return bad(502, "ai", "Dịch vụ AI đang lỗi. Thử lại sau.")
+    await asyncio.to_thread(keep_turn, user, lesson_key, question, text)
     return {"text": text}
 
 

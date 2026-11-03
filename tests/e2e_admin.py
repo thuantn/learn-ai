@@ -34,7 +34,7 @@ class FakeAI(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         SEEN.append({"auth": self.headers.get("Authorization"), "body": body})
-        out = json.dumps({"choices": [{"message": {"content": "**Trả lời giả**"}}]}).encode()
+        out = json.dumps({"choices": [{"message": {"content": "**Trả lời giả** \\(x^2\\)"}}]}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
@@ -191,6 +191,47 @@ def run(br, base, temp, work):
     binh.wait_for_selector("text=Trả lời giả")
     check("learner gets an answer", len(SEEN) == calls + 1)
     check("lesson text reached the provider inside the data block", "Bản hai" in SEEN[-1]["body"]["messages"][0]["content"])
+
+    # The thread is still there after a reload, with its formatting, and the next question follows on from it.
+    binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
+    if not binh.locator("#askDock").is_visible():
+        binh.click("#lessonAskBtn")
+    binh.wait_for_selector("#askThread .is-question")
+    check("question survives a reload", binh.locator("#askThread .is-question").inner_text() == "Vì sao?")
+    check("answer survives a reload with its formatting", binh.locator("#askThread .md-answer strong").inner_text() == "Trả lời giả")
+    binh.wait_for_selector("#askThread mjx-container", state="attached")
+    binh.fill("#askInput", "Còn gì nữa?")
+    binh.click("#askSend")
+    for _ in range(50):
+        if binh.locator("#askThread .md-answer").count() == 2 and "Đang trả lời" not in binh.locator("#askThread").inner_text():
+            break
+        binh.wait_for_timeout(100)
+    sent = SEEN[-1]["body"]["messages"]
+    check("follow-up carries the earlier turn", [m["role"] for m in sent] == ["system", "user", "assistant", "user"] and sent[1]["content"] == "Vì sao?", [m["role"] for m in sent])
+    binh.set_viewport_size({"width": 390, "height": 844})
+    binh.wait_for_timeout(300)
+    if not binh.locator("#askForm").is_visible():
+        binh.click("#lessonAskBtn")
+    binh.wait_for_timeout(300)
+    binh.screenshot(path=str(SHOTS / "ask-thread-390.png"))
+    binh.set_viewport_size({"width": 1280, "height": 900})
+    binh.wait_for_timeout(200)
+    # The page's dialog handler accepts everything, so saying no needs its own stand-in.
+    binh.evaluate("window.realConfirm = window.confirm; window.confirm = () => false")
+    if not binh.locator("#askClear").is_visible():
+        binh.click("#lessonAskBtn")
+    binh.click("#askClear")
+    binh.wait_for_timeout(200)
+    check("dismissing the question keeps the thread", binh.locator("#askThread .is-question").count() == 2)
+    binh.evaluate("window.confirm = window.realConfirm")
+    binh.click("#askClear")
+    binh.wait_for_selector("#askThread .is-question", state="detached")
+    check("clear hides itself", not binh.locator("#askClear").is_visible())
+    binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
+    binh.wait_for_timeout(400)
+    check("cleared stays cleared", binh.locator("#askThread .ask-bubble").count() == 0)
+    if not binh.locator("#askDock").is_visible():
+        binh.click("#lessonAskBtn")
 
     # Turning it off works at once, for a page already open too.
     boss.click("#packageList button:has-text('Tắt ô Hỏi')")

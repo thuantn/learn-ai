@@ -324,6 +324,7 @@ def purge_rows(c, package_id: str):
         ("lesson_progress", "lesson"),
         ("listen_pos", "episode"),
         ("user_doc", "name"),
+        ("ask_message", "lesson"),
     ]
     for table, col in tables:
         c.execute(f"DELETE FROM {table} WHERE substr({col},1,14)=?", (prefix,))

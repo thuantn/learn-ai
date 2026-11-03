@@ -65,6 +65,12 @@ CREATE TABLE admin_log(
   id INTEGER PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
   detail TEXT NOT NULL DEFAULT '', at REAL NOT NULL);
 """,
+    """
+CREATE TABLE ask_message(
+  id INTEGER PRIMARY KEY, user TEXT NOT NULL REFERENCES users(name) ON DELETE CASCADE, lesson TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('user', 'assistant')), body TEXT NOT NULL, at REAL NOT NULL);
+CREATE INDEX ask_message_thread ON ask_message(user, lesson, id);
+""",
 ]
 
 log = logging.getLogger("learn")

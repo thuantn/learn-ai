@@ -92,6 +92,8 @@ Bật ô Hỏi cần hai việc:
 1. Nhập khóa ở `/admin`, bấm Thử kết nối. Dùng khóa riêng có trần chi tiêu, không dùng chung với app khác. Báo model không chạy được theo ZDR thì đổi model, không tắt ZDR.
 2. Tác giả bấm "Xin bật ô Hỏi" ở Thư viện, admin đọc nội dung rồi duyệt. Bản mới có nội dung AI đọc khác thì package về lại danh sách chờ, ô Hỏi dừng cho tới khi duyệt lại.
 
+Mỗi người có một hội thoại riêng cho từng bài, lưu ở bảng `ask_message` nên nằm trong bản sao lưu. AI nhận tối đa 6 lượt hỏi đáp gần nhất, trong giới hạn 16.000 ký tự. Mỗi bài giữ tối đa 200 dòng cho mỗi người. Tác giả không có cách xem qua app, còn người có quyền vào database thì đọc được. Hội thoại mất khi người học bấm Xóa hoặc bỏ bài khỏi thư viện, khi xóa package hoặc xóa tài khoản. Bị thu hồi quyền thì hội thoại ở lại, được share lại thì thấy lại.
+
 Chưa có tùy chọn Internet; điều kiện là kiểm tra được ZDR với khóa thật. Chưa thử chèn lệnh với mô hình thật; làm việc này trước khi bật ô Hỏi cho người ngoài chủ dự án.
 
 ## Kiểm tra sau deploy
