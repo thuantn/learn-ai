@@ -1645,7 +1645,7 @@
     }
 
     @media (max-width: 1023px) {
-      body.in-lesson:not(.no-audio) .mobile-now-playing {
+      body.in-lesson.audio-started:not(.no-audio):not(.on-listen) .mobile-now-playing {
         display: flex;
         align-items: center;
         position: fixed;
@@ -1663,11 +1663,49 @@
       }
 
       @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-        body.in-lesson:not(.no-audio) .mobile-now-playing {
+        body.in-lesson.audio-started:not(.no-audio):not(.on-listen) .mobile-now-playing {
           background: var(--bg-glass);
           -webkit-backdrop-filter: saturate(160%) blur(14px);
           backdrop-filter: saturate(160%) blur(14px);
         }
+      }
+    }
+
+    @media (max-width: 1023px) {
+      /* The phone top bar only holds the logo, so it scrolls away with the page. */
+      .unified-top-bar {
+        position: static;
+      }
+
+      .mobile-floating-capsule,
+      .mobile-now-playing {
+        transition: transform 0.2s ease;
+      }
+
+      /* Stays for keyboard users only: Chrome also leaves focus on a tab after a tap, and :focus-within would pin the bar. */
+      body.bars-away .mobile-floating-capsule:not(:has(:focus-visible)) {
+        transform: translateY(calc(100% + 16px + env(safe-area-inset-bottom, 0px)));
+      }
+
+      /* Takes the tab bar's place, so play and pause stay in reach. */
+      body.bars-away .mobile-now-playing {
+        transform: translateY(72px);
+      }
+    }
+
+    /* A phone on its side has about 390 px of height: icons only. */
+    @media (max-width: 1023px) and (max-height: 500px) {
+      .mobile-floating-capsule {
+        height: 54px;
+        padding: 2px 6px;
+      }
+
+      .capsule-tab-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
       }
     }
 
@@ -1930,7 +1968,7 @@ a.drawer-nav-item { display: flex; align-items: center; text-decoration: none; c
 #loginForm .btn-studio-primary, #passwordForm .btn-studio-primary { margin-top: 0.5rem; }
 @media (max-width: 1023px) {
   .stage-body { padding-bottom: 96px; }
-  body.in-lesson:not(.no-audio) .stage-body { padding-bottom: 152px; }
+  body.in-lesson.audio-started:not(.no-audio):not(.on-listen) .stage-body { padding-bottom: 152px; }
   .main-buttons > * { flex: 1 1 42%; }
 }
 @media (min-width: 1024px) {

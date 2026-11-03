@@ -418,6 +418,19 @@ audio.addEventListener("timeupdate", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = audio.paused ? "paused" : "playing";
 }));
 audio.addEventListener("ended", savePosition);
+// The phone's mini player appears once audio has started; before that, Listen has the only play button it needs.
+audio.addEventListener("play", () => document.body.classList.add("audio-started"));
+["ended", "emptied"].forEach(ev => audio.addEventListener(ev, () => document.body.classList.remove("audio-started")));
+
+// Phones: the tab bar steps aside while reading down, and returns on the way up or at the end of the page.
+let lastScrollY = 0;
+window.addEventListener("scroll", () => {
+  const y = window.scrollY;
+  if (Math.abs(y - lastScrollY) < 8) return;
+  const atEnd = y + window.innerHeight >= document.documentElement.scrollHeight - 8;
+  document.body.classList.toggle("bars-away", y > lastScrollY && y > 80 && !atEnd);
+  lastScrollY = y;
+}, { passive: true });
 audio.addEventListener("error", () => { if (audio.src) { $("audioError").hidden = false; go("listen"); } });
 audio.addEventListener("playing", () => { $("audioError").hidden = true; });
 
