@@ -135,6 +135,12 @@ function renderLesson() {
   $$("[data-article]").forEach(a => { a.href = l.page; });
   $("homePill").textContent = statusText(l);
   $("home-title").textContent = `${lessonNo(l)}: ${l.title}`;
+  const homeStart = $("homeCta")?.querySelector("[data-act=start]");
+  if (homeStart) {
+    if (l.status === "in_progress") homeStart.textContent = "Tiếp tục học";
+    else if (l.status === "done") homeStart.textContent = "Học lại";
+    else homeStart.textContent = "Bắt đầu học";
+  }
   $("dockKicker").textContent = hasAudio() ? `Podcast, ${lessonNo(l)}` : lessonNo(l);
   $("dockTitle").textContent = l.title;
   const t = l.tracks;
@@ -196,43 +202,53 @@ function renderHomeTests() {
   const tests = state.tests || [];
   heading.hidden = tests.length === 0;
   box.textContent = "";
-  let last = null;
+
+  const packages = [];
+  const pkgMap = new Map();
   tests.forEach(t => {
-    const group = testGroupHeading(t, last);
-    if (group) box.append(group);
-    last = t.package_id;
-    const row = document.createElement("article");
-    row.className = "stream-row";
+    let p = pkgMap.get(t.package_id);
+    if (!p) {
+      p = { id: t.package_id, title: t.package_title || "Bộ đề", tests: [] };
+      pkgMap.set(t.package_id, p);
+      packages.push(p);
+    }
+    p.tests.push(t);
+  });
+
+  packages.forEach(pkg => {
+    const row = document.createElement("a");
+    row.className = "stream-row test-package-row";
+    row.href = "#tests=" + encodeURIComponent(pkg.id);
+
     const info = document.createElement("div");
-    info.className = "stream-info";
+    info.className = "test-package-info";
+
     const title = document.createElement("h3");
-    title.className = "stream-title";
-    title.textContent = t.title;
-    const pills = document.createElement("div");
-    pills.className = "meta-pills";
-    const pillTexts = [
-      `${t.items} câu`,
-      t.minutes ? `${t.minutes} phút` : "Không giới hạn giờ",
-      t.best_percent !== null && t.best_percent !== undefined ? `Điểm cao nhất: ${t.best_percent}%` : null,
-      t.pool ? `Chờ ôn: ${t.pool} câu` : null,
-    ].filter(Boolean);
-    pillTexts.forEach(txt => {
-      const p = document.createElement("span");
-      p.className = "meta-pill";
-      p.textContent = txt;
-      pills.append(p);
-    });
-    info.append(title, pills);
-    const act = document.createElement("div");
-    act.className = "stream-actions";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "btn-studio-primary";
-    btn.dataset.act = "test-open";
-    btn.dataset.id = t.key;
-    btn.textContent = "Làm đề";
-    act.append(btn);
-    row.append(info, act);
+    title.className = "test-group-title";
+    title.textContent = pkg.title;
+
+    const meta = document.createElement("div");
+    meta.className = "test-package-meta";
+
+    const parts = [`${pkg.tests.length} đề`];
+    const bests = pkg.tests.map(t => t.best_percent).filter(v => v !== null && v !== undefined);
+    if (bests.length > 0) {
+      parts.push(`Điểm cao nhất ${Math.max(...bests)}%`);
+    }
+    const poolSum = pkg.tests.reduce((sum, t) => sum + (t.pool || 0), 0);
+    if (poolSum > 0) {
+      parts.push(`Chờ ôn ${poolSum} câu`);
+    }
+    meta.textContent = parts.join(" · ");
+
+    info.append(title, meta);
+
+    const chev = document.createElement("span");
+    chev.className = "lesson-row-chevron";
+    chev.setAttribute("aria-hidden", "true");
+    chev.textContent = "›";
+
+    row.append(info, chev);
     box.append(row);
   });
 }
@@ -240,39 +256,67 @@ function renderHomeTests() {
 function renderList() {
   const box = $("lessonList");
   box.textContent = "";
-  state.lessons.forEach(l => {
-    const row = document.createElement("article");
-    row.className = "stream-row";
-    const info = document.createElement("div");
-    info.className = "stream-info";
+  const total = state.lessons.length;
+  state.lessons.forEach((l, i) => {
+    const row = document.createElement("div");
+    row.className = "stream-row lesson-row";
+    const isCurrent = state.lesson && l.id === state.lesson.id;
+    if (isCurrent) row.classList.add("is-current");
+    if (total > 8 && i >= 8 && !isCurrent) {
+      row.hidden = true;
+    }
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lesson-row-main";
+    btn.dataset.act = "start";
+    btn.dataset.lesson = l.id;
+
     const idx = document.createElement("span");
-    idx.className = "stream-index";
+    idx.className = "stream-index lesson-row-idx";
     idx.textContent = String(l.order).padStart(2, "0");
+
     const text = document.createElement("div");
-    const h = document.createElement("h3");
-    h.className = "stream-title";
-    h.textContent = `${lessonNo(l)}: ${l.title}`;
-    const p = document.createElement("p");
-    p.className = "stream-status " + (l.status === "done" ? "is-done" : "");
-    p.textContent = l.mine ? statusText(l) : `${statusText(l)}. Tác giả: ${l.author}`;
-    text.append(h, p);
-    info.append(idx, text);
-    const act = document.createElement("div");
-    act.className = "stream-actions";
-    const start = document.createElement("button");
-    start.type = "button";
-    start.className = l.status === "done" ? "btn-studio-secondary" : "btn-studio-primary";
-    start.dataset.act = "start";
-    start.dataset.lesson = l.id;
-    start.textContent = l.status === "done" ? "Học lại" : "Bắt đầu buổi học";
+    text.className = "lesson-row-text";
+
+    const title = document.createElement("span");
+    title.className = "lesson-row-title";
+    title.textContent = `${lessonNo(l)}: ${l.title}`;
+
+    const status = document.createElement("span");
+    status.className = "lesson-row-status" + (l.status === "done" ? " is-done" : "");
+    status.textContent = l.mine ? statusText(l) : `${statusText(l)}. Tác giả: ${l.author}`;
+
+    text.append(title, status);
+
+    const chev = document.createElement("span");
+    chev.className = "lesson-row-chevron";
+    chev.setAttribute("aria-hidden", "true");
+    chev.textContent = "›";
+
+    btn.append(idx, text, chev);
+
     const read = document.createElement("a");
-    read.className = "btn-studio-secondary";
+    read.className = "lesson-row-read";
     read.href = l.page;
-    read.textContent = "Đọc bài đầy đủ";
-    act.append(start, read);
-    row.append(info, act);
+    read.textContent = "Đọc bài";
+
+    row.append(btn, read);
     box.append(row);
   });
+
+  if (total > 8) {
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "btn-link-quiet lesson-expand-btn";
+    moreBtn.textContent = `Xem tất cả ${total} bài`;
+    moreBtn.addEventListener("click", () => {
+      box.querySelectorAll(".lesson-row[hidden]").forEach(r => r.removeAttribute("hidden"));
+      moreBtn.remove();
+    });
+    box.append(moreBtn);
+  }
+
   renderHomeTests();
   const dueText = state.due ? `Còn ${state.due} thẻ đến hạn` : "Không có thẻ đến hạn";
   $$("[data-due-text]").forEach(e => { e.textContent = dueText; });

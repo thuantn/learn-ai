@@ -116,6 +116,12 @@ function testRoute() {
   return false;
 }
 
+function shouldShowItemsPill(title, items) {
+  if (!items) return false;
+  const re = new RegExp(`(?:^|\\D)${items}\\s*(?:câu|questions)(?:\\b|\\W|$)`, "i");
+  return !re.test(title || "");
+}
+
 async function showTestsScreen(pkgFilter) {
   const hash = pkgFilter ? "#tests=" + encodeURIComponent(pkgFilter) : "#tests";
   go("tests", true, hash);
@@ -156,13 +162,18 @@ async function showTestsScreen(pkgFilter) {
       const info = el("div", "lib-info");
       info.append(el("h3", "stream-title", t.title));
       const pills = el("div", "meta-pills");
-      [
-        `${t.items} câu`,
-        t.minutes ? `${t.minutes} phút` : "Không giới hạn giờ",
-        `Điểm đạt: ${t.pass_percent}%`,
-        t.best_percent !== null && t.best_percent !== undefined ? `Điểm cao nhất: ${t.best_percent}%` : null,
-        t.pool ? `Chờ ôn: ${t.pool} câu` : null,
-      ].filter(Boolean).forEach(txt => pills.append(el("span", "meta-pill", txt)));
+      const pillTexts = [];
+      if (shouldShowItemsPill(t.title, t.items)) {
+        pillTexts.push(`${t.items} câu`);
+      }
+      if (t.minutes) pillTexts.push(`${t.minutes} phút`);
+      else pillTexts.push("Không giới hạn giờ");
+      pillTexts.push(`Điểm đạt: ${t.pass_percent}%`);
+      if (t.best_percent !== null && t.best_percent !== undefined) {
+        pillTexts.push(`Điểm cao nhất: ${t.best_percent}%`);
+      }
+      if (t.pool) pillTexts.push(`Chờ ôn: ${t.pool} câu`);
+      pillTexts.forEach(txt => pills.append(el("span", "meta-pill", txt)));
       info.append(pills);
       const act = el("div", "stream-actions");
       const btn = actionButton("Làm đề", "test-open", t.key, "btn-studio-primary");
@@ -202,13 +213,18 @@ async function showTestDetail(key) {
     if (pill) pill.textContent = t.package_title || "Bộ đề";
     if (pills) {
       pills.textContent = "";
-      [
-        `${t.items} câu`,
-        t.minutes ? `${t.minutes} phút` : "Không giới hạn giờ",
-        `Điểm đạt: ${t.pass_percent}%`,
-        t.best_percent !== null && t.best_percent !== undefined ? `Điểm cao nhất: ${t.best_percent}%` : null,
-        t.pool ? `Chờ ôn: ${t.pool} câu` : null,
-      ].filter(Boolean).forEach(txt => pills.append(el("span", "meta-pill", txt)));
+      const detailPills = [];
+      if (shouldShowItemsPill(t.title, t.items)) {
+        detailPills.push(`${t.items} câu`);
+      }
+      if (t.minutes) detailPills.push(`${t.minutes} phút`);
+      else detailPills.push("Không giới hạn giờ");
+      detailPills.push(`Điểm đạt: ${t.pass_percent}%`);
+      if (t.best_percent !== null && t.best_percent !== undefined) {
+        detailPills.push(`Điểm cao nhất: ${t.best_percent}%`);
+      }
+      if (t.pool) detailPills.push(`Chờ ôn: ${t.pool} câu`);
+      detailPills.forEach(txt => pills.append(el("span", "meta-pill", txt)));
     }
     if (desc) {
       desc.innerHTML = renderTestText(t.description || "");

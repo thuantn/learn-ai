@@ -238,6 +238,12 @@ def run(br, base, temp, work):
     ts = all_tests(an)
     want = [next(y["package_title"] for y in ts if y["package_id"] == pid) for pid in dict.fromkeys(x["package_id"] for x in ts)]
     check("bộ đề trên trang đầu có tên package", groups == want, f"groups={groups}, want={want}")
+    distinct_pkg_count = len(dict.fromkeys(x["package_id"] for x in ts))
+    check("số bộ đề trên trang đầu bằng số package", home_tests_count == distinct_pkg_count, f"count={home_tests_count}, want={distinct_pkg_count}")
+    an.locator("#homeTestList .stream-row").first.click()
+    an.wait_for_selector("#screen-tests.active")
+    new_hash = an.evaluate("location.hash")
+    check("bấm bộ đề vào thẳng danh sách đề của package", new_hash.startswith("#tests="), f"hash={new_hash}")
 
     # 8. không tràn ngang ở 360 px
     an.set_viewport_size({"width": 360, "height": 740})

@@ -207,6 +207,9 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.wait_for_selector("#lessonList .stream-row")
     check("package appears on home", a.locator("#lessonList .stream-row").count() == 1)
     check("package title did not run as HTML", a.evaluate("window.__xss") is None)
+    check("no Đọc bài đầy đủ inside #lessonList", a.locator("#lessonList").get_by_text("Đọc bài đầy đủ").count() == 0)
+    row_height = a.locator("#lessonList .stream-row").first.bounding_box()["height"]
+    check("lesson row height under 90 px at 1280 px", row_height < 90, f"height={row_height}")
 
     # Upload second version of the same package that adds one file
     if good2 is None:
