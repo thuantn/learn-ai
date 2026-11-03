@@ -304,6 +304,10 @@ def run(br, base, temp, work):
         if "Đang trả lời" not in binh.locator("#askThread").inner_text():
             break
         binh.wait_for_timeout(100)
+    # Reaching a lesson with the overlay open (browser back, a keyboard) must not leave its backdrop over the lesson.
+    binh.evaluate("go('review')")
+    binh.wait_for_selector("#screen-review.active")
+    check("entering a lesson closes the overlay's backdrop", not binh.locator("#askBackdrop").is_visible())
     binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
     binh.wait_for_selector("#askThread .is-question >> nth=3", state="attached")
     check("lesson thread shows question asked from library", binh.locator("#askThread .is-question").nth(3).inner_text() == "Từ thư viện")

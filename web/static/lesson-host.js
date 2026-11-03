@@ -388,7 +388,7 @@
 
   async function sendAsk(question) {
     question = question.trim();
-    if (!question || $("askInput").disabled) return;
+    if (!question || $("askInput").disabled || AskThread.sending) return;
     const qEl = askBubble("is-question");
     qEl.textContent = question;
     $("askInput").value = "";

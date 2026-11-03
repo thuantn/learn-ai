@@ -144,6 +144,21 @@ try:
         pg.wait_for_timeout(2500)
         state = pg.evaluate("({t:audio.currentTime,paused:audio.paused,err:audio.error&&audio.error.code})")
         check("audio really plays", state["t"] > 0 and not state["paused"] and state["err"] is None, state)
+        # Audio goes on across screens, so its controls go too; Listen and a wide lesson already have their own.
+        mini = lambda: pg.locator(".mobile-now-playing").is_visible()
+        check("no mini player on Listen", not mini())
+        pg.evaluate("go('home')")
+        check("wide screen: mini player on home while audio plays", mini())
+        pg.evaluate("go('review')")
+        check("wide lesson: the dock, not the mini player", not mini())
+        wide = pg.viewport_size
+        pg.set_viewport_size({"width": 390, "height": 844})
+        check("phone: mini player in a lesson while audio plays", mini())
+        pg.evaluate("go('home')")
+        check("phone: mini player on home while audio plays", mini())
+        pg.set_viewport_size(wide)
+        pg.evaluate("go('listen')")
+        pg.wait_for_selector("#screen-listen.active")
         pg.evaluate("audio.currentTime=524")
         pg.wait_for_timeout(1500)
         pg.locator("#screen-listen").get_by_role("button", name="Dừng", exact=True).click()
@@ -211,6 +226,28 @@ try:
 
         check("no outside requests", not outside, outside[:3])
         check("no page errors", not errs, errs[:3])
+
+        # Lesson steps are the way back on a wide screen, where the top bar has none.
+        pg.evaluate("go('flashcard')")
+        pg.locator('#screen-flashcard .flow-step-item[data-step="1"]').click()
+        check("lesson step goes back to Ôn lại", pg.locator("#screen-review.active").count() == 1)
+
+        # The tab bar must return on a screen too short to scroll back up on.
+        pg.set_viewport_size({"width": 390, "height": 300})
+        pg.evaluate("go('home')")
+        pg.wait_for_timeout(200)
+        pg.mouse.move(195, 150)
+        for _ in range(3):
+            pg.mouse.wheel(0, 50)
+            pg.wait_for_timeout(120)
+        pg.wait_for_timeout(200)
+        check("tab bar left while scrolling down", pg.evaluate("document.body.classList.contains('bars-away')"), pg.evaluate("scrollY"))
+        pg.evaluate("go('flashcard')")
+        pg.wait_for_timeout(300)
+        check("tab bar back after changing screen", not pg.evaluate("document.body.classList.contains('bars-away')"))
+        drawer_focus = pg.evaluate("getComputedStyle(document.getElementById('navDrawer')).visibility")
+        check("closed drawer takes no keyboard focus", drawer_focus == "hidden", drawer_focus)
+        pg.set_viewport_size({"width": 1440, "height": 900})
 
         pg.evaluate("go('home')")
         pg.click("#accountMenu summary")

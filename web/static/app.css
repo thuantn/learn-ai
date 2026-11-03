@@ -308,10 +308,6 @@
       display: none !important;
     }
 
-    body:not(.in-lesson):not(.lesson-host) .capsule-audio-cluster {
-      display: none !important;
-    }
-
     body:not(.in-lesson):not(.lesson-host) #navDrawer [data-nav="review"],
     body:not(.in-lesson):not(.lesson-host) #navDrawer [data-nav="listen"],
     body:not(.in-lesson):not(.lesson-host) #navDrawer [data-nav="flashcard"],
@@ -1315,6 +1311,19 @@
       color: var(--accent-bright);
     }
 
+    button.flow-step-item {
+      background: none;
+      border: 0;
+      padding: 0 0.125rem;
+      min-height: 44px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    button.flow-step-item:hover {
+      color: var(--text-main);
+    }
+
     .summary-stack {
       display: flex;
       flex-direction: column;
@@ -1642,32 +1651,43 @@
 
     .mobile-now-playing {
       display: none;
+      align-items: center;
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+      height: 48px;
+      background: var(--bg-panel);
+      border: 1px solid var(--hairline);
+      border-radius: 16px;
+      padding: 0 0.5rem;
+      box-shadow: var(--shadow-float);
+      z-index: 54;
+      box-sizing: border-box;
     }
 
-    @media (max-width: 1023px) {
-      body.in-lesson.audio-started:not(.no-audio):not(.on-listen) .mobile-now-playing {
-        display: flex;
-        align-items: center;
-        position: fixed;
-        left: 12px;
-        right: 12px;
-        bottom: calc(84px + env(safe-area-inset-bottom, 0px));
-        height: 48px;
-        background: var(--bg-panel);
-        border: 1px solid var(--hairline);
-        border-radius: 16px;
-        padding: 0 0.5rem;
-        box-shadow: var(--shadow-float);
-        z-index: 54;
-        box-sizing: border-box;
+    @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+      .mobile-now-playing {
+        background: var(--bg-glass);
+        -webkit-backdrop-filter: saturate(160%) blur(14px);
+        backdrop-filter: saturate(160%) blur(14px);
       }
+    }
 
-      @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-        body.in-lesson.audio-started:not(.no-audio):not(.on-listen) .mobile-now-playing {
-          background: var(--bg-glass);
-          -webkit-backdrop-filter: saturate(160%) blur(14px);
-          backdrop-filter: saturate(160%) blur(14px);
-        }
+    /* Audio goes on across screens, so its controls must too. Listen has the full player, and a wide lesson has the dock. */
+    @media (max-width: 1023px) {
+      body.audio-started:not(.on-listen):not(.in-test) .mobile-now-playing {
+        display: flex;
+      }
+    }
+
+    @media (min-width: 1024px) {
+      body.audio-started:not(.in-lesson):not(.in-test) .mobile-now-playing {
+        display: flex;
+        left: auto;
+        right: 24px;
+        bottom: 24px;
+        width: 420px;
       }
     }
 
@@ -1791,12 +1811,15 @@
       justify-content: space-between;
       padding: 1.125rem 1rem;
       transform: translateX(-104%);
-      transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+      visibility: hidden;
+      transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0.26s;
       overflow-y: auto;
     }
 
     .mobile-nav-drawer.open {
       transform: translateX(0);
+      visibility: visible;
+      transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     @media (min-width: 1024px) {
@@ -1849,12 +1872,6 @@
       background: var(--bg-active);
       color: var(--text-main);
       font-weight: 600;
-    }
-
-    #navDrawer [data-nav="home"],
-    #navDrawer [data-nav="library"],
-    #navDrawer [data-nav="tests"] {
-      display: none !important;
     }
 
     .drawer-footer {
@@ -1968,7 +1985,7 @@ a.drawer-nav-item { display: flex; align-items: center; text-decoration: none; c
 #loginForm .btn-studio-primary, #passwordForm .btn-studio-primary { margin-top: 0.5rem; }
 @media (max-width: 1023px) {
   .stage-body { padding-bottom: 96px; }
-  body.in-lesson.audio-started:not(.no-audio):not(.on-listen) .stage-body { padding-bottom: 152px; }
+  body.audio-started:not(.on-listen):not(.in-test) .stage-body { padding-bottom: 152px; }
   .main-buttons > * { flex: 1 1 42%; }
 }
 @media (min-width: 1024px) {
@@ -3099,9 +3116,6 @@ body.in-test .stage-body {
   margin-bottom: 0.375rem;
 }
 #screen-home .hero-note {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   max-width: 100%;
 }
 #homeCta {

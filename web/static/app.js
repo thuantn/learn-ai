@@ -50,8 +50,8 @@ function go(id, replace, hash) {
   document.body.classList.toggle("on-listen", id === "listen");
   if (!isLesson) {
     openAsk(false);
-  } else {
-    $("askDock").classList.remove("overlay-open");
+  } else if ($("askDock").classList.contains("overlay-open")) {
+    openAsk(false);
   }
   syncAsk();
   $$(".screen").forEach(s => s.classList.toggle("active", s.id === "screen-" + id));
@@ -102,9 +102,13 @@ function renderFlow() {
     const steps = document.createElement("div");
     steps.className = "flow-steps";
     names.forEach((n, i) => {
-      const s = document.createElement("span");
+      const s = document.createElement("button");
+      s.type = "button";
       s.className = "flow-step-item" + (i + 1 === at ? " active" : "");
       s.dataset.step = i + 1;
+      s.dataset.act = "go";
+      s.dataset.to = ["review", "listen", "flashcard"][i];
+      if (i + 1 === at) s.setAttribute("aria-current", "step");
       s.textContent = `${i + 1}. ${n}`;
       steps.append(s);
     });
@@ -123,7 +127,6 @@ function renderLesson() {
   const hasTests = state.tests && state.tests.length > 0;
   document.body.classList.toggle("no-lesson", !l);
   document.body.classList.toggle("no-audio", !hasAudio());
-  document.body.classList.toggle("no-ask", !(l && l.ask));
   $("homeCta").hidden = !l;
   $("homeEmptyCta").hidden = !!l || hasTests;
   $("homeListHeading").hidden = !l;
@@ -139,7 +142,6 @@ function renderLesson() {
       $("homeNote").textContent = "Tải lên bài của bạn, hoặc nhờ đồng nghiệp share bài để bắt đầu học.";
     }
     $("summary").textContent = "";
-    renderChipsForLesson(null);
     $("dockKicker").textContent = "";
     $("dockTitle").textContent = "";
     return;
@@ -187,7 +189,6 @@ function renderLesson() {
     band.append(n, p);
     box.append(band);
   });
-  renderChipsForLesson(l);
   renderTrackButtons();
   renderTime();
 }
@@ -597,7 +598,7 @@ function askBubble(cls) {
 
 async function sendAsk(question) {
   question = question.trim();
-  if (!question || $("askInput").disabled) return;
+  if (!question || $("askInput").disabled || AskThread.sending) return;
   removeChipIfAsked(question);
   const isLesson = document.body.classList.contains("in-lesson");
   const targetLessonId = isLesson ? (state.lesson ? state.lesson.id : null) : askLessonId;
@@ -611,6 +612,7 @@ async function sendAsk(question) {
   out.textContent = "Đang trả lời...";
   $("askSend").disabled = true;
   AskThread.sending = true;
+  $("askLessonPick").disabled = true;
   AskThread.scrollTo(qEl);
   try {
     const d = await api("/api/ask", send("POST", { lesson: targetLessonId, question }));
@@ -626,6 +628,7 @@ async function sendAsk(question) {
     if (!$("askInput").value) $("askInput").value = question;
   }
   AskThread.sending = false;
+  $("askLessonPick").disabled = false;
   $("askSend").disabled = false;
 }
 
@@ -667,9 +670,9 @@ function setLesson(id) {
   audio.removeAttribute("src");
   pendingSeek = null;
   state.lesson = l;
-  syncAsk();
   state.track = l.track in l.tracks ? l.track : (Object.keys(l.tracks)[0] || null);
   renderLesson();
+  syncAsk();
 }
 async function startLesson(id) {
   if (id) setLesson(id);
