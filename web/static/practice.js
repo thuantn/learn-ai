@@ -778,6 +778,21 @@ function renderCurrentQuestion() {
     }
   }
 
+  const itemActions = el("div", "test-item-actions");
+  if (_currentAttempt.ask && (item.checked || _currentAttempt.status === "submitted")) {
+    const askBtn = el("button", "btn-studio-secondary", "Hỏi về câu này");
+    askBtn.type = "button";
+    askBtn.dataset.act = "test-item-ask";
+    askBtn.dataset.itemId = item.id;
+    itemActions.append(askBtn);
+  }
+  const fbBtn = el("button", "btn-link-quiet", "Báo sai câu này");
+  fbBtn.type = "button";
+  fbBtn.dataset.act = "test-item-feedback";
+  fbBtn.dataset.itemId = item.id;
+  itemActions.append(fbBtn);
+  box.append(itemActions);
+
   const counter = $("testRunCounter");
   if (counter) counter.textContent = `Câu ${_currentIndex + 1} / ${_currentAttempt.items.length}`;
 
@@ -1285,8 +1300,150 @@ function renderResultItems() {
       card.append(docsBox);
     }
 
+    const cardActions = el("div", "test-item-actions");
+    if (_resultAttempt && _resultAttempt.ask) {
+      const askBtn = el("button", "btn-studio-secondary", "Hỏi về câu này");
+      askBtn.type = "button";
+      askBtn.dataset.act = "test-item-ask";
+      askBtn.dataset.itemId = it.id;
+      cardActions.append(askBtn);
+    }
+    const fbBtn = el("button", "btn-link-quiet", "Báo sai câu này");
+    fbBtn.type = "button";
+    fbBtn.dataset.act = "test-item-feedback";
+    fbBtn.dataset.itemId = it.id;
+    cardActions.append(fbBtn);
+    card.append(cardActions);
+
     list.append(card);
   });
+}
+
+function reportItem(itemId) {
+  const att = _currentAttempt || _resultAttempt;
+  if (!att) return;
+  const idx = (att.items || []).findIndex(x => x.id === itemId);
+  const numStr = idx >= 0 ? `Câu ${idx + 1}` : itemId;
+  if (window.openFeedback) {
+    window.openFeedback({
+      url: `/api/attempts/${encodeURIComponent(att.id)}/items/${encodeURIComponent(itemId)}/feedback`,
+      kind: "wrong",
+      label: `${att.title || "Bộ đề"} · ${numStr}`,
+      title: "Báo sai câu hỏi",
+    });
+  }
+}
+
+let _askAttemptId = null;
+let _askItemId = null;
+let _askSending = false;
+
+async function openItemAsk(itemId) {
+  const att = _currentAttempt || _resultAttempt;
+  if (!att) return;
+  _askAttemptId = att.id;
+  _askItemId = itemId;
+  const idx = (att.items || []).findIndex(x => x.id === itemId);
+  const numStr = idx >= 0 ? `Câu ${idx + 1}` : itemId;
+
+  const dia = $("testAskDialog");
+  const ctx = $("testAskContext");
+  const thread = $("testAskThread");
+  const err = $("testAskError");
+  const clearBtn = $("testAskClear");
+  const input = $("testAskInput");
+  if (!dia || !thread) return;
+
+  if (ctx) ctx.textContent = `Đang hỏi về: ${att.title || "Bộ đề"} · ${numStr}. Câu hỏi được lưu để bạn xem lại và hỏi tiếp; tác giả đề không xem được.`;
+  if (err) err.hidden = true;
+  if (clearBtn) clearBtn.hidden = true;
+  if (input) input.value = "";
+  thread.textContent = "Đang tải...";
+  dia.showModal();
+
+  try {
+    const d = await api(`/api/attempts/${encodeURIComponent(_askAttemptId)}/items/${encodeURIComponent(_askItemId)}/ask`);
+    thread.textContent = "";
+    const msgs = d.messages || [];
+    if (msgs.length > 0 && clearBtn) clearBtn.hidden = false;
+    const bubbles = msgs.map(m => {
+      const b = el("div", "ask-bubble " + (m.role === "user" ? "is-question" : "md-answer"));
+      if (m.role === "user") {
+        b.textContent = m.text;
+      } else {
+        b.innerHTML = renderAnswer(m.text);
+      }
+      return b;
+    });
+    thread.append(...bubbles);
+    thread.scrollTop = thread.scrollHeight;
+    if (window.MathJax && MathJax.startup) {
+      await MathJax.startup.promise;
+      await MathJax.typesetPromise(bubbles).catch(() => {});
+      thread.scrollTop = thread.scrollHeight;
+    }
+  } catch (e) {
+    thread.textContent = e.message || "Không tải được lịch sử hỏi.";
+  }
+}
+
+async function sendItemAsk() {
+  if (_askSending || !_askAttemptId || !_askItemId) return;
+  const input = $("testAskInput");
+  const thread = $("testAskThread");
+  const sendBtn = $("testAskSend");
+  const clearBtn = $("testAskClear");
+  const err = $("testAskError");
+  if (!input || !thread) return;
+
+  const q = input.value.trim();
+  if (!q) return;
+
+  if (err) err.hidden = true;
+  const userBubble = el("div", "ask-bubble is-question", q);
+  thread.append(userBubble);
+  input.value = "";
+
+  const botBubble = el("div", "ask-bubble md-answer", "Đang trả lời...");
+  thread.append(botBubble);
+  thread.scrollTop = thread.scrollHeight;
+
+  _askSending = true;
+  if (sendBtn) sendBtn.disabled = true;
+
+  try {
+    const d = await api(
+      `/api/attempts/${encodeURIComponent(_askAttemptId)}/items/${encodeURIComponent(_askItemId)}/ask`,
+      send("POST", { question: q })
+    );
+    botBubble.innerHTML = renderAnswer(d.text);
+    if (window.MathJax && MathJax.typesetPromise) {
+      await MathJax.typesetPromise([botBubble]).catch(() => {});
+    }
+    if (clearBtn) clearBtn.hidden = false;
+  } catch (e) {
+    botBubble.textContent = e.message || "Có lỗi khi gửi câu hỏi.";
+    botBubble.classList.add("is-error");
+    if (!input.value) input.value = q;
+  } finally {
+    _askSending = false;
+    if (sendBtn) sendBtn.disabled = false;
+    thread.scrollTop = thread.scrollHeight;
+  }
+}
+
+async function clearItemAsk() {
+  if (!_askAttemptId || !_askItemId) return;
+  if (!confirm("Xóa toàn bộ câu hỏi của bạn về câu này?")) return;
+  const thread = $("testAskThread");
+  const clearBtn = $("testAskClear");
+  try {
+    await api(`/api/attempts/${encodeURIComponent(_askAttemptId)}/items/${encodeURIComponent(_askItemId)}/ask`, { method: "DELETE" });
+    if (thread) thread.textContent = "";
+    if (clearBtn) clearBtn.hidden = true;
+  } catch (e) {
+    alert(e.message || "Không thể xóa hội thoại.");
+  }
 }
 
 function attachSafeLinks(container) {
@@ -1306,6 +1463,13 @@ document.addEventListener("DOMContentLoaded", () => {
   attachSafeLinks($("testDetailDesc"));
   attachSafeLinks($("screen-test-run"));
   attachSafeLinks($("screen-test-result"));
+
+  const askForm = $("testAskForm");
+  if (askForm) askForm.addEventListener("submit", e => { e.preventDefault(); sendItemAsk(); });
+  const askInput = $("testAskInput");
+  if (askInput) askInput.addEventListener("keydown", e => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendItemAsk(); }
+  });
 });
 
 Object.assign(ACTIONS, {
@@ -1368,6 +1532,13 @@ Object.assign(ACTIONS, {
   "test-font-dec": () => { changeFont(-1); },
   "test-font-inc": () => { changeFont(1); },
   "test-speech": () => { toggleSpeech(); },
+  "test-item-ask": el => { openItemAsk(el.dataset.itemId); },
+  "test-item-feedback": el => { reportItem(el.dataset.itemId); },
+  "test-ask-clear": () => { clearItemAsk(); },
+  "test-ask-close": () => {
+    const dia = $("testAskDialog");
+    if (dia) dia.close();
+  },
   "result-filter": el => {
     _resultFilter = el.dataset.filter || "all";
     $$(".filter-tab").forEach(tab => {

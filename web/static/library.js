@@ -68,6 +68,7 @@ function renderLibrary(d) {
     if (p.tests && p.tests.length > 0) {
       const doTests = actionButton("Làm đề", "lib-tests", p.id, p.first_lesson ? "btn-studio-secondary" : "btn-studio-primary");
       act.append(doTests);
+      act.append(actionButton("Thống kê đề", "lib-test-stats", p.id));
     }
     act.append(actionButton("Share", "lib-share", p.id), actionButton(`Góp ý (${p.feedback})`, "lib-feedback", p.id),
       actionButton("Tải bản mới", "lib-upload"), actionButton("Xóa", "lib-delete", p.id, "btn-studio-secondary btn-danger-soft"));
@@ -363,10 +364,57 @@ async function openFeedbackList(id) {
   });
 }
 
+// ---------- Practice test stats the author sees ----------
+async function openTestStats(id) {
+  const p = state.library.mine.find(x => x.id === id);
+  const dia = $("testStatsDialog");
+  const title = $("testStatsTitle");
+  const box = $("testStatsList");
+  if (!dia || !box) return;
+  title.textContent = p ? p.title : "Thống kê";
+  box.textContent = "Đang tải...";
+  dia.showModal();
+
+  try {
+    const d = await api(`/api/packages/${encodeURIComponent(id)}/test-stats`);
+    box.textContent = (d.tests && d.tests.length) ? "" : "Chưa có dữ liệu thống kê.";
+    (d.tests || []).forEach(t => {
+      const sec = el("article", "test-stat-group fb-card");
+      sec.append(el("h3", "stream-title", t.title));
+      if (t.items && t.items.length > 0) {
+        t.items.forEach(it => {
+          const itemCard = el("div", "test-stat-item");
+          const pills = el("div", "meta-pills");
+          pills.append(el("span", "meta-pill", `${it.people} người làm`));
+          pills.append(el("span", "meta-pill is-warn", `Tỉ lệ sai: ${it.wrong_percent}%`));
+          if (it.top_wrong) {
+            pills.append(el("span", "meta-pill", `Sai nhiều nhất: ${it.top_wrong.text}`));
+          }
+          itemCard.append(pills);
+          const qBox = el("div", "test-desc-box");
+          qBox.innerHTML = renderTestText(it.question);
+          itemCard.append(qBox);
+          sec.append(itemCard);
+        });
+      }
+      if (t.hidden > 0) {
+        sec.append(el("p", "dock-note", `Còn ${t.hidden} câu chưa đủ 3 người.`));
+      } else if (!t.items || t.items.length === 0) {
+        sec.append(el("p", "dock-note", "Chưa có câu nào có đủ 3 người làm."));
+      }
+      box.append(sec);
+    });
+  } catch (err) {
+    box.textContent = err.message || "Không tải được thống kê.";
+  }
+}
+
 Object.assign(ACTIONS, {
   "lib-upload": openUpload,
   "lib-share": b => openShare(b.dataset.id),
   "lib-feedback": b => openFeedbackList(b.dataset.id),
+  "lib-test-stats": b => openTestStats(b.dataset.id),
+  "test-stats-close": () => $("testStatsDialog").close(),
   "lib-delete": b => deletePackage(b.dataset.id),
   "lib-ask": async b => {
     if (!confirm("Xin bật ô Hỏi? Admin sẽ đọc nội dung bài. Khi được duyệt, nội dung bài và câu hỏi của người học được gửi tới nhà cung cấp AI.")) return;

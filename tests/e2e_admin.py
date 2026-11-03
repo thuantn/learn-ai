@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import zipfile
 
 from playwright.sync_api import sync_playwright
 
@@ -42,6 +43,32 @@ class FakeAI(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *a):
         pass
+
+
+def add_test_to_zip(dest):
+    test_json = json.dumps({
+        "title": "Đề Quản Trị",
+        "description": "Mô tả đề",
+        "items": [{
+            "id": "q1",
+            "type": "single",
+            "domain": "Chung",
+            "question": "Câu hỏi trong bộ đề?",
+            "options": [{"id": "A", "text": "Lựa chọn đúng", "why": "Vì đây là đáp án đúng"}, {"id": "B", "text": "Lựa chọn sai", "why": "Vì sai"}],
+            "correct": ["A"],
+            "explanation": "Lời giải chi tiết cho câu hỏi.",
+        }]
+    })
+    with zipfile.ZipFile(dest, "r") as zin:
+        entries = {item.filename: zin.read(item.filename) for item in zin.infolist()}
+    pkg = json.loads(entries["package.json"].decode("utf-8"))
+    pkg["tests"] = ["t1"]
+    entries["package.json"] = json.dumps(pkg).encode("utf-8")
+    entries["tests/t1.json"] = test_json.encode("utf-8")
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zout:
+        for fname, data in entries.items():
+            zout.writestr(fname, data)
+    return dest
 
 
 def new_page(br, errs, width=1280, height=900):
@@ -108,7 +135,7 @@ def run(br, base, temp, work):
     # The author asks for Ask.
     an.goto(base + "/#library")
     an.wait_for_selector("#screen-library.active")
-    commit_upload(an, make_zip(work / "v1.zip", "bai-hoi", f"Bài {XSS}", content="# Bản một\n"))
+    commit_upload(an, add_test_to_zip(make_zip(work / "v1.zip", "bai-hoi", f"Bài {XSS}", content="# Bản một\n")))
     an.wait_for_selector("#libMine .stream-row")
     pid = call(an, "GET", "/api/packages")
     pid = json.loads(pid["text"])["mine"][0]["id"]
@@ -158,15 +185,17 @@ def run(br, base, temp, work):
     boss.wait_for_selector("#reviewDialog[open]")
     check("review shows what the AI will read", "Bản một" in boss.inner_text("#reviewBody"))
     shown = boss.inner_text("#reviewBody")
+    check("admin duyệt thấy đề", "Bộ đề: Đề Quản Trị" in shown and "Câu hỏi trong bộ đề?" in shown and "Lựa chọn đúng" in shown and "Lời giải chi tiết" in shown)
     sample = json.loads((ROOT / "sample/package/lessons/sample/lesson.json").read_text("utf-8"))
     missing = [t for q in sample["quiz"] for t in [q["q"], *q["options"], q.get("why", "")] if t and t not in shown]
     missing += [t for t in sample["summary"] if t not in shown]
     check("review shows every quiz option and explanation", not missing, missing[:3])
     check("review states there is no Internet option", "Internet" in boss.inner_text("#reviewDialog"))
     boss.screenshot(path=str(SHOTS / "admin-review.png"))
+    boss.screenshot(path=str(SHOTS / "admin-review-1280.png"))
     an.goto(base + "/#library")
     an.wait_for_selector("#libMine .stream-row")
-    commit_upload(an, make_zip(work / "v2.zip", "bai-hoi", f"Bài {XSS}", content="# Bản hai, chưa ai đọc\n"))
+    commit_upload(an, add_test_to_zip(make_zip(work / "v2.zip", "bai-hoi", f"Bài {XSS}", content="# Bản hai, chưa ai đọc\n")))
     boss.click("#reviewApprove")
     boss.wait_for_selector("#reviewError:not([hidden])")
     check("approving text that changed is refused", "thay đổi" in boss.inner_text("#reviewError"))
@@ -287,7 +316,7 @@ def run(br, base, temp, work):
     boss.wait_for_selector("#pendingEmpty:not([hidden])")
     an.goto(base + "/#library")
     an.wait_for_selector("#libMine .stream-row")
-    commit_upload(an, make_zip(work / "v3.zip", "bai-hoi", f"Bài {XSS}", content="# Bản ba\n"))
+    commit_upload(an, add_test_to_zip(make_zip(work / "v3.zip", "bai-hoi", f"Bài {XSS}", content="# Bản ba\n")))
     boss.reload()
     boss.wait_for_selector("#pendingList .stream-row")
     check("changed text goes back to the queue", True)

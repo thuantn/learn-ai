@@ -57,10 +57,16 @@
     error.hidden = true;
     button.disabled = true;
     try {
-      const r = await fetch(`/api/lessons/${encodeURIComponent(current.lesson)}/feedback`, {
+      const url = current.url || `/api/lessons/${encodeURIComponent(current.lesson)}/feedback`;
+      const body = { kind, text: dlg.querySelector("#fbText").value };
+      if (!current.url) {
+        body.target_type = current.targetType;
+        body.target_id = current.targetId;
+      }
+      const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, target_type: current.targetType, target_id: current.targetId, text: dlg.querySelector("#fbText").value }),
+        body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || "Chưa gửi được. Thử lại sau.");
@@ -73,11 +79,12 @@
     button.disabled = false;
   }
 
-  // options: lesson, targetType ("lesson", "card", "quiz"), targetId, label, kind, onSent
+  // options: url, lesson, targetType ("lesson", "card", "quiz"), targetId, label, kind, title, onSent
   window.openFeedback = function (options) {
     const dlg = document.getElementById("feedbackDialog") || build();
     current = { targetType: "lesson", targetId: "", ...options };
     pick(options.kind || "comment");
+    dlg.querySelector("#fbTitle").textContent = options.title || "Góp ý cho bài học";
     dlg.querySelector("#fbTarget").textContent = options.label || "";
     dlg.querySelector("#fbText").value = "";
     dlg.querySelector("#fbError").hidden = true;
