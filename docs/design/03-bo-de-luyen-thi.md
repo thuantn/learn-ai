@@ -1,6 +1,6 @@
 # Bộ đề luyện thi: thiết kế
 
-Trạng thái: **đã qua phản biện (DeepSeek, GLM, agy, một builder), đang xây.** Chủ dự án dặn review xong thì làm tiếp.
+Trạng thái: **đã qua phản biện (DeepSeek, GLM, agy, một builder), đã xây xong.**
 
 Trong tài liệu, **[Chủ dự án]** là điều người dùng đã quyết định. **[Đề xuất]** là quyết định của người viết, chủ dự án có thể đổi.
 
@@ -194,11 +194,11 @@ Câu sai của bộ đề không thành flashcard. [Đề xuất] Câu 4 lựa c
 - `test_revision`: id, key bộ đề, mã nội dung, toàn bộ đề. Không đổi sau khi tạo. **Không dùng lại `package_lessons` hay `lesson_for`, vì các hàm đó trả cả đáp án.** Dữ liệu gửi cho trình duyệt đi qua một hàm riêng chỉ lấy phần được phép.
 - `test_attempt`: id ngẫu nhiên không đoán được, người làm, bộ đề, bản đề, chế độ (`exam`, `practice`, `review`), thứ tự câu và lựa chọn, giờ bắt đầu, tổng thời gian dừng, số lần dừng, lúc đang dừng, lúc nộp, điểm.
 - `test_answer`: mỗi câu của một lượt một dòng: câu đang chọn, cờ, và sau khi chấm thì đúng hay sai, mã đáp án, thời điểm.
-- `test_first_answer`: lần trả lời đầu của mỗi người với mỗi mã đáp án. Thống kê cho tác giả tính từ bảng này, nên Làm lại hay hủy lượt không làm lệch số.
+- `test_first_answer`: lần trả lời đầu của mỗi người với mỗi mã đáp án (chỉ ghi khi chấm một câu có chọn ở lượt không phải `review`, bằng `INSERT ... ON CONFLICT DO NOTHING`). Thống kê cho tác giả tính duy nhất từ bảng này, nên Làm lại hay hủy lượt (xóa `test_attempt` và `test_answer`) không làm mất lần trả lời đầu hay làm lệch số.
 - `test_pool`: người, bộ đề, id câu, mã đáp án, lúc vào, số lần đúng liên tiếp, lần đúng gần nhất.
 - Id bộ đề mang tiền tố package như mọi bảng tiến độ khác, id câu nằm dưới bộ đề. Mọi API đều lọc theo người đang đăng nhập.
 - Hội thoại Hỏi dùng `ask_message`, khóa gồm package, bộ đề và câu.
-- Xóa package hay xóa tài khoản thì xóa theo, bằng `ON DELETE CASCADE`. Bị thu hồi quyền hoặc bỏ package khỏi thư viện thì tiến độ ở lại như mọi tiến độ khác, để được share lại thì thấy lại và thống kê của tác giả không tụt; chỉ hội thoại Hỏi mất khi bỏ khỏi thư viện, như hiện nay.
+- Xóa package hay xóa tài khoản thì xóa theo, bằng `ON DELETE CASCADE`, không cần thêm vào `purge_rows`. Bị thu hồi quyền hoặc bỏ package khỏi thư viện thì tiến độ ở lại như mọi tiến độ khác, để được share lại thì thấy lại và thống kê của tác giả không tụt; chỉ hội thoại Hỏi mất khi bỏ khỏi thư viện, như hiện nay.
 
 ## 13. Bắt buộc kiểm tra
 

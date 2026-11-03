@@ -1,59 +1,106 @@
-Hãy chuyển đổi hoặc soạn bộ đề trắc nghiệm luyện thi sang định dạng JSON theo mẫu dưới đây.
+Hãy chuyển đổi tài liệu hoặc bộ câu hỏi thành bộ đề trắc nghiệm luyện thi dạng JSON theo mẫu bên dưới.
 
+Yêu cầu bắt buộc:
+1. Chỉ trả về một khối JSON duy nhất trong cặp dấu ```json và ```, không có lời mở đầu hay kết luận.
+2. Tự kiểm tra lại từng câu hỏi để đảm bảo đáp án chính xác.
+3. Mỗi lựa chọn đều phải có trường "why" giải thích vì sao lựa chọn đó đúng hoặc sai.
+4. Tuyệt đối không nhắc tới chữ cái lựa chọn (như "đáp án A", "phương án B", "cả A và B") trong câu hỏi, lựa chọn hay lời giải, vì hệ thống sẽ xáo trộn vị trí lựa chọn khi làm bài. Hãy nhắc trực tiếp nội dung phương án.
+5. Trường "domain" chỉ ghi một lĩnh vực chính, mỗi bộ đề không quá 12 lĩnh vực.
+6. Loại câu:
+   - "single": chọn đúng 1 đáp án, mảng "correct" có đúng 1 mã lựa chọn.
+   - "multi": chọn nhiều đáp án, mảng "correct" có từ 2 mã lựa chọn trở lên.
+7. Lựa chọn: từ 2 đến 8 lựa chọn, có mã id là các chữ cái in hoa liên tục từ "A" đến "H".
+8. Link trong "docs" phải bắt đầu bằng https://.
+9. Nếu bộ đề dài, hãy trả từng bộ một. Các file cùng một gói đề phải giữ nguyên trường "slug" để hệ thống tự động gộp lại khi tải lên.
+10. Đáp án đúng không được thường xuyên là lựa chọn dài nhất hay chi tiết nhất; viết các lựa chọn sai dài và hợp lý như lựa chọn đúng. Câu chọn nhiều thì số đáp án đúng nên khác nhau giữa các câu.
+11. Con số nào trong câu hỏi hay đáp án cũng phải tính lại cẩn thận.
+
+Ví dụ mẫu:
+
+```json
 {
-  "slug": "ma-bo-de",
-  "title": "Tên gói bộ đề",
-  "topic": "Chủ đề",
-  "description": "Mô tả ngắn về bộ đề",
+  "slug": "cham-soc-cay-trong-nha",
+  "title": "Kỹ thuật chăm sóc cây cảnh trong nhà",
+  "topic": "Làm vườn",
+  "description": "Bộ đề trắc nghiệm kiến thức chăm sóc và phòng bệnh cho cây cảnh trong nhà.",
   "tests": [
     {
-      "id": "de-1",
-      "title": "Đề số 1",
-      "description": "Mô tả cho đề 1",
-      "time_limit_minutes": 60,
-      "pass_percent": 70,
+      "id": "de-so-1",
+      "title": "Kiến thức tưới nước và ánh sáng",
+      "description": "Các nguyên tắc cơ bản về độ ẩm và vị trí đặt cây.",
+      "time_limit_minutes": 30,
+      "pass_percent": 75,
       "items": [
         {
           "id": "q1",
           "type": "single",
-          "domain": "Lĩnh vực chính",
-          "question": "Nội dung câu hỏi?",
+          "domain": "Tưới nước",
+          "question": "Dấu hiệu nào cho thấy cây trồng chậu trong nhà đang bị thừa nước?",
           "options": [
             {
               "id": "A",
-              "text": "Nội dung phương án A",
-              "why": "Vì sao phương án này đúng hoặc sai"
+              "text": "Lá cây giòn và mép lá cuộn tròn lên trên.",
+              "why": "Đây thường là dấu hiệu của việc thiếu nước hoặc không khí quá khô."
             },
             {
               "id": "B",
-              "text": "Nội dung phương án B",
-              "why": "Vì sao phương án này đúng hoặc sai"
+              "text": "Lá phía dưới ngả vàng, thân mềm và đất ẩm kéo dài.",
+              "why": "Thừa nước làm rễ thiếu oxy dẫn tới thối rễ, biểu hiện qua việc vàng lá dưới và cuống lá mềm."
             },
             {
               "id": "C",
-              "text": "Nội dung phương án C",
-              "why": "Vì sao phương án này đúng hoặc sai"
+              "text": "Bề mặt đất nứt nẻ và chậu cây nhẹ hơn bình thường.",
+              "why": "Đây là hiện tượng chậu cây đã khô kiệt nước."
             },
             {
               "id": "D",
-              "text": "Nội dung phương án D",
-              "why": "Vì sao phương án này đúng hoặc sai"
+              "text": "Rễ non mọc trắng và vươn đều dưới đáy chậu.",
+              "why": "Đây là dấu hiệu của bộ rễ khỏe mạnh phát triển tốt."
             }
           ],
-          "correct": ["A"],
-          "explanation": "Lời giải thích chi tiết cho toàn bộ câu hỏi.",
-          "best_practice": "Kinh nghiệm thực tế hoặc quy tắc ghi nhớ (không bắt buộc)",
-          "docs": ["https://vi.wikipedia.org/..."]
+          "correct": ["B"],
+          "explanation": "Tưới quá nhiều nước làm đất ngập úng, rễ cây không hô hấp được và dễ nhiễm nấm thối rễ. Biểu hiện rõ nhất là đất luôn sũng nước, lá dưới vàng và thân cây mềm nhũn.",
+          "best_practice": "Kiểm tra độ ẩm đất sâu khoảng hai lóng tay trước khi quyết định tưới.",
+          "docs": [
+            "https://example.com/tai-lieu/kiem-soat-do-am"
+          ]
+        },
+        {
+          "id": "q2",
+          "type": "multi",
+          "domain": "Ánh sáng",
+          "question": "Những loại cây nào sau đây phát triển tốt trong điều kiện ánh sáng tán xạ yếu trong phòng?",
+          "options": [
+            {
+              "id": "A",
+              "text": "Cây lưỡi hổ",
+              "why": "Cây lưỡi hổ có khả năng chịu bóng tốt và sinh trưởng ổn định khi ánh sáng yếu."
+            },
+            {
+              "id": "B",
+              "text": "Cây xương rồng sa mạc",
+              "why": "Xương rồng sa mạc đòi hỏi nắng gắt trực tiếp nhiều giờ mỗi ngày, thiếu nắng sẽ teo tóp."
+            },
+            {
+              "id": "C",
+              "text": "Cây trầu bà xanh",
+              "why": "Trầu bà xanh thích nghi rất tốt với điều kiện trong phòng râm mát."
+            },
+            {
+              "id": "D",
+              "text": "Cây hoa giấy",
+              "why": "Hoa giấy cần ánh sáng trực tiếp ngoài trời để phân hóa mầm hoa và phát triển cành."
+            }
+          ],
+          "correct": ["A", "C"],
+          "explanation": "Cây lưỡi hổ và trầu bà xanh là các giống cây chịu râm tốt, thích hợp bài trí ở góc phòng hoặc bàn làm việc thiếu ánh sáng trực tiếp.",
+          "best_practice": "Luân chuyển cây ra khu vực có ánh sáng tán xạ dịu mỗi tuần một lần để cây quang hợp.",
+          "docs": [
+            "https://example.com/tai-lieu/cay-trong-bong-ram"
+          ]
         }
       ]
     }
   ]
 }
-
-Quy tắc bắt buộc:
-1. `type`: "single" (chọn 1 đáp án, `correct` có đúng 1 id) hoặc "multi" (chọn nhiều đáp án, `correct` có từ 2 id trở lên).
-2. `options`: từ 2 đến 8 lựa chọn, id là các chữ cái in hoa 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'.
-3. KHÔNG nhắc tới chữ cái lựa chọn (như "Đáp án A", "chọn phương án B", "cả A và B đều đúng") trong câu hỏi, lựa chọn, giải thích hay why, vì các lựa chọn sẽ được xáo ngẫu nhiên khi người học làm bài. Hãy nhắc tới nội dung của lựa chọn.
-4. Tự kiểm tra lại từng câu để đảm bảo đáp án đúng chính xác và mỗi phương án đều có giải thích `why`.
-5. Link trong `docs` phải bắt đầu bằng `https://`.
-6. Với bộ đề lớn (trên 50 câu), hãy chia thành nhiều lần trả lời. Mỗi file là một bộ đề nhưng giữ nguyên trường "slug" để hệ thống tự động gộp lại khi tải lên.
+```

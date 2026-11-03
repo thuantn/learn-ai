@@ -119,3 +119,50 @@ def test_toolkit_needs_login(ctx):
     from test_catalog import _client
     with _client(ctx) as c:
         assert c.get("/api/toolkit.zip").status_code == 401
+
+
+
+
+def test_zip_has_the_test_format(ctx, capsys, tmp_path):
+    entry = f"{NAME}/references/practice-test-format.md"
+    assert entry in fetch(ctx, capsys, tmp_path)
+    source = pathlib.Path(ctx.main.__file__).resolve().parent.parent / "docs" / "practice-test-format.md"
+    assert (tmp_path / entry).read_text("utf-8") == source.read_text("utf-8")
+
+
+def test_skill_description_stays_short(ctx, capsys, tmp_path):
+    fetch(ctx, capsys, tmp_path)
+    text = (tmp_path / NAME / "SKILL.md").read_text("utf-8")
+    desc = dict(line.split(": ", 1) for line in text.split("---\n")[1].strip().splitlines())["description"]
+    assert len(desc) <= 200, len(desc)
+    assert re.search(r"practice test|bộ đề", desc, re.IGNORECASE)
+
+
+def json_block(text, after=""):
+    """The first ```json block after the heading `after`."""
+    m = re.search(r"```json[^\S\r\n]*\r?\n(.*?)\r?\n```", text[text.index(after):], re.DOTALL)
+    assert m, "no json block"
+    return m.group(1)
+
+
+def assert_example_passes(example, tmp_path, ctx, capsys):
+    from app import contract
+    path = tmp_path / "example.json"
+    path.write_text(example, encoding="utf-8")
+    problems = contract.unpack_test_file(path, tmp_path / "out")
+    assert problems == [], [f"{p.code}: {p.message}" for p in problems]
+    # the same file through the skill's own checker, as an author with only Python would run it
+    fetch(ctx, capsys, tmp_path / "zip")
+    run = learnpkg(tmp_path / "zip" / NAME, "validate", str(path), cwd=tmp_path)
+    assert run.returncode == 0, run.stdout + run.stderr
+
+
+def test_prompt_example_passes_the_checker(ctx, capsys, tmp_path):
+    root = pathlib.Path(__file__).resolve().parent.parent
+    assert_example_passes(json_block((root / "web" / "static" / "test-prompt.txt").read_text("utf-8")), tmp_path, ctx, capsys)
+
+
+def test_format_doc_example_passes_the_checker(ctx, capsys, tmp_path):
+    root = pathlib.Path(__file__).resolve().parent.parent
+    doc = (root / "docs" / "practice-test-format.md").read_text("utf-8")
+    assert_example_passes(json_block(doc, "## Single-File Example"), tmp_path, ctx, capsys)

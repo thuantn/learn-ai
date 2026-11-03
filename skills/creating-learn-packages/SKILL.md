@@ -1,13 +1,35 @@
 ---
 name: creating-learn-packages
-description: Use when someone wants to create or update a lesson or course for the learn-ai app, turn notes or documents into a lesson, or make the zip its Library accepts.
+description: Use when someone wants to create or update a lesson, course or practice test (bộ đề) for the learn-ai app, turn notes or documents into one, or make the file its Library accepts.
 ---
 
-# Tạo package bài học
+# Tạo package bài học và bộ đề luyện thi
 
-Mọi đường dẫn dưới đây tính từ thư mục chứa file này, gọi là `SKILL_DIR`. Định dạng và cầu nối: `references/lesson-format.md`, đọc trước khi viết. Khung chạy được: `template/`. Công cụ: `scripts/learnpkg.py`, chỉ cần Python; bài có audio thì cần thêm `pip install mutagen`.
+Mọi đường dẫn dưới đây tính từ thư mục chứa file này, gọi là `SKILL_DIR`. Định dạng bài học: `references/lesson-format.md`. Định dạng bộ đề: `references/practice-test-format.md`. Đọc định dạng tương ứng trước khi viết. Khung bài mẫu: `template/`. Công cụ: `scripts/learnpkg.py`, chỉ cần Python; bài có audio thì cần thêm `pip install mutagen`.
 
 `SKILL_DIR` có thể chỉ đọc. Tạo bài ở thư mục làm việc, không tạo trong `SKILL_DIR`, và gọi công cụ bằng đường dẫn đầy đủ, kể cả các lệnh ghi trong `references/lesson-format.md`. Lệnh Python có thể là `python3`.
+
+## Practice tests (Bộ đề luyện thi)
+
+Định dạng chi tiết: `references/practice-test-format.md`.
+
+Khi người dùng muốn tạo bộ đề luyện thi hoặc ngân hàng câu hỏi:
+1. Soạn một file `.json` duy nhất chứa thông tin gói (`slug`, `title`, `topic`, `description`) và danh sách `tests`, mỗi bộ đề chứa danh sách câu hỏi `items`.
+2. Tuân thủ quy tắc trong `references/practice-test-format.md`:
+   - Loại câu `"single"` (1 đáp án đúng) hoặc `"multi"` (từ 2 đáp án đúng trở lên).
+   - Mỗi lựa chọn có `id` (chữ cái hoa A–H), `text` và `why` (giải thích vì sao đúng hoặc sai).
+   - Tuyệt đối không nhắc chữ cái lựa chọn (A, B...) trong nội dung để xáo thứ tự an toàn.
+   - Khi sửa đáp án, sửa danh sách `correct`, không hoán đổi nội dung chữ giữa các lựa chọn.
+   - Mỗi bộ đề không quá 12 lĩnh vực chính (`domain`).
+   - Đáp án đúng không được hay là lựa chọn dài nhất hay chi tiết nhất; câu chọn nhiều thì số đáp án đúng khác nhau giữa các câu.
+   - Mọi con số trong câu hỏi và đáp án phải tính lại bằng cách chạy phép tính.
+   - Không ghi giờ làm bài nếu tác giả không nói; điểm đạt mặc định 70.
+   - Bộ đề không có Điểm dừng như bài học. Không đưa thông tin nội bộ, tên người, tên khách hàng trong tài liệu nguồn vào đề.
+3. Kiểm tra file đề:
+   ```
+   python SKILL_DIR/scripts/learnpkg.py validate de.json
+   ```
+4. Báo tác giả số câu, số câu chọn một và chọn nhiều, các lĩnh vực, rồi gửi file `.json`. Tác giả tải lên thẳng ở hộp Tải lên trong Thư viện, không cần zip, và đọc lại đề ở bước xác nhận trước khi cài.
 
 ## Khi chạy trong Claude app hoặc web
 
