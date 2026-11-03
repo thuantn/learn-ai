@@ -1,4 +1,5 @@
 """Passwords, sessions and failed-login limits."""
+import asyncio
 import hashlib
 import math
 import os
@@ -15,6 +16,7 @@ from . import db
 # OWASP minimum for Argon2id.
 HASHER = PasswordHasher(time_cost=2, memory_cost=19456, parallelism=1)
 DUMMY_HASH = HASHER.hash(secrets.token_urlsafe(32))
+HASHING = asyncio.Semaphore(2)  # each Argon2 call uses about 19 MB
 
 MIN_PASSWORD, MAX_PASSWORD = 15, 256
 IDLE_SECONDS, ABSOLUTE_SECONDS = 7 * 86400, 30 * 86400

@@ -2,6 +2,7 @@
 import logging
 import pathlib
 import shutil
+import time
 import zipfile
 
 from .contract import Problem, check_package, errors
@@ -131,7 +132,7 @@ def safe_extract(zip_path, dest):
 
                 if dest.exists():
                     shutil.rmtree(dest)
-                tmp_dir.rename(dest)
+                _rename(tmp_dir, dest)
                 return []
         except zipfile.BadZipFile as exc:
             log.warning("bad zip file: %s", exc)
@@ -141,3 +142,13 @@ def safe_extract(zip_path, dest):
         log.warning("extract failed: %s", exc)
         cleanup()
         return [Problem("upload.zip", "zip_bad", "Lỗi khi giải nén.")]
+
+
+def _rename(src, dest):
+    # On Windows a virus scanner may still hold files just extracted; the rename then fails for a moment.
+    for wait in (0.05, 0.1, 0.2, 0.4, 0.8, 1.6):
+        try:
+            return src.rename(dest)
+        except PermissionError:
+            time.sleep(wait)
+    return src.rename(dest)

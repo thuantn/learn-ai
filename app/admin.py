@@ -4,8 +4,9 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 
-from . import ai, catalog, db, uploads
+from . import accounts, ai, auth, catalog, db, uploads
 from .web_util import bad, page, read_json
 
 log = logging.getLogger("learn")
@@ -46,6 +47,7 @@ async def overview():
     with db.connect() as c:
         lesson_counts = {r["package_id"]: r["n"] for r in c.execute("SELECT package_id, count(*) n FROM package_lessons GROUP BY package_id")}
         test_counts = {r["package_id"]: r["n"] for r in c.execute("SELECT package_id, count(*) n FROM package_tests GROUP BY package_id")}
+        session_counts = {r["user"]: r["n"] for r in c.execute("SELECT user, count(*) n FROM sessions GROUP BY user")}
         packages = [{
             "id": r["id"], "title": r["title"], "owner": r["owner"], "size_bytes": r["size_bytes"], "version": r["version"],
             "ask_status": r["ask_status"], "updated_at": r["updated_at"], "lessons": lesson_counts.get(r["id"], 0),
@@ -59,8 +61,10 @@ async def overview():
         users = [{
             "name": r["name"], "admin": bool(r["is_admin"]), "used": r["used"],
             "quota": r["quota_bytes"] if r["quota_bytes"] is not None else uploads.DEFAULT_QUOTA,
+            "must_change": bool(r["must_change"]), "created_at": r["created_at"],
+            "sessions": session_counts.get(r["name"], 0),
         } for r in c.execute(
-            """SELECT u.name, u.is_admin, u.quota_bytes, coalesce(sum(p.size_bytes),0) used
+            """SELECT u.name, u.is_admin, u.quota_bytes, u.must_change, u.created_at, coalesce(sum(p.size_bytes),0) used
                FROM users u LEFT JOIN packages p ON p.owner=u.name GROUP BY u.name ORDER BY used DESC LIMIT ?""", (LIST_LIMIT,))]
         entries = [dict(r) for r in c.execute("SELECT actor, action, target, detail, at FROM admin_log ORDER BY id DESC LIMIT ?", (LIST_LIMIT,))]
     return {
@@ -69,6 +73,103 @@ async def overview():
         "ai": ai.status(),
         "providers": [{"id": k, "label": v["label"], "zdr": v["zdr"], "default_model": v["default_model"]} for k, v in ai.PROVIDERS.items()],
     }
+
+
+def _change_and_log(change, name, actor, action):
+    with db.connect() as c:
+        password = change(c, name)
+        db.admin_log(c, actor, action, name)
+    return password
+
+
+async def _hashing(change, name, actor, action):
+    # Argon2 is slow and memory hungry: off the event loop, under the same limit as login.
+    async with auth.HASHING:
+        return await asyncio.to_thread(_change_and_log, change, name, actor, action)
+
+
+@router.post("/api/admin/users")
+async def add_user(request: Request):
+    data = await read_json(request) or {}
+    raw_name = data.get("name")
+    if not isinstance(raw_name, str):
+        return bad(400, "name_bad", "Email không hợp lệ.")
+    name = raw_name.strip().lower()
+    if len(name) > 254 or not accounts.NAME_RE.match(name):
+        return bad(400, "name_bad", "Email không hợp lệ.")
+    try:
+        password = await _hashing(accounts.create, name, request.state.user, "user_add")
+    except ValueError:
+        return bad(409, "exists", "Tài khoản này đã tồn tại.")
+    return JSONResponse({"name": name, "password": password}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/api/admin/users/{name}/reset-password")
+async def reset_user_password(name: str, request: Request):
+    name = name.strip().lower()
+    if name == request.state.user:
+        return bad(409, "self", "Dùng chức năng Đổi mật khẩu để tự đổi mật khẩu của mình.")
+    try:
+        password = await _hashing(accounts.reset, name, request.state.user, "user_reset")
+    except ValueError:
+        return bad(404, "user", "Không có tài khoản này.")
+    return JSONResponse({"name": name, "password": password}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/api/admin/users/{name}/end-sessions")
+async def end_user_sessions(name: str, request: Request):
+    name = name.strip().lower()
+    with db.connect() as c:
+        if not c.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone():
+            return bad(404, "user", "Không có tài khoản này.")
+        c.execute("DELETE FROM sessions WHERE user=?", (name,))
+        db.admin_log(c, request.state.user, "user_end_sessions", name)
+    return {"ok": True}
+
+
+@router.put("/api/admin/users/{name}")
+async def update_user(name: str, request: Request):
+    name = name.strip().lower()
+    data = await read_json(request) or {}
+    has_admin = "admin" in data
+    has_quota = "quota_gb" in data
+    if not has_admin and not has_quota:
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+    admin_val = data.get("admin")
+    if has_admin and not isinstance(admin_val, bool):
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+    quota_val = data.get("quota_gb")
+    if has_quota and (isinstance(quota_val, bool) or not isinstance(quota_val, int) or not (1 <= quota_val <= 100)):
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+    if has_admin and name == request.state.user and not admin_val:
+        return bad(409, "self", "Không thể tự gỡ quyền admin của chính mình.")
+    with db.connect() as c:
+        if not c.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone():
+            return bad(404, "user", "Không có tài khoản này.")
+        if has_admin:
+            c.execute("UPDATE users SET is_admin=? WHERE name=?", (int(admin_val), name))
+            db.admin_log(c, request.state.user, "set_admin", name, "on" if admin_val else "off")
+        if has_quota:
+            c.execute("UPDATE users SET quota_bytes=? WHERE name=?", (quota_val * 1024 ** 3, name))
+            db.admin_log(c, request.state.user, "set_quota", name, f"{quota_val} GB")
+    return {"ok": True}
+
+
+@router.delete("/api/admin/users/{name}")
+async def remove_user(name: str, request: Request):
+    name = name.strip().lower()
+    data = await read_json(request) or {}
+    confirm = data.get("confirm")
+    if confirm != name:
+        return bad(400, "confirm", "Xác nhận tên tài khoản không đúng.")
+    if name == request.state.user:
+        return bad(409, "self", "Không thể tự xóa tài khoản của chính mình.")
+    with db.connect() as c:
+        if not c.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone():
+            return bad(404, "user", "Không có tài khoản này.")
+        db.admin_log(c, request.state.user, "user_remove", name)
+    await asyncio.to_thread(accounts.remove, name)
+    return {"ok": True}
 
 
 @router.get("/api/admin/packages/{package_id}/review")

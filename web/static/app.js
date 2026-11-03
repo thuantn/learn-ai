@@ -684,6 +684,8 @@ function joinFromLink() {
 // After DOMContentLoaded, so library.js has run and its screen can open straight away.
 document.addEventListener("DOMContentLoaded", () => (async function init() {
   state.me = await api("/api/me");
+  const isAdmin = !!(state.me && state.me.admin);
+  document.querySelectorAll("[data-admin-link]").forEach(a => a.hidden = !isAdmin);
   renderFlow();
   renderSpeed();
   renderThemeLabel();

@@ -53,7 +53,7 @@ ASK_PER_MINUTE = 6
 SHARE_PER_MINUTE, JOIN_PER_MINUTE = 30, 10
 FEEDBACK_MAX, FEEDBACK_PER_HOUR = 2000, 20
 FEEDBACK_KINDS = ("comment", "wrong", "abuse")
-HASHING = asyncio.Semaphore(2)  # each Argon2 call uses about 19 MB
+HASHING = auth.HASHING
 AI_SLOTS = asyncio.Semaphore(4)  # a call can hold a worker thread for 90 s, and every request needs one for its session
 PUBLIC_PATHS = {"/login", "/healthz", "/favicon.ico"}
 PASSWORD_PATHS = {"/change-password", "/api/change-password", "/logout"}
@@ -173,8 +173,6 @@ async def login_page(request: Request):
 
 @app.get("/change-password")
 async def change_password_page(request: Request):
-    if not request.state.must_change:
-        return RedirectResponse("/", 303)
     return page("password.html")
 
 
@@ -225,21 +223,61 @@ async def logout(request: Request):
 
 @app.post("/api/change-password")
 async def change_password(request: Request):
-    if not request.state.must_change:
-        return bad(403, "not_needed", "Tài khoản này không cần đổi mật khẩu. Hãy liên hệ quản trị.")
     data = await read_json(request)
     new = str((data or {}).get("password", ""))
     user = request.state.user
+    if request.state.must_change:
+        problem = auth.password_problem(user, new)
+        if problem:
+            return bad(400, "weak", problem)
+        with db.connect() as c:
+            old = c.execute("SELECT pw_hash FROM users WHERE name=?", (user,)).fetchone()["pw_hash"]
+        async with HASHING:
+            same = await asyncio.to_thread(auth.verify_password, old, new)
+            if same:
+                return bad(400, "weak", "Mật khẩu mới phải khác mật khẩu tạm.")
+            hashed = await asyncio.to_thread(auth.hash_password, new)
+        with db.connect() as c:
+            c.execute("UPDATE users SET pw_hash=?, must_change=0 WHERE name=?", (hashed, user))
+            c.execute("DELETE FROM sessions WHERE user=?", (user,))
+            token = auth.new_session(c, user)
+        log.info("password changed name=%r", user)
+        resp = JSONResponse({"ok": True})
+        set_session_cookie(resp, token)
+        return resp
+
+    ip = client_ip(request)
+    if limiter.blocked(ip, user):
+        log.warning("change password blocked name=%r ip=%s", user, ip)
+        return bad(429, "wait", "Thử lại sau ít phút.")
+
+    current = (data or {}).get("current")
+    with db.connect() as c:
+        row = c.execute("SELECT pw_hash FROM users WHERE name=?", (user,)).fetchone()
+    stored = row["pw_hash"] if row else None
+
+    ok = False
+    if isinstance(current, str) and 0 < len(current) <= auth.MAX_PASSWORD:
+        async with HASHING:
+            ok = await asyncio.to_thread(auth.verify_password, stored, current)
+
+    if not ok:
+        limiter.failed(ip, user)
+        log.warning("change password failed name=%r ip=%s", user, ip)
+        return bad(400, "current", "Mật khẩu hiện tại không đúng.")
+
+    limiter.succeeded(ip, user)
+
     problem = auth.password_problem(user, new)
     if problem:
         return bad(400, "weak", problem)
-    with db.connect() as c:
-        old = c.execute("SELECT pw_hash FROM users WHERE name=?", (user,)).fetchone()["pw_hash"]
+
+    if new == current:
+        return bad(400, "weak", "Mật khẩu mới phải khác mật khẩu hiện tại.")
+
     async with HASHING:
-        same = await asyncio.to_thread(auth.verify_password, old, new)
-        if same:
-            return bad(400, "weak", "Mật khẩu mới phải khác mật khẩu tạm.")
         hashed = await asyncio.to_thread(auth.hash_password, new)
+
     with db.connect() as c:
         c.execute("UPDATE users SET pw_hash=?, must_change=0 WHERE name=?", (hashed, user))
         c.execute("DELETE FROM sessions WHERE user=?", (user,))

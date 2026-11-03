@@ -9,22 +9,29 @@
   python -m app.cli set-quota NAME GB
 """
 import pathlib
-import secrets
 import shutil
 import sys
-import time
 
-from . import auth, catalog, db, uploads
+from . import accounts, catalog, db, uploads
 
-
-def temp_password():
-    return secrets.token_urlsafe(18)
+temp_password = accounts.temp_password
 
 
 def main(argv):
     db.init()
     cmd = argv[0] if argv else ""
     name = argv[1].strip().lower() if len(argv) > 1 else ""
+    if cmd == "remove-user":
+        if not name:
+            print(__doc__)
+            return 2
+        try:
+            accounts.remove(name)
+        except ValueError:
+            print("Không có tài khoản này.")
+            return 1
+        print("Đã xóa tài khoản và dữ liệu.")
+        return 0
     with db.connect() as c:
         if cmd == "list-users":
             for r in c.execute("SELECT name, must_change FROM users ORDER BY name"):
@@ -65,39 +72,32 @@ def main(argv):
                 return 0
             print(__doc__)
             return 2
-        if not name or cmd not in ("add-user", "reset-password", "end-sessions", "remove-user"):
+        if not name or cmd not in ("add-user", "reset-password", "end-sessions"):
             print(__doc__)
             return 2
-        exists = c.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone()
         if cmd == "add-user":
-            if exists:
+            try:
+                password = accounts.create(c, name)
+            except ValueError:
                 print("Tài khoản đã có. Dùng reset-password.")
                 return 1
-            password = temp_password()
-            c.execute("INSERT INTO users(name, pw_hash, must_change, created_at) VALUES(?,?,1,?)", (name, auth.hash_password(password), time.time()))
             print(f"Mật khẩu tạm của {name}: {password}")
             return 0
-        if not exists:
+        if not c.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone():
             print("Không có tài khoản này.")
             return 1
         if cmd == "reset-password":
-            password = temp_password()
-            c.execute("UPDATE users SET pw_hash=?, must_change=1 WHERE name=?", (auth.hash_password(password), name))
-            c.execute("DELETE FROM sessions WHERE user=?", (name,))
+            try:
+                password = accounts.reset(c, name)
+            except ValueError:
+                print("Không có tài khoản này.")
+                return 1
             print(f"Mật khẩu tạm của {name}: {password}")
-        elif cmd == "end-sessions":
+            return 0
+        if cmd == "end-sessions":
             c.execute("DELETE FROM sessions WHERE user=?", (name,))
             print("Đã kết thúc mọi phiên.")
-        else:
-            owned = [r["id"] for r in c.execute("SELECT id FROM packages WHERE owner=?", (name,))]
-            for package_id in owned:
-                catalog.purge_rows(c, package_id)
-            c.execute("DELETE FROM users WHERE name=?", (name,))
-            print("Đã xóa tài khoản và dữ liệu.")
-    # After the commit above, so a failed delete keeps the files.
-    if cmd == "remove-user":
-        for package_id in owned:
-            shutil.rmtree(catalog.packages_dir() / package_id, ignore_errors=True)
+            return 0
     return 0
 
 

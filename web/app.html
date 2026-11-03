@@ -66,7 +66,11 @@
         <button type="button" class="stage-tab" data-act="go" data-to="flashcard" data-nav="flashcard">3. Flashcard</button>
         <a class="stage-tab" data-article href="#">Bài đầy đủ</a>
       </nav>
-      <div class="top-bar-right"><button type="button" class="btn-logout" data-act="logout">Đăng xuất</button></div>
+      <div class="top-bar-right">
+        <a class="btn-logout" href="/change-password">Đổi mật khẩu</a>
+        <a class="btn-logout" href="/admin" data-admin-link hidden>Quản trị</a>
+        <button type="button" class="btn-logout" data-act="logout">Đăng xuất</button>
+      </div>
     </header>
 
     <main class="stage-body">
@@ -535,6 +539,8 @@
   </div>
   <div class="drawer-footer">
     <button type="button" class="drawer-action-btn" data-act="theme" data-theme-label>Nền Sáng</button>
+    <a class="drawer-action-btn" href="/change-password">Đổi mật khẩu</a>
+    <a class="drawer-action-btn" href="/admin" data-admin-link hidden>Quản trị</a>
     <button type="button" class="drawer-action-btn logout" data-act="logout">Đăng xuất</button>
   </div>
 </aside>

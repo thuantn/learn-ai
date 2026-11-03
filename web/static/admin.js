@@ -27,9 +27,13 @@ const TEST_RESULT = {
 const LOG_LABEL = {
   ask_approve: "Duyệt ô Hỏi", ask_reject: "Từ chối ô Hỏi", ask_off: "Tắt ô Hỏi", package_remove: "Gỡ package",
   ai_save: "Đổi nhà cung cấp hoặc khóa AI", set_admin: "Đổi quyền admin", set_quota: "Đổi hạn mức",
+  user_add: "Tạo tài khoản", user_reset: "Đặt lại mật khẩu", user_end_sessions: "Đăng xuất mọi nơi", user_remove: "Xoá tài khoản",
 };
 let providers = [];
 let reviewing = null;
+let me = null;
+let removingUser = null;
+let credCurrent = null;
 
 function el(tag, className, text) {
   const e = document.createElement(tag);
@@ -42,6 +46,12 @@ function button(label, className, onClick) {
   const b = el("button", className, label);
   b.type = "button";
   b.addEventListener("click", onClick);
+  return b;
+}
+
+function userButton(label, act, onClick, className) {
+  const b = button(label, className || "btn-studio-secondary", onClick);
+  b.dataset.userAct = act;
   return b;
 }
 
@@ -115,7 +125,79 @@ function renderAi(status, list) {
   $("aiWarn").hidden = !warnings.length;
 }
 
+async function resetPassword(name) {
+  const d = await api(`/api/admin/users/${encodeURIComponent(name)}/reset-password`, send("POST", {}));
+  openCredDialog(d.name, d.password);
+  await load();
+}
+
+async function endSessions(name) {
+  await api(`/api/admin/users/${encodeURIComponent(name)}/end-sessions`, send("POST", {}));
+  await load();
+}
+
+async function toggleAdmin(name, turnOn) {
+  await api(`/api/admin/users/${encodeURIComponent(name)}`, send("PUT", { admin: turnOn }));
+  await load();
+}
+
+async function setQuota(name, currentBytes) {
+  const currentGb = Math.round(currentBytes / (1024 ** 3)) || 5;
+  const ans = window.prompt("Nhập hạn mức dung lượng (1..100 GB):", String(currentGb));
+  if (ans === null) return;
+  const gb = parseInt(ans.trim(), 10);
+  if (isNaN(gb) || gb < 1 || gb > 100) {
+    throw new Error("Hạn mức phải từ 1 đến 100 GB.");
+  }
+  await api(`/api/admin/users/${encodeURIComponent(name)}`, send("PUT", { quota_gb: gb }));
+  await load();
+}
+
+function openRemoveDialog(name) {
+  removingUser = name;
+  $("userRemoveConfirm").value = "";
+  $("userRemoveGo").disabled = true;
+  $("userRemoveDialog").showModal();
+}
+
+function openCredDialog(name, password) {
+  $("credName").textContent = name;
+  $("credPass").value = password;
+  const invite = "Chào bạn,\n\nTài khoản Học AI của bạn đã sẵn sàng.\nĐịa chỉ: " + location.origin + "/login\nTên đăng nhập: " + name + "\nMật khẩu tạm: " + password + "\n\nLần đầu đăng nhập, app sẽ yêu cầu bạn đặt mật khẩu mới.";
+  $("credMail").href = "mailto:" + encodeURIComponent(name) + "?subject=" + encodeURIComponent("Tài khoản Học AI") + "&body=" + encodeURIComponent(invite);
+  credCurrent = { name, password, invite };
+  $("credDialog").showModal();
+}
+
+function clearCredDialog() {
+  $("credPass").value = "";
+  $("credMail").removeAttribute("href");
+  $("credName").textContent = "";
+  credCurrent = null;
+}
+
+async function copyText(text, fallbackElem) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (e) {}
+  }
+  if (fallbackElem && fallbackElem.select) {
+    fallbackElem.select();
+    document.execCommand("copy");
+  } else {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.append(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+}
+
 async function load() {
+  if (!me) me = await api("/api/me");
   const d = await api("/api/admin/overview");
   fill("pendingList", "pendingEmpty", d.pending, p => row(p.title, [pills([
     p.owner,
@@ -124,6 +206,32 @@ async function load() {
   ])], [
     button("Đọc và duyệt", "btn-studio-primary", guarded(() => openReview(p.id))),
   ]));
+  fill("userList", null, d.users, u => {
+    const isSelf = !!(me && (me.id === u.name || me.name === u.name));
+    const pillList = [
+      isSelf && "Bạn",
+      u.admin && "Admin",
+      u.must_change && "Chưa đổi mật khẩu tạm",
+      `${u.sessions || 0} phiên`,
+      `${size(u.used)} / ${size(u.quota)}`,
+    ];
+    let actions = [];
+    if (isSelf) {
+      actions = [
+        userButton("Đăng xuất mọi nơi", "end", guarded(() => endSessions(u.name))),
+        userButton("Hạn mức", "quota", guarded(() => setQuota(u.name, u.quota))),
+      ];
+    } else {
+      actions = [
+        userButton("Đặt lại mật khẩu", "reset", guarded(() => resetPassword(u.name))),
+        userButton("Đăng xuất mọi nơi", "end", guarded(() => endSessions(u.name))),
+        userButton(u.admin ? "Tắt admin" : "Bật admin", "admin", guarded(() => toggleAdmin(u.name, !u.admin))),
+        userButton("Hạn mức", "quota", guarded(() => setQuota(u.name, u.quota))),
+        userButton("Xoá", "remove", guarded(() => openRemoveDialog(u.name)), "btn-studio-secondary btn-danger-soft"),
+      ];
+    }
+    return row(u.name, [pills(pillList)], actions);
+  });
   renderAi(d.ai, d.providers);
   fill("abuseList", "abuseEmpty", d.abuse, x => row(x.title, [
     pills([`Tác giả: ${x.owner}`, `Người báo: ${x.author || "đã xóa"}`, when(x.created_at)]),
@@ -145,7 +253,6 @@ async function load() {
       ASK_LABEL[p.ask_status],
     ])], actions);
   });
-  fill("userList", null, d.users, u => row(u.name, [pills([u.admin && "Admin", `${size(u.used)} / ${size(u.quota)}`])]));
   fill("logList", "logEmpty", d.log, x => row(LOG_LABEL[x.action] || x.action, [pills([x.actor, when(x.at)]), el("p", "fb-body", [x.target, x.detail].filter(Boolean).join(" · "))]));
 }
 
@@ -263,5 +370,46 @@ document.addEventListener("DOMContentLoaded", () => {
     const d = await api("/api/admin/ai/test", send("POST", {}));
     $("aiResult").textContent = TEST_RESULT[d.code] || "Không rõ kết quả.";
   }));
+
+  $("userAddForm").addEventListener("submit", guarded(async () => {
+    const input = $("userAddName");
+    const name = input.value.trim().toLowerCase();
+    if (!name) return;
+    const d = await api("/api/admin/users", send("POST", { name }));
+    input.value = "";
+    openCredDialog(d.name, d.password);
+    await load();
+  }));
+
+  $("userRemoveConfirm").addEventListener("input", () => {
+    $("userRemoveGo").disabled = $("userRemoveConfirm").value !== removingUser;
+  });
+  $("userRemoveCancel").addEventListener("click", () => {
+    $("userRemoveDialog").close();
+  });
+  $("userRemoveGo").addEventListener("click", guarded(async () => {
+    const name = removingUser;
+    const confirm = $("userRemoveConfirm").value;
+    $("userRemoveDialog").close();
+    await api(`/api/admin/users/${encodeURIComponent(name)}`, send("DELETE", { confirm }));
+    await load();
+  }));
+
+  $("credClose").addEventListener("click", () => {
+    $("credDialog").close();
+    clearCredDialog();
+  });
+  $("credDialog").addEventListener("close", clearCredDialog);
+  const copied = (id, label) => {
+    $(id).textContent = "Đã chép";
+    setTimeout(() => { $(id).textContent = label; }, 2000);
+  };
+  $("credCopy").addEventListener("click", guarded(async () => {
+    if (credCurrent) { await copyText(credCurrent.password, $("credPass")); copied("credCopy", "Chép mật khẩu"); }
+  }));
+  $("credCopyInvite").addEventListener("click", guarded(async () => {
+    if (credCurrent) { await copyText(credCurrent.invite); copied("credCopyInvite", "Chép lời mời"); }
+  }));
+
   load().catch(showError);
 });

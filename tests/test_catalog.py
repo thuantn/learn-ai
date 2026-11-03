@@ -43,10 +43,11 @@ def _fresh_db_module(tmp_path, monkeypatch, **extra_env):
         "app.practice",
         "app.practice_api",
         "app.web_util",
+        "app.accounts",
     ):
         sys.modules.pop(name, None)
         # `from . import x` reads the package attribute first, so it must go too.
-        if "app" in sys.modules and name in ("app.practice", "app.practice_api"):
+        if "app" in sys.modules and name in ("app.practice", "app.practice_api", "app.accounts"):
             sys.modules["app"].__dict__.pop(name.split(".")[1], None)
     for k, v in extra_env.items():
         monkeypatch.setenv(k, v)

@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -347,6 +348,101 @@ def run(br, base, temp, work):
     check("removal log carries no key", KEY not in boss.content())
     binh.reload()
     check("removed package is gone for the learner", binh.locator("iframe.lesson-iframe").count() == 0 and "Không mở được" in binh.locator("h1").inner_text())
+
+    # Account management and password flow
+    dung = "dung@example.com"
+    boss.set_viewport_size({"width": 1280, "height": 900})
+    boss.goto(base + "/admin")
+    boss.wait_for_selector("#userAddForm")
+    boss.fill("#userAddName", dung)
+    boss.click("#userAddForm button[type=submit]")
+    boss.wait_for_selector("#credDialog[open]")
+    temp_pw = boss.input_value("#credPass")
+    check("temp password is not empty", bool(temp_pw))
+    mail_href = boss.get_attribute("#credMail", "href") or ""
+    check("credMail contains encoded name and password", urllib.parse.quote(dung) in mail_href and urllib.parse.quote(temp_pw) in mail_href)
+    boss.click("#credClose")
+    boss.wait_for_selector("#credDialog", state="hidden")
+    check("credPass is empty after closing dialog", boss.input_value("#credPass") == "")
+
+    # New browser context logs in as that user, sent to /change-password, sets a password
+    dung_pg = new_page(br, errs)
+    dung_pg.goto(base + "/login")
+    dung_pg.fill("#loginUser", dung)
+    dung_pg.fill("#loginPass", temp_pw)
+    dung_pg.click("#submitBtn")
+    dung_pg.wait_for_url(f"{base}/change-password*")
+    check("first login redirects to change-password", "/change-password" in dung_pg.url)
+    pw1 = "mat-khau-dung-lan-1-dai-hon-15"
+    dung_pg.fill("#pass1", pw1)
+    dung_pg.fill("#pass2", pw1)
+    dung_pg.click("#submitBtn")
+    dung_pg.wait_for_url(f"{base}/")
+    check("first password change lands on /", dung_pg.url == f"{base}/")
+
+    # Opens app, clicks "Đổi mật khẩu", page shows #pass0
+    dung_pg.click("a.btn-logout:has-text('Đổi mật khẩu')")
+    dung_pg.wait_for_url(f"{base}/change-password*")
+    dung_pg.wait_for_selector("#pass0Block:not([hidden])")
+    check("voluntary change shows pass0", dung_pg.locator("#pass0").is_visible())
+
+    # Wrong current password shows an error
+    dung_pg.fill("#pass0", "mat-khau-sai-hoan-toan")
+    pw2 = "mat-khau-dung-lan-2-dai-hon-15"
+    dung_pg.fill("#pass1", pw2)
+    dung_pg.fill("#pass2", pw2)
+    dung_pg.click("#submitBtn")
+    dung_pg.wait_for_selector("#alertBox.error")
+    check("wrong current password shows error", "không đúng" in dung_pg.inner_text("#alertBox"))
+
+    # Right current password succeeds and lands on "/"
+    dung_pg.fill("#pass0", pw1)
+    dung_pg.click("#submitBtn")
+    dung_pg.wait_for_selector("#alertBox.ok")
+    dung_pg.wait_for_url(f"{base}/", timeout=5000)
+    check("voluntary password change lands on /", dung_pg.url == f"{base}/")
+
+    # Logs in again with the new password
+    call(dung_pg, "POST", "/logout")
+    dung_pg.goto(base + "/login")
+    dung_pg.fill("#loginUser", dung)
+    dung_pg.fill("#loginPass", pw2)
+    dung_pg.click("#submitBtn")
+    dung_pg.wait_for_url(f"{base}/")
+    check("login with second new password succeeds", dung_pg.url == f"{base}/")
+
+    # The password page at 360 px, while the account still exists
+    dung_pg.set_viewport_size({"width": 360, "height": 740})
+    dung_pg.goto(base + "/change-password")
+    dung_pg.wait_for_selector("#pass0Block:not([hidden])")
+    sw_pw = dung_pg.evaluate("document.documentElement.scrollWidth")
+    wide_pw = dung_pg.evaluate("""[...document.querySelectorAll('body *')].filter(e => e.getBoundingClientRect().right > 360).map(e => e.tagName + '#' + e.id + '.' + e.className + ' ' + Math.round(e.getBoundingClientRect().right))""")
+    check("password page scrollWidth <= 360", sw_pw <= 360, (sw_pw, wide_pw[:6]))
+    dung_pg.screenshot(path=str(SHOTS / "password-360.png"), full_page=True)
+
+    # Admin removes account through #userRemoveDialog and row is gone
+    boss.goto(base + "/admin")
+    boss.wait_for_selector(f"#userList .stream-row:has-text('{dung}')")
+    boss.click(f"#userList .stream-row:has-text('{dung}') button[data-user-act=remove]")
+    boss.wait_for_selector("#userRemoveDialog[open]")
+    check("remove go is disabled before typing confirm", boss.locator("#userRemoveGo").is_disabled())
+    boss.fill("#userRemoveConfirm", dung)
+    check("remove go is enabled when email matches", not boss.locator("#userRemoveGo").is_disabled())
+    boss.click("#userRemoveGo")
+    boss.wait_for_selector("#userRemoveDialog", state="hidden")
+    boss.wait_for_selector(f"#userList .stream-row:has-text('{dung}')", state="detached")
+    check("user row is gone after removal", boss.locator(f"#userList .stream-row:has-text('{dung}')").count() == 0)
+    check("removed user's open session stops working", call(dung_pg, "GET", "/api/me")["status"] == 401)
+
+    # Screenshots of the admin page and the password page at 360 px with a scrollWidth <= 360 check
+
+    boss.set_viewport_size({"width": 360, "height": 740})
+    boss.goto(base + "/admin")
+    boss.wait_for_selector("#userList .stream-row")
+    sw_admin = boss.evaluate("document.documentElement.scrollWidth")
+    check("admin scrollWidth <= 360", sw_admin <= 360, sw_admin)
+    boss.screenshot(path=str(SHOTS / "admin-accounts-360.png"), full_page=True)
+
     check("no page errors or CSP blocks", not errs, errs[:4])
 
 

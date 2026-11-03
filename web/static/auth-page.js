@@ -39,22 +39,51 @@ if (loginForm) loginForm.addEventListener("submit", async e => {
 });
 
 const passwordForm = $("passwordForm");
-if (passwordForm) passwordForm.addEventListener("submit", async e => {
-  e.preventDefault();
-  const p1 = $("pass1").value, p2 = $("pass2").value;
-  if (p1.length < 15) return show("Mật khẩu phải có ít nhất 15 ký tự.");
-  if (p1 !== p2) return show("Hai ô mật khẩu không khớp. Hãy nhập lại.");
-  const btn = $("submitBtn");
-  btn.disabled = true;
-  try {
-    const { status, data } = await post("/api/change-password", { password: p1 });
-    if (status === 200) { location.href = "/" + keepJoin; return; }
-    show(data.error || "Có lỗi. Thử lại sau.");
-  } catch (err) {
-    show("Không kết nối được. Kiểm tra mạng rồi thử lại.");
-  }
-  btn.disabled = false;
-});
+let isVoluntary = false;
+if (passwordForm) {
+  fetch("/api/me").then(r => {
+    if (r.status === 200) {
+      isVoluntary = true;
+      const p0 = $("pass0Block");
+      if (p0) p0.hidden = false;
+      const pill = document.querySelector(".status-pill");
+      if (pill) pill.textContent = "Tài khoản";
+      const lead = document.querySelector(".auth-lead");
+      if (lead) lead.textContent = "Đổi mật khẩu của bạn. Sau khi đổi, các thiết bị khác sẽ phải đăng nhập lại.";
+      const back = $("backHome");
+      if (back) back.hidden = false;
+    }
+  }).catch(() => {});
+
+  passwordForm.addEventListener("submit", async e => {
+    e.preventDefault();
+    const p1 = $("pass1").value, p2 = $("pass2").value;
+    if (p1.length < 15) return show("Mật khẩu phải có ít nhất 15 ký tự.");
+    if (p1 !== p2) return show("Hai ô mật khẩu không khớp. Hãy nhập lại.");
+    const body = { password: p1 };
+    if (isVoluntary) {
+      body.current = $("pass0") ? $("pass0").value : "";
+    }
+    const btn = $("submitBtn");
+    btn.disabled = true;
+    try {
+      const { status, data } = await post("/api/change-password", body);
+      if (status === 200) {
+        if (isVoluntary) {
+          show("Đã đổi mật khẩu.", "ok");
+          setTimeout(() => { location.href = "/"; }, 1000);
+          return;
+        }
+        location.href = "/" + keepJoin;
+        return;
+      }
+      show(data.error || "Có lỗi. Thử lại sau.", status === 429 ? "wait" : "error");
+    } catch (err) {
+      show("Không kết nối được. Kiểm tra mạng rồi thử lại.");
+    }
+    btn.disabled = false;
+  });
+}
 
 const leave = $("leave");
 if (leave) leave.addEventListener("click", async () => {

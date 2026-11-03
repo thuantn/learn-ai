@@ -25,6 +25,18 @@
     <p class="dock-note" id="pendingEmpty" hidden>Không có package nào đang chờ.</p>
   </section>
 
+  <section aria-labelledby="usersTitle">
+    <h2 class="list-heading lib-second" id="usersTitle">Tài khoản</h2>
+    <form class="flow-strip admin-form" id="userAddForm">
+      <label class="auth-label" for="userAddName"><span>Email</span></label>
+      <div class="auth-input-box"><input type="email" id="userAddName" class="auth-input" autocomplete="off" spellcheck="false" required></div>
+      <div class="stream-actions">
+        <button type="submit" class="btn-studio-primary">Tạo tài khoản</button>
+      </div>
+    </form>
+    <div class="lesson-stream" id="userList"></div>
+  </section>
+
   <section aria-labelledby="aiTitle">
     <h2 class="list-heading lib-second" id="aiTitle">Nhà cung cấp AI</h2>
     <form class="flow-strip admin-form" id="aiForm">
@@ -56,11 +68,6 @@
     <p class="dock-note" id="packagesEmpty" hidden>Chưa có package nào.</p>
   </section>
 
-  <section aria-labelledby="usersTitle">
-    <h2 class="list-heading lib-second" id="usersTitle">Tài khoản và dung lượng</h2>
-    <div class="lesson-stream" id="userList"></div>
-  </section>
-
   <section aria-labelledby="logTitle">
     <h2 class="list-heading lib-second" id="logTitle">Nhật ký</h2>
     <div class="lesson-stream" id="logList"></div>
@@ -80,6 +87,40 @@
       <button type="button" class="btn-studio-secondary" id="reviewClose">Đóng</button>
       <button type="button" class="btn-studio-secondary btn-danger-soft" id="reviewReject">Từ chối</button>
       <button type="button" class="btn-studio-primary" id="reviewApprove">Duyệt</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="lesson-dialog" id="userRemoveDialog" aria-labelledby="userRemoveTitle">
+  <div class="lesson-dialog-form">
+    <h2 class="list-heading" id="userRemoveTitle">Xoá tài khoản</h2>
+    <p class="lesson-dialog-text">Tài khoản này, các package và tiến độ học sẽ bị xoá vĩnh viễn.</p>
+    <label class="auth-label" for="userRemoveConfirm"><span>Nhập lại email để xác nhận</span></label>
+    <div class="auth-input-box">
+      <input type="text" id="userRemoveConfirm" class="auth-input" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="lesson-dialog-buttons">
+      <button type="button" class="btn-studio-secondary" id="userRemoveCancel">Huỷ</button>
+      <button type="button" class="btn-studio-primary btn-danger-soft" id="userRemoveGo" disabled>Xoá</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="lesson-dialog" id="credDialog" aria-labelledby="credTitle">
+  <div class="lesson-dialog-form">
+    <h2 class="list-heading" id="credTitle">Thông tin tài khoản</h2>
+    <p class="dock-note" id="credName"></p>
+    <div class="auth-input-box">
+      <input id="credPass" class="auth-input" readonly aria-label="Mật khẩu tạm">
+    </div>
+    <div class="stream-actions">
+      <button type="button" class="btn-studio-primary" id="credCopy">Chép mật khẩu</button>
+      <button type="button" class="btn-studio-secondary" id="credCopyInvite">Chép lời mời</button>
+      <a class="btn-studio-secondary" id="credMail" href="#">Soạn email mời</a>
+    </div>
+    <p class="dock-note admin-note">Mật khẩu chỉ hiện một lần. Lời mời có mật khẩu tạm, nên chỉ gửi đúng người.</p>
+    <div class="lesson-dialog-buttons">
+      <button type="button" class="btn-studio-secondary" id="credClose">Đóng</button>
     </div>
   </div>
 </dialog>

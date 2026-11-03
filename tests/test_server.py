@@ -193,7 +193,9 @@ def test_temp_password_must_be_changed_first(ctx, capsys):
         assert c.post("/api/change-password", json={"password": GOOD}).status_code == 200
         assert c.cookies.get("__Host-session") != old
         assert c.get("/api/me").status_code == 200
-        assert c.post("/api/change-password", json={"password": GOOD + "x"}).status_code == 403
+        # Once changed, a further change needs the current password
+        again = c.post("/api/change-password", json={"password": GOOD + "x"})
+        assert again.status_code == 400 and again.json()["code"] == "current"
     with client(main) as stale:
         stale.cookies.set("__Host-session", old)
         assert stale.get("/api/me").status_code == 401
