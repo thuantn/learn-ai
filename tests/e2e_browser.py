@@ -86,7 +86,7 @@ def wait_js(page, expr, seconds=15):
 
 def watch(pg, errs):
     pg.on("pageerror", lambda e: errs.append("js: " + str(e)))
-    pg.on("console", lambda m: errs.append(f"console: {m.text[:50]} @ {m.location} on {pg.url} screen={pg.evaluate('document.querySelector(\".screen.active\")?.id')}") if m.type == "error" and "401" not in m.text and "purify.min.js" not in m.location["url"] else None)  # purify trips CSP while stripping the hostile onerror the stub sends; "cannot run script" checks it never ran
+    pg.on("console", lambda m: errs.append(f"console: {m.text[:50]} @ {m.location} on {pg.url}") if m.type == "error" and "401" not in m.text and "purify.min.js" not in m.location["url"] else None)  # purify trips CSP while stripping the hostile onerror the stub sends; "cannot run script" checks it never ran
 
 
 try:

@@ -148,6 +148,7 @@ function renderLesson() {
   $$("[data-lesson-short]").forEach(e => { e.textContent = lessonNo(l); });
   $$("[data-article]").forEach(a => { a.href = l.page; });
   $("homePill").textContent = statusText(l);
+  $("homePill").classList.toggle("is-done", l.status === "done");
   $("home-title").textContent = `${lessonNo(l)}: ${l.title}`;
   const homeStart = $("homeCta")?.querySelector("[data-act=start]");
   if (homeStart) {

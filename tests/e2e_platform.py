@@ -390,6 +390,22 @@ def run(br, base, temp, good, audio, bad, good2=None):
                 .filter(e => e.offsetParent && e.getBoundingClientRect().height < 40).map(e => e.textContent.trim()).slice(0, 4)""")
             check(f"{screen} {width}px touch targets", not small, small)
             a.screenshot(path=str(SHOTS / f"{screen}-{width}.png"))
+    # Tab bar items and top bar brand checks.
+    a.set_viewport_size({"width": 390, "height": 844})
+    a.goto(f"{base}/#home")
+    a.wait_for_selector("#screen-home.active")
+    has_ask = a.locator(".capsule-ask-btn").is_visible()
+    want_tabs = ["Trang đầu", "Thư viện", "Bộ đề", "Hỏi", "Tài khoản"] if has_ask else ["Trang đầu", "Thư viện", "Bộ đề", "Tài khoản"]
+    tab_items = [e.inner_text().strip() for e in a.locator(".mobile-floating-capsule > *").all() if e.is_visible()]
+    check("tab bar shows exact items at 390px", tab_items == want_tabs, f"items={tab_items}, want={want_tabs}")
+    a.locator(".mobile-floating-capsule [data-nav=library]").click()
+    a.wait_for_selector("#screen-library.active")
+    check("clicking Thư viện activates #screen-library", a.locator("#screen-library.active").count() == 1)
+    check("Thư viện item marked aria-current", a.locator(".mobile-floating-capsule [data-nav=library]").get_attribute("aria-current") == "page")
+    a.set_viewport_size({"width": 1280, "height": 900})
+    a.wait_for_timeout(200)
+    check("at 1280 px the top bar contains .topbar-brand", a.locator(".unified-top-bar .topbar-brand").is_visible())
+
     a.set_viewport_size({"width": 360, "height": 740})
     a.goto(base + "/#library")
     a.wait_for_selector("#libMine .stream-row")
