@@ -925,6 +925,21 @@ async def package_feedback(package_id: str, request: Request):
 
 # ---------- Upload ----------
 
+async def stage_upload(user: str, raw_path: pathlib.Path, kind: str = "zip", already_begun: bool = False):
+    if not already_begun and not uploads.begin(user):
+        return bad(429, "busy", "Đang có file khác được tải lên. Thử lại sau.")
+    try:
+        info = await asyncio.to_thread(uploads.prepare, raw_path, user, kind)
+    finally:
+        raw_path.unlink(missing_ok=True)
+        uploads.end(user)
+    if "dir" not in info:
+        return JSONResponse({"code": info["code"], "problems": info["problems"]}, status_code=413 if info["code"] == "quota" else 400)
+    upload_id = uploads.keep(user, info)
+    log.info("upload staged user=%r slug=%r size=%d", user, info["slug"], info["size"])
+    return {"upload_id": upload_id, **{k: info[k] for k in ("title", "slug", "lessons", "tests", "is_update", "removed", "warnings", "size")}}
+
+
 @app.post("/api/uploads")
 async def upload_package(request: Request):
     user = request.state.user
@@ -954,16 +969,113 @@ async def upload_package(request: Request):
             return bad(413, "too_large", "File tải lên quá lớn.")
         except (ClientDisconnect, asyncio.TimeoutError):
             return bad(400, "interrupted", "Tải lên bị ngắt giữa chừng. Thử lại.")
-        info = await asyncio.to_thread(uploads.prepare, raw_path, user, kind)
+        return await stage_upload(user, raw_path, kind, already_begun=True)
     finally:
-        if raw_path:
+        if raw_path and raw_path.exists():
             raw_path.unlink(missing_ok=True)
         uploads.end(user)
-    if "dir" not in info:
-        return JSONResponse({"code": info["code"], "problems": info["problems"]}, status_code=413 if info["code"] == "quota" else 400)
-    upload_id = uploads.keep(user, info)
-    log.info("upload staged user=%r slug=%r size=%d", user, info["slug"], info["size"])
-    return {"upload_id": upload_id, **{k: info[k] for k in ("title", "slug", "lessons", "tests", "is_update", "removed", "warnings", "size")}}
+
+
+@app.post("/api/uploads/parts")
+async def start_parts_upload(request: Request):
+    user = request.state.user
+    data = await read_json(request)
+    size = data.get("size") if isinstance(data, dict) else None
+    if not isinstance(size, int) or isinstance(size, bool) or size < 1 or size > bundle.MAX_ZIP:
+        return bad(413, "too_large", "File tải lên quá lớn.")
+    if await asyncio.to_thread(uploads.disk_low):
+        return bad(507, "disk", "Máy chủ sắp hết dung lượng. Báo quản trị.")
+
+    uploads.expire()
+    for s_id, s_info in list(uploads.part_sessions.items()):
+        if s_info["user"] == user:
+            uploads.drop_parts_session(s_id)
+
+    other_users = {s["user"] for s in uploads.part_sessions.values() if s["user"] != user}
+    if len(other_users) >= uploads.MAX_PART_SESSIONS:
+        return bad(429, "busy", "Đang có file khác được tải lên. Thử lại sau.")
+
+    session = secrets.token_urlsafe(18)
+    raw_path = uploads.staging_dir() / f"{secrets.token_hex(12)}.zip"
+
+    def _create_empty(p, sz):
+        with open(p, "wb") as f:
+            f.truncate(sz)
+
+    await asyncio.to_thread(_create_empty, raw_path, size)
+
+    parts = (size + uploads.PART_SIZE - 1) // uploads.PART_SIZE
+    uploads.part_sessions[session] = {
+        "session": session,
+        "user": user,
+        "path": raw_path,
+        "size": size,
+        "parts": parts,
+        "part_size": uploads.PART_SIZE,
+        "received": set(),
+        "created": time.time(),
+    }
+    return {"session": session, "part_size": uploads.PART_SIZE, "parts": parts}
+
+
+@app.put("/api/uploads/parts/{session}/{index}")
+async def upload_part(session: str, index: str, request: Request):
+    user = request.state.user
+    ps = uploads.get_parts_session(session, user)
+    if not ps:
+        return bad(404, "upload", "Bản tải lên đã hết hạn. Tải lại file.")
+    try:
+        idx = int(index)
+    except ValueError:
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+    if idx < 0 or idx >= ps["parts"]:
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+
+    if idx == ps["parts"] - 1:
+        expected_size = ps["size"] - idx * ps["part_size"]
+    else:
+        expected_size = ps["part_size"]
+
+    offset = idx * ps["part_size"]
+    try:
+        written = await uploads.receive(request.stream(), ps["path"], limit=expected_size, offset=offset)
+        if written != expected_size:
+            ps["received"].discard(idx)
+            return bad(400, "input", "Dữ liệu không hợp lệ.")
+    except uploads.TooLarge:
+        ps["received"].discard(idx)
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+    except (ClientDisconnect, asyncio.TimeoutError):
+        ps["received"].discard(idx)
+        return bad(400, "interrupted", "Tải lên bị ngắt giữa chừng. Thử lại.")
+
+    ps["received"].add(idx)
+    return {"ok": True}
+
+
+@app.post("/api/uploads/parts/{session}/finish")
+async def finish_parts_upload(session: str, request: Request):
+    user = request.state.user
+    ps = uploads.get_parts_session(session, user)
+    if not ps:
+        return bad(404, "upload", "Bản tải lên đã hết hạn. Tải lại file.")
+    missing = [i for i in range(ps["parts"]) if i not in ps["received"]]
+    if missing:
+        return JSONResponse({"code": "missing", "missing": missing}, status_code=409)
+    if not uploads.begin(user):
+        return bad(429, "busy", "Đang có file khác được tải lên. Thử lại sau.")
+    uploads.part_sessions.pop(session, None)
+    return await stage_upload(user, ps["path"], "zip", already_begun=True)
+
+
+@app.delete("/api/uploads/parts/{session}")
+async def cancel_parts_upload(session: str, request: Request):
+    user = request.state.user
+    ps = uploads.get_parts_session(session, user)
+    if not ps:
+        return bad(404, "upload", "Bản tải lên đã hết hạn. Tải lại file.")
+    uploads.drop_parts_session(session)
+    return {"ok": True}
 
 
 @app.post("/api/uploads/{upload_id}/commit")

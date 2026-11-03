@@ -15,10 +15,13 @@ MAX_ACTIVE_TOTAL = 4
 CHUNK_TIMEOUT = 60
 TOTAL_TIMEOUT = 1800
 MAX_PROBLEMS = 50
+PART_SIZE = 2 * 1024 * 1024
+MAX_PART_SESSIONS = 8
 
 # One worker, so plain dicts are enough. Everything here is lost on restart, and startup clears .staging.
 stages = {}
 active = {}
+part_sessions = {}
 
 
 class TooLarge(Exception):
@@ -34,6 +37,7 @@ def staging_dir() -> pathlib.Path:
 def clear_staging() -> None:
     shutil.rmtree(catalog.packages_dir() / ".staging", ignore_errors=True)
     staging_dir()
+    part_sessions.clear()
 
 
 def begin(user: str) -> bool:
@@ -51,14 +55,17 @@ def disk_low() -> bool:
     return shutil.disk_usage(staging_dir()).free < MIN_FREE_BYTES
 
 
-async def receive(stream, path, chunk_timeout=None, total_timeout=None, limit=None) -> int:
+async def receive(stream, path, chunk_timeout=None, total_timeout=None, limit=None, offset=None) -> int:
     """Writes the request body to path, counting bytes because Content-Length can lie."""
     chunk_timeout = CHUNK_TIMEOUT if chunk_timeout is None else chunk_timeout
     deadline = time.monotonic() + (TOTAL_TIMEOUT if total_timeout is None else total_timeout)
     max_bytes = bundle.MAX_ZIP if limit is None else limit
     size = 0
     chunks = stream.__aiter__()
-    with open(path, "wb") as f:
+    mode = "r+b" if offset is not None else "wb"
+    with open(path, mode) as f:
+        if offset is not None:
+            f.seek(offset)
         while True:
             wait = min(chunk_timeout, deadline - time.monotonic())
             try:
@@ -143,11 +150,28 @@ def drop(upload_id: str) -> None:
         shutil.rmtree(stage["dir"], ignore_errors=True)
 
 
+def drop_parts_session(session_id: str) -> None:
+    ps = part_sessions.pop(session_id, None)
+    if ps:
+        path = ps.get("path")
+        if path:
+            pathlib.Path(path).unlink(missing_ok=True)
+
+
 def expire(now=None) -> None:
     now = time.time() if now is None else now
     for upload_id, stage in list(stages.items()):
         if now - stage["created"] > STAGE_TTL and not stage["committing"]:
             drop(upload_id)
+    for session_id, ps in list(part_sessions.items()):
+        if now - ps["created"] > STAGE_TTL:
+            drop_parts_session(session_id)
+
+
+def get_parts_session(session_id: str, user: str) -> dict | None:
+    expire()
+    ps = part_sessions.get(session_id)
+    return ps if ps and ps["user"] == user else None
 
 
 def keep(user: str, info: dict) -> str:

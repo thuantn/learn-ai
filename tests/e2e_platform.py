@@ -161,8 +161,22 @@ def run(br, base, temp, good, audio, bad):
     a.click("#upError [data-act=up-close]")
 
     # A good zip needs the checkbox.
+    parts_puts = []
+    a.on("request", lambda r: parts_puts.append(r.url) if r.method == "PUT" and "/api/uploads/parts/" in r.url else None)
+    dropped = []
+
+    def drop_first_part(route):
+        # The tunnel cuts requests at random: the first try of part 0 fails, the page must send it again.
+        if route.request.method == "PUT" and route.request.url.endswith("/0") and not dropped:
+            dropped.append(route.request.url)
+            return route.abort("connectionreset")
+        route.continue_()
+    a.route("**/api/uploads/parts/**", drop_first_part)
     upload(a, good)
-    a.wait_for_selector("#upConfirm:not([hidden])")
+    a.wait_for_selector("#upConfirm:not([hidden])", timeout=30000)
+    a.unroute("**/api/uploads/parts/**")
+    part0 = [u for u in parts_puts if u.endswith("/0")]
+    check("dialog upload used PUT parts, resent the dropped part and reached confirm", dropped and len(part0) >= 2 and a.locator("#upConfirm").is_visible(), parts_puts)
     check("confirm is locked until the box is ticked", a.locator("#upCommit").is_disabled())
     box = a.locator("#uploadDialog").bounding_box()
     check("dialog is centred", abs(box["x"] + box["width"] / 2 - 640) < 2, box)

@@ -419,3 +419,241 @@ def test_package_count_cap(ctx, capsys):
         assert update.status_code == 200, update.text
         assert commit(c, update.json()["upload_id"]).status_code == 200
         assert first["package_id"]
+
+
+def multipart_package(ctx, name="mp"):
+    root = _make_package(ctx.tmp / name, cards=CARDS)
+    # ~4.5 MB dummy data produces 3 parts when PART_SIZE is 2 MB
+    # an mp3 outside the lesson tracks is neither size-capped nor parsed, so random bytes pass validation
+    (root / "lessons" / "demo" / "page" / "filler.mp3").write_bytes(os.urandom(4_500_000))
+    return zip_of(root)
+
+
+def start_parts(c, size):
+    return c.post("/api/uploads/parts", json={"size": size})
+
+
+def put_part(c, session, index, chunk, headers=None):
+    hdrs = {"Content-Type": "application/octet-stream"}
+    if headers:
+        hdrs.update(headers)
+    return c.put(f"/api/uploads/parts/{session}/{index}", content=chunk, headers=hdrs)
+
+
+def finish_parts(c, session):
+    return c.post(f"/api/uploads/parts/{session}/finish")
+
+
+def test_parts_in_order_and_out_of_order_installs(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        # 1. In order
+        body = multipart_package(ctx, "p_in_order")
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        assert len(parts) == 3
+
+        r = start_parts(c, len(body))
+        assert r.status_code == 200
+        s = r.json()["session"]
+        assert r.json()["parts"] == 3
+        assert r.json()["part_size"] == part_size
+
+        for i, chunk in enumerate(parts):
+            res = put_part(c, s, i, chunk)
+            assert res.status_code == 200 and res.json() == {"ok": True}
+
+        fin = finish_parts(c, s)
+        assert fin.status_code == 200
+        info = fin.json()
+        assert info["title"] == "Demo"
+        res_commit = commit(c, info["upload_id"])
+        assert res_commit.status_code == 200 and res_commit.json()["version"] == 1
+        assert len(c.get("/api/lessons").json()["lessons"]) == 1
+
+        # 2. Out of order (update version)
+        body2 = multipart_package(ctx, "p_out_order")
+        parts2 = [body2[i:i + part_size] for i in range(0, len(body2), part_size)]
+        r2 = start_parts(c, len(body2))
+        s2 = r2.json()["session"]
+
+        # Send in order: 2, 0, 1
+        for i in (2, 0, 1):
+            res = put_part(c, s2, i, parts2[i])
+            assert res.status_code == 200 and res.json() == {"ok": True}
+
+        fin2 = finish_parts(c, s2)
+        assert fin2.status_code == 200
+        assert fin2.json()["is_update"] is True
+        res_commit2 = commit(c, fin2.json()["upload_id"])
+        assert res_commit2.status_code == 200 and res_commit2.json()["version"] == 2
+
+
+def test_part_sent_twice(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        body = multipart_package(ctx, "p_dup")
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        r = start_parts(c, len(body))
+        s = r.json()["session"]
+
+        # Part 0 sent twice
+        assert put_part(c, s, 0, parts[0]).status_code == 200
+        assert put_part(c, s, 0, parts[0]).status_code == 200
+
+        # Remaining parts
+        assert put_part(c, s, 1, parts[1]).status_code == 200
+        assert put_part(c, s, 2, parts[2]).status_code == 200
+
+        fin = finish_parts(c, s)
+        assert fin.status_code == 200
+
+
+def test_wrong_size_part_and_index_out_of_range(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        body = multipart_package(ctx, "p_err")
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        r = start_parts(c, len(body))
+        s = r.json()["session"]
+
+        # Wrong size part: too short or too long
+        assert put_part(c, s, 0, parts[0][:100]).status_code == 400
+        assert put_part(c, s, 0, parts[0] + b"x").status_code == 400
+        assert put_part(c, s, 2, parts[2][:10]).status_code == 400
+        assert put_part(c, s, 2, parts[2] + b"x").status_code == 400
+
+        # Index out of range
+        assert put_part(c, s, -1, parts[0]).status_code == 400
+        assert put_part(c, s, 3, parts[0]).status_code == 400
+        assert put_part(c, s, 999, parts[0]).status_code == 400
+
+
+def test_finish_missing_part_409(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        body = multipart_package(ctx, "p_miss")
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        r = start_parts(c, len(body))
+        s = r.json()["session"]
+
+        # Send part 0 and 2, miss part 1
+        put_part(c, s, 0, parts[0])
+        put_part(c, s, 2, parts[2])
+
+        fin = finish_parts(c, s)
+        assert fin.status_code == 409
+        d = fin.json()
+        assert d["code"] == "missing"
+        assert d["missing"] == [1]
+
+        # Then sending part 1 allows finish to succeed
+        put_part(c, s, 1, parts[1])
+        assert finish_parts(c, s).status_code == 200
+
+
+def test_another_user_session_404(ctx, capsys):
+    a = _ready_client(ctx, capsys, "an")
+    b = _ready_client(ctx, capsys, "binh")
+    part_size = ctx.main.uploads.PART_SIZE
+    with a, b:
+        body = multipart_package(ctx, "p_other")
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        r = start_parts(a, len(body))
+        s = r.json()["session"]
+
+        # B tries to PUT, finish, and DELETE A's session
+        assert put_part(b, s, 0, parts[0]).status_code == 404
+        assert finish_parts(b, s).status_code == 404
+        assert b.delete(f"/api/uploads/parts/{s}").status_code == 404
+
+        # A's session is unaffected: A can complete it
+        for i, chunk in enumerate(parts):
+            assert put_part(a, s, i, chunk).status_code == 200
+        assert finish_parts(a, s).status_code == 200
+
+
+def test_new_start_replaces_old_session(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        body = multipart_package(ctx, "p_replace")
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        r1 = start_parts(c, len(body))
+        s1 = r1.json()["session"]
+
+        # User starts a new session
+        r2 = start_parts(c, len(body))
+        s2 = r2.json()["session"]
+        assert s1 != s2
+
+        # s1 is now replaced / gone
+        assert put_part(c, s1, 0, parts[0]).status_code == 404
+        # s2 is valid
+        assert put_part(c, s2, 0, parts[0]).status_code == 200
+
+
+def test_parts_size_over_max_zip_413(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    with c:
+        max_zip = ctx.main.bundle.MAX_ZIP
+        assert start_parts(c, max_zip + 1).status_code == 413
+        assert start_parts(c, 0).status_code == 413
+        assert start_parts(c, -1).status_code == 413
+        assert start_parts(c, "not_int").status_code == 413
+
+
+def test_body_larger_than_part_size_refused_with_false_content_length(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        body = multipart_package(ctx, "p_false_len")
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        r = start_parts(c, len(body))
+        s = r.json()["session"]
+
+        # Send body larger than part_size with Content-Length claiming part_size
+        oversized = parts[0] + b"extra_byte"
+        hdrs = {"Content-Length": str(part_size)}
+        res = put_part(c, s, 0, oversized, headers=hdrs)
+        assert res.status_code == 400
+
+
+def test_parts_file_gone_after_finish(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    part_size = ctx.main.uploads.PART_SIZE
+    with c:
+        body = multipart_package(ctx, "p_gone")
+        parts = [body[i:i + part_size] for i in range(0, len(body), part_size)]
+        r = start_parts(c, len(body))
+        s = r.json()["session"]
+
+        for i, chunk in enumerate(parts):
+            put_part(c, s, i, chunk)
+
+        st_before = staging(ctx)
+        # Verify a .zip staging file exists while upload was in progress
+        assert any(p.endswith(".zip") for p in st_before)
+
+        fin = finish_parts(c, s)
+        assert fin.status_code == 200
+
+        # After finish, the raw zip parts file is gone from staging
+        st_after = staging(ctx)
+        assert not any(p.endswith(".zip") for p in st_after)
+
+
+def test_invalid_finish_ends_the_session_and_removes_the_file(ctx, capsys):
+    c = _ready_client(ctx, capsys)
+    with c:
+        body = os.urandom(3_000_000)  # not a zip
+        s = start_parts(c, len(body)).json()["session"]
+        part_size = ctx.main.uploads.PART_SIZE
+        for i in range(0, 2):
+            assert put_part(c, s, i, body[i * part_size:(i + 1) * part_size]).status_code == 200
+        assert finish_parts(c, s).status_code == 400
+        assert finish_parts(c, s).status_code == 404
+        assert not any(p.endswith(".zip") for p in staging(ctx))

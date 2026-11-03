@@ -1,7 +1,7 @@
 "use strict";
 // Library, upload, share and the author's feedback list. Text from packages only ever goes in with textContent.
 const MAX_ZIP = 90 * 1024 * 1024;
-let upload = { xhr: null, id: null, removed: [] };
+let upload = { xhr: null, controller: null, session: null, id: null, removed: [] };
 let sharing = null;
 
 function el(tag, className, text) {
@@ -118,6 +118,12 @@ function uploadStep(step) {
   ["upPick", "upBusy", "upError", "upConfirm"].forEach(id => { $(id).hidden = id !== step; });
 }
 function openUpload() {
+  if (upload.xhr) upload.xhr.abort();
+  upload.xhr = null;
+  if (upload.controller) upload.controller.abort();
+  upload.controller = null;
+  upload.session = null;
+  upload.id = null;
   $("upFile").value = "";
   if ($("upJsonText")) $("upJsonText").value = "";
   $("upPickError").hidden = true;
@@ -137,6 +143,192 @@ function showUploadProblems(problems) {
   });
   uploadStep("upError");
 }
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) return reject(new DOMException("Aborted", "AbortError"));
+    const timer = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true });
+    }
+  });
+}
+async function sendPartsFile(file, name) {
+  uploadStep("upBusy");
+  $("upBusyName").textContent = name || file.name || "package.zip";
+  $("upBusyText").textContent = "Đang tải lên";
+  $("upPercent").textContent = "0%";
+  $("upMeter").style.width = "0%";
+
+  const controller = new AbortController();
+  upload.controller = controller;
+  upload.session = null;
+
+  let sessionData;
+  try {
+    const res = await fetch("/api/uploads/parts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ size: file.size }),
+      signal: controller.signal,
+    });
+    let d = {};
+    try { d = await res.json(); } catch (_) {}
+    if (!res.ok) {
+      upload.controller = null;
+      if (d.problems) return showUploadProblems(d.problems);
+      return showUploadProblems([{ path: "", message: d.error || "Tải lên chưa được. Thử lại sau." }]);
+    }
+    sessionData = d;
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    upload.controller = null;
+    return showUploadProblems([{ path: "", message: "Mất kết nối giữa chừng. Bài đang chạy không bị ảnh hưởng, hãy thử lại." }]);
+  }
+
+  const { session, part_size, parts } = sessionData;
+  upload.session = session;
+
+  let acknowledgedBytes = 0;
+  let nextIndex = 0;
+  let fatalError = null;
+  const retryingParts = new Set();
+
+  function updateProgress() {
+    const percent = Math.min(100, Math.round(acknowledgedBytes / file.size * 100));
+    $("upPercent").textContent = percent + "%";
+    $("upMeter").style.width = percent + "%";
+  }
+
+  function updateBusyText() {
+    if (retryingParts.size > 0) {
+      const n = retryingParts.values().next().value;
+      $("upBusyText").textContent = `Đang gửi lại phần ${n}`;
+    } else {
+      $("upBusyText").textContent = acknowledgedBytes >= file.size ? "Đang kiểm tra" : "Đang tải lên";
+    }
+  }
+
+  async function uploadPart(i) {
+    let attempt = 0;
+    while (true) {
+      if (controller.signal.aborted || fatalError) throw new DOMException("Aborted", "AbortError");
+      const startByte = i * part_size;
+      const endByte = Math.min(file.size, startByte + part_size);
+      const chunk = file.slice(startByte, endByte);
+      let res;
+      try {
+        res = await fetch(`/api/uploads/parts/${session}/${i}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: chunk,
+          signal: controller.signal,
+        });
+      } catch (netErr) {
+        if (controller.signal.aborted || fatalError) throw netErr;
+        attempt++;
+        if (attempt > 6) {
+          throw new Error("Mất kết nối giữa chừng. Bài đang chạy không bị ảnh hưởng, hãy thử lại.");
+        }
+        retryingParts.add(i + 1);
+        updateBusyText();
+        await sleep(2000 * attempt, controller.signal);
+        retryingParts.delete(i + 1);
+        updateBusyText();
+        continue;
+      }
+
+      if (res.ok) {
+        acknowledgedBytes += chunk.size;
+        updateProgress();
+        updateBusyText();
+        break;
+      }
+
+      let body = null;
+      if (res.status === 400) {
+        try { body = await res.clone().json(); } catch (_) {}
+      }
+      // "interrupted" is the server timing out a slow part: the same cut the retries are for.
+      if (res.status === 408 || res.status === 429 || res.status >= 500 || (body && body.code === "interrupted")) {
+        attempt++;
+        if (attempt > 6) {
+          let d = {};
+          try { d = await res.json(); } catch (_) {}
+          throw new Error(d.error || `Tải lên phần ${i + 1} không thành công sau nhiều lần thử.`);
+        }
+        retryingParts.add(i + 1);
+        updateBusyText();
+        await sleep(2000 * attempt, controller.signal);
+        retryingParts.delete(i + 1);
+        updateBusyText();
+        continue;
+      } else {
+        let d = {};
+        try { d = await res.json(); } catch (_) {}
+        const err = new Error(d.error || "Tải lên chưa được. Thử lại sau.");
+        if (d.problems) err.problems = d.problems;
+        throw err;
+      }
+    }
+  }
+
+  async function worker() {
+    while (nextIndex < parts) {
+      if (controller.signal.aborted || fatalError) break;
+      const idx = nextIndex++;
+      try {
+        await uploadPart(idx);
+      } catch (err) {
+        if (!fatalError && err.name !== "AbortError") {
+          fatalError = err;
+          controller.abort();
+        }
+        break;
+      }
+    }
+  }
+
+  const workerCount = Math.min(3, parts);
+  const workers = [];
+  for (let w = 0; w < workerCount; w++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+
+  if (fatalError) {
+    upload.controller = null;
+    upload.session = null;
+    if (fatalError.problems) return showUploadProblems(fatalError.problems);
+    return showUploadProblems([{ path: "", message: fatalError.message || "Tải lên chưa được. Thử lại sau." }]);
+  }
+
+  if (controller.signal.aborted) {
+    return;
+  }
+
+  $("upBusyText").textContent = "Đang kiểm tra";
+  try {
+    const finRes = await fetch(`/api/uploads/parts/${session}/finish`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    upload.controller = null;
+    upload.session = null;
+    let d = {};
+    try { d = await finRes.json(); } catch (_) {}
+    if (finRes.status === 200) return showConfirm(d);
+    if (d.problems) return showUploadProblems(d.problems);
+    showUploadProblems([{ path: "", message: d.error || "Tải lên chưa được. Thử lại sau." }]);
+  } catch (finErr) {
+    if (controller.signal.aborted) return;
+    upload.controller = null;
+    upload.session = null;
+    showUploadProblems([{ path: "", message: "Mất kết nối giữa chừng. Bài đang chạy không bị ảnh hưởng, hãy thử lại." }]);
+  }
+}
 function sendFile(file, contentType, name) {
   if (!file) return;
   const isJson = contentType === "application/json" || file.type === "application/json" || (file.name && file.name.toLowerCase().endsWith(".json"));
@@ -146,6 +338,9 @@ function sendFile(file, contentType, name) {
     $("upPickError").textContent = isJson ? "File JSON quá lớn, tối đa 16 MB." : "File zip quá lớn, tối đa 90 MB.";
     $("upPickError").hidden = false;
     return;
+  }
+  if (!isJson) {
+    return sendPartsFile(file, name);
   }
   uploadStep("upBusy");
   $("upBusyName").textContent = name || file.name || (isJson ? "tests.json" : "package.zip");
@@ -262,6 +457,10 @@ async function commitUpload() {
 function closeUpload() {
   if (upload.xhr) upload.xhr.abort();
   upload.xhr = null;
+  if (upload.controller) upload.controller.abort();
+  upload.controller = null;
+  if (upload.session) fetch(`/api/uploads/parts/${upload.session}`, { method: "DELETE" }).catch(() => {});
+  upload.session = null;
   if (upload.id) fetch(`/api/uploads/${upload.id}`, { method: "DELETE" }).catch(() => {});
   upload.id = null;
   $("uploadDialog").close();
