@@ -234,6 +234,10 @@ def run(br, base, temp, work):
     home_title = an.inner_text("#home-title")
     home_tests_count = an.locator("#homeTestList .stream-row").count()
     check("trang đầu có mục Bộ đề", "Chưa có bài học nào" not in home_title and home_tests_count > 0, f"title={home_title}, count={home_tests_count}")
+    groups = an.locator("#homeTestList .test-group-title").all_inner_texts()
+    ts = all_tests(an)
+    want = [next(y["package_title"] for y in ts if y["package_id"] == pid) for pid in dict.fromkeys(x["package_id"] for x in ts)]
+    check("bộ đề trên trang đầu có tên package", groups == want, f"groups={groups}, want={want}")
 
     # 8. không tràn ngang ở 360 px
     an.set_viewport_size({"width": 360, "height": 740})
@@ -430,6 +434,9 @@ def run(br, base, temp, work):
     an.wait_for_selector("#screen-test-detail.active")
     an.click("#testDetailActions [data-act=attempt-start][data-mode=exam]")
     an.wait_for_selector("#screen-test-run.active")
+    an.wait_for_selector(".test-option-btn")
+    timer_txt = an.inner_text("#testTimer")
+    check("thi có giờ: đồng hồ đếm ngược từ giới hạn", timer_txt in ("1:00", "0:59", "0:58"), timer_txt)
     timed_aid = an.evaluate("location.hash").split("#attempt=")[1]
 
     db_file = work / "data" / "learn.db"
@@ -537,6 +544,14 @@ def run(br, base, temp, work):
     an.goto(f"{base}/#attempt={rev_aid}")
     an.wait_for_selector("#screen-test-run.active")
     an.screenshot(path=str(SHOTS / "practice-run-1280.png"))
+    an.set_viewport_size({"width": 1600, "height": 900})
+    an.wait_for_timeout(200)
+    run_w = an.evaluate("document.querySelector('.test-run-layout').getBoundingClientRect().width")
+    grid_h = an.evaluate("parseFloat(getComputedStyle(document.getElementById('testGrid')).maxHeight)")
+    an.screenshot(path=str(SHOTS / "practice-run-1600.png"))
+    an.set_viewport_size({"width": 1280, "height": 900})
+    an.wait_for_timeout(200)
+    check("màn rộng: khung làm bài không bó ở 900 px, lưới cao hơn nửa màn", run_w >= 1100 and grid_h > 450, f"width={run_w}, grid max-height={grid_h}")
     dock_vis = an.locator(".studio-dock").is_visible()
     capsule_vis = an.locator(".mobile-floating-capsule").is_visible()
     check("dock nghe không che nút khi làm bài", not dock_vis and not capsule_vis)
@@ -553,6 +568,30 @@ def run(br, base, temp, work):
     btn_speech = an.locator("#btnTestSpeech")
     note_speech = an.locator("#testSpeechNote")
     check("nút giọng đọc hoặc lý do ẩn đều hiện đúng", btn_speech.is_visible() or note_speech.is_visible())
+
+    # 17b. the voice follows the question's language, not the app's
+    spoken = an.evaluate("""() => {
+        const out = [];
+        const voices = [{ lang: "vi-VN", localService: true }, { lang: "en-US", localService: true }];
+        if (!("speechSynthesis" in window)) window.speechSynthesis = {};  // WebKit builds without speech
+        speechSynthesis.getVoices = () => voices;
+        speechSynthesis.speak = u => out.push({ lang: u.lang, text: u.text });
+        speechSynthesis.cancel = () => {};
+        window.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
+        const item = _currentAttempt.items[_currentIndex];
+        const saved = { q: item.question, o: item.options.map(x => x.text) };
+        item.question = "Câu hỏi tiếng Việt có dấu?";
+        toggleSpeech();
+        item.question = "Which feature should the administrator configure first?";
+        item.options.forEach((x, i) => { x.text = "Option text " + i; });
+        toggleSpeech();
+        item.question = saved.q; item.options.forEach((x, i) => { x.text = saved.o[i]; });
+        return out;
+    }""")
+    check("giọng đọc theo ngôn ngữ của câu",
+          len(spoken) == 2 and spoken[0]["lang"] == "vi-VN" and "Lựa chọn A" in spoken[0]["text"]
+          and spoken[1]["lang"] == "en-US" and "Option A" in spoken[1]["text"] and "Lựa chọn" not in spoken[1]["text"],
+          [(s["lang"], s["text"][:40]) for s in spoken])
 
     # 18. rời màn làm bài bằng Back dọn sạch
     in_test_before = an.evaluate("document.body.classList.contains('in-test')")

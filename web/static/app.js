@@ -175,6 +175,15 @@ function renderLesson() {
   renderTime();
 }
 
+// Tests come ordered by package; each package gets its title above its tests so "Đề 1" says whose it is.
+function testGroupHeading(t, last) {
+  if (t.package_id === last) return null;
+  const h = document.createElement("h3");
+  h.className = "test-group-title";
+  h.textContent = t.package_title || "Bộ đề";
+  return h;
+}
+
 function renderHomeTests() {
   const heading = $("homeTestsHeading");
   const box = $("homeTestList");
@@ -182,7 +191,11 @@ function renderHomeTests() {
   const tests = state.tests || [];
   heading.hidden = tests.length === 0;
   box.textContent = "";
+  let last = null;
   tests.forEach(t => {
+    const group = testGroupHeading(t, last);
+    if (group) box.append(group);
+    last = t.package_id;
     const row = document.createElement("article");
     row.className = "stream-row";
     const info = document.createElement("div");

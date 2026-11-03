@@ -1882,7 +1882,7 @@ body.in-test .workbench {
 }
 
 body.in-test .stage-body {
-  max-width: 900px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 0.75rem 1rem 2.5rem;
 }
@@ -1992,9 +1992,11 @@ body.in-test .stage-body {
 
 @media (min-width: 1024px) {
   .test-run-layout {
-    grid-template-columns: minmax(0, 1fr) 260px;
+    grid-template-columns: minmax(0, 1fr) 300px;
     align-items: start;
   }
+  /* wide screens: the whole 60-question grid fits without its own scrollbar */
+  .test-run-layout .test-grid { max-height: calc(100vh - 260px); }
 }
 
 .test-stage {
@@ -2527,3 +2529,4 @@ body.in-test .stage-body {
   width: 100%;
   margin: 0.5rem 0;
 }
+.test-group-title { font-size: 1rem; font-weight: 700; color: var(--text-main); margin: 1rem 0 0; padding: 0 0.25rem; }

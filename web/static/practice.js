@@ -147,7 +147,11 @@ async function showTestsScreen(pkgFilter) {
       return;
     }
     if (empty) empty.hidden = true;
+    let last = null;
     tests.forEach(t => {
+      const group = pkgFilter ? null : testGroupHeading(t, last);
+      if (group) list.append(group);
+      last = t.package_id;
       const row = el("article", "stream-row");
       const info = el("div", "lib-info");
       info.append(el("h3", "stream-title", t.title));
@@ -329,7 +333,6 @@ let _clockInterval = null;
 let _saveQueue = {};
 let _resultAttempt = null;
 let _resultFilter = "all";
-let _ttsVoice = null;
 
 function leaveAttempt() {
   document.body.classList.remove("in-test");
@@ -370,39 +373,34 @@ function changeFont(delta) {
   } catch (_) {}
 }
 
-function setupTts(lang) {
+// Speech follows the language of the question itself: tests in any language sit in a Vietnamese app.
+const VI_MARKS = /[ăâđêôơưàáạảãằắặẳẵầấậẩẫèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]/i;
+const textLang = text => (VI_MARKS.test(text) ? "vi" : "en");
+const LANG_NAME = { vi: "tiếng Việt", en: "tiếng Anh" };
+
+function voiceFor(lang) {
+  const voices = window.speechSynthesis.getVoices().filter(v => v.lang && v.lang.toLowerCase().startsWith(lang));
+  return voices.find(v => v.default) || voices.find(v => v.localService) || voices[0] || null;
+}
+
+function setupTts() {
   const btn = $("btnTestSpeech");
   const note = $("testSpeechNote");
   if (!btn || !note) return;
-
   if (!("speechSynthesis" in window)) {
     btn.hidden = true;
     note.textContent = "Trình duyệt không hỗ trợ giọng đọc.";
     note.hidden = false;
     return;
   }
-
-  function pickVoice() {
-    const voices = window.speechSynthesis.getVoices();
-    const l = (lang || "vi").toLowerCase();
-    const shortLang = l.slice(0, 2);
-    _ttsVoice = voices.find(v => v.lang && v.lang.toLowerCase().replace("_", "-").startsWith(l)) ||
-                voices.find(v => v.lang && v.lang.toLowerCase().startsWith(shortLang)) || null;
-
-    if (_ttsVoice) {
-      btn.hidden = false;
-      note.hidden = true;
-    } else {
-      btn.hidden = true;
-      note.textContent = "Thiết bị chưa có giọng đọc " + (shortLang === "vi" ? "tiếng Việt" : shortLang);
-      note.hidden = false;
-    }
+  function showButton() {
+    const any = window.speechSynthesis.getVoices().length > 0;
+    btn.hidden = !any;
+    note.textContent = any ? "" : "Thiết bị chưa có giọng đọc.";
+    note.hidden = any;
   }
-
-  pickVoice();
-  if (!_ttsVoice && window.speechSynthesis.onvoiceschanged !== undefined) {
-    window.speechSynthesis.onvoiceschanged = pickVoice;
-  }
+  showButton();
+  if (window.speechSynthesis.onvoiceschanged !== undefined) window.speechSynthesis.onvoiceschanged = showButton;
 }
 
 function stopSpeech() {
@@ -414,7 +412,7 @@ function stopSpeech() {
 }
 
 function toggleSpeech() {
-  if (!("speechSynthesis" in window) || !_ttsVoice) return;
+  if (!("speechSynthesis" in window)) return;
   if (window.speechSynthesis.speaking) {
     stopSpeech();
     return;
@@ -425,16 +423,24 @@ function toggleSpeech() {
   const div = document.createElement("div");
   div.innerHTML = renderTestText(item.question);
   const qText = div.textContent || "";
+  const lang = textLang(qText + " " + item.options.map(o => o.text).join(" "));
+  const voice = voiceFor(lang);
+  const note = $("testSpeechNote");
+  if (!voice) {
+    if (note) { note.textContent = "Thiết bị chưa có giọng đọc " + LANG_NAME[lang] + "."; note.hidden = false; }
+    return;
+  }
+  if (note) note.hidden = true;
 
+  const label = lang === "vi" ? "Lựa chọn" : "Option";
   let speechText = qText + ".\n";
   item.options.forEach((opt, idx) => {
-    const letter = String.fromCharCode(65 + idx);
-    speechText += `Lựa chọn ${letter}: ${opt.text}.\n`;
+    speechText += `${label} ${String.fromCharCode(65 + idx)}: ${opt.text}.\n`;
   });
 
   const u = new SpeechSynthesisUtterance(speechText);
-  u.voice = _ttsVoice;
-  u.lang = _ttsVoice.lang;
+  u.voice = voice;
+  u.lang = voice.lang;
   u.onend = () => { stopSpeech(); };
   u.onerror = () => { stopSpeech(); };
 
@@ -1079,7 +1085,7 @@ async function showTestRun(attemptId) {
     _currentAttempt = att;
     renderRunScreen();
     startClock();
-    setupTts(att.lang || "vi");
+    setupTts();
   } catch (err) {
     if (err.message !== "login" && err.message !== "password") {
       if (box) box.textContent = err.message || "Không tải được lượt làm bài.";
