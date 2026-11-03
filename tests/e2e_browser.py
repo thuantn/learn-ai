@@ -127,7 +127,8 @@ try:
         pg.click("#submitBtn")
         pg.wait_for_url(BASE + "/")
         pg.wait_for_selector("#screen-home.active")
-        check("both lessons listed", pg.locator("#lessonList .stream-row").count() == 2)
+        n_lessons = len(json.loads((PACKAGE / "package.json").read_text(encoding="utf-8-sig"))["lessons"])
+        check("every lesson listed", pg.locator("#lessonList .stream-row").count() == n_lessons)
         check("no due cards before starting", "Không có thẻ" in pg.inner_text(".dock-foot"), pg.inner_text(".dock-foot"))
 
         pg.locator(f'#lessonList [data-lesson="{L2_KEY}"]').click()
