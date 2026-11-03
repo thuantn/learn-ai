@@ -6,7 +6,9 @@
   const lessonId = (location.pathname.match(/^\/lesson\/(p[0-9a-f]{12}\.[a-z0-9-]+)$/) || [])[1];
   let frameInfo = null;
   let iframe = null;
-  let port = null;
+  // Every port handed to the current frame. A busy page can send a second hello before it gets the first port,
+  // and closing the first one then dropped the calls already sent on it.
+  let ports = [];
   let loadCount = 0;
   let docPending = null;
   let docTimer = null;
@@ -62,10 +64,7 @@
       iframe.remove();
       iframe = null;
     }
-    if (port) {
-      try { port.close(); } catch (e) {}
-      port = null;
-    }
+    closePorts();
   }
 
   function lostAccess() {
@@ -103,10 +102,7 @@
       iframe.remove();
       iframe = null;
     }
-    if (port) {
-      try { port.close(); } catch (e) {}
-      port = null;
-    }
+    closePorts();
     try {
       const r = await fetch(`/api/lessons/${lessonId}/frame`, send("POST", {}));
       if (r.status === 404) {
@@ -152,7 +148,7 @@
     loadCount++;
     if (loadCount > 1) {
       setCover("Trang bài vừa cố chuyển sang địa chỉ khác nên đã bị đóng.", "reload");
-      if (port) { try { port.close(); } catch (e) {} port = null; }
+      closePorts();
     }
   }
 
@@ -160,17 +156,23 @@
     if (!iframe || event.source !== iframe.contentWindow) return;
     const msg = event.data;
     if (!msg || msg.type !== "learn-hello") return;
-    if (port) { try { port.close(); } catch (e) {} }
     const channel = new MessageChannel();
-    port = channel.port1;
-    port.onmessage = onPortMessage;
-    port.start();
+    ports.push(channel.port1);
+    channel.port1.onmessage = onPortMessage;
+    channel.port1.start();
     iframe.contentWindow.postMessage({ type: "learn-port" }, "*", [channel.port2]);
   });
 
-  function reply(id, ok, rest) {
-    if (!port) return;
-    port.postMessage({ id, ok, ...rest });
+  function closePorts() {
+    ports.forEach(p => { try { p.close(); } catch (e) {} });
+    ports = [];
+  }
+
+  // Answers on the port the call came in on, and only while that port still belongs to the current frame.
+  function replyOn(from) {
+    return (id, ok, rest) => {
+      if (ports.includes(from)) from.postMessage({ id, ok, ...rest });
+    };
   }
 
   function isPlainObject(v) {
@@ -178,6 +180,7 @@
   }
 
   async function onPortMessage(event) {
+    const reply = replyOn(event.target);
     const msg = event.data;
     if (msg === null || typeof msg !== "object") return;
     let raw;

@@ -53,6 +53,8 @@
     if (event.source !== window.parent) return;
     const msg = event.data;
     if (!msg || msg.type !== "learn-port" || !event.ports[0]) return;
+    // A later port answers a hello sent while the first was on its way. The first one stays in use.
+    if (port) return;
     stopHello();
     port = event.ports[0];
     port.onmessage = onPortMessage;
