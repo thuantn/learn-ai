@@ -28,9 +28,12 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 def has_content(c, package_id) -> bool:
-    return c.execute(
-        "SELECT 1 FROM package_lessons WHERE package_id=? AND json_extract(data, '$.content')<>'' LIMIT 1", (package_id,)
-    ).fetchone() is not None
+    return (
+        c.execute(
+            "SELECT 1 FROM package_lessons WHERE package_id=? AND json_extract(data, '$.content')<>'' LIMIT 1", (package_id,)
+        ).fetchone() is not None
+        or c.execute("SELECT 1 FROM package_tests WHERE package_id=? LIMIT 1", (package_id,)).fetchone() is not None
+    )
 
 
 @router.get("/admin")
@@ -42,9 +45,11 @@ async def admin_page():
 async def overview():
     with db.connect() as c:
         lesson_counts = {r["package_id"]: r["n"] for r in c.execute("SELECT package_id, count(*) n FROM package_lessons GROUP BY package_id")}
+        test_counts = {r["package_id"]: r["n"] for r in c.execute("SELECT package_id, count(*) n FROM package_tests GROUP BY package_id")}
         packages = [{
             "id": r["id"], "title": r["title"], "owner": r["owner"], "size_bytes": r["size_bytes"], "version": r["version"],
             "ask_status": r["ask_status"], "updated_at": r["updated_at"], "lessons": lesson_counts.get(r["id"], 0),
+            "tests": test_counts.get(r["id"], 0),
         } for r in c.execute(
             "SELECT id, title, owner, size_bytes, version, ask_status, updated_at FROM packages "
             "ORDER BY ask_status IN ('pending', 'approved') DESC, updated_at DESC LIMIT ?", (LIST_LIMIT,))]
@@ -74,10 +79,20 @@ async def review(package_id: str):
         if not row:
             return bad(404, "package", "Không có package này.")
         lessons = [json.loads(r["data"]) for r in c.execute("SELECT data FROM package_lessons WHERE package_id=? ORDER BY ord", (package_id,))]
+        tests = [
+            json.loads(r["data"])
+            for r in c.execute(
+                """SELECT tr.data FROM package_tests pt
+                   JOIN test_revision tr ON tr.id = pt.revision_id
+                   WHERE pt.package_id=? ORDER BY pt.ord""",
+                (package_id,),
+            )
+        ]
     return {
         "title": row["title"], "author": row["owner"], "ask_status": row["ask_status"], "ask_hash": row["ask_hash"],
         "zdr": ai.status()["zdr"],
         "lessons": [{k: x.get(k) for k in ("title", "summary", "cards", "quiz", "content")} for x in lessons],
+        "tests": tests,
     }
 
 

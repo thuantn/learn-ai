@@ -71,6 +71,41 @@ CREATE TABLE ask_message(
   role TEXT NOT NULL CHECK(role IN ('user', 'assistant')), body TEXT NOT NULL, at REAL NOT NULL);
 CREATE INDEX ask_message_thread ON ask_message(user, lesson, id);
 """,
+    """
+CREATE TABLE test_revision(
+  id INTEGER PRIMARY KEY, package_id TEXT NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+  test_key TEXT NOT NULL, content_hash TEXT NOT NULL, data TEXT NOT NULL, created_at REAL NOT NULL,
+  UNIQUE(test_key, content_hash));
+CREATE TABLE package_tests(
+  key TEXT PRIMARY KEY, package_id TEXT NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, item_count INTEGER NOT NULL,
+  time_limit_minutes INTEGER NOT NULL, pass_percent INTEGER NOT NULL,
+  revision_id INTEGER NOT NULL REFERENCES test_revision(id) ON DELETE CASCADE);
+CREATE INDEX package_tests_pkg ON package_tests(package_id);
+CREATE TABLE test_attempt(
+  id TEXT PRIMARY KEY, user TEXT NOT NULL REFERENCES users(name) ON DELETE CASCADE,
+  test_key TEXT NOT NULL, revision_id INTEGER NOT NULL REFERENCES test_revision(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL CHECK(mode IN ('exam', 'practice', 'review')), layout TEXT NOT NULL,
+  started_at REAL NOT NULL, paused_total REAL NOT NULL DEFAULT 0, pause_count INTEGER NOT NULL DEFAULT 0, paused_at REAL,
+  submitted_at REAL, score INTEGER, total INTEGER);
+CREATE UNIQUE INDEX test_attempt_open ON test_attempt(user, test_key, mode) WHERE submitted_at IS NULL;
+CREATE INDEX test_attempt_user ON test_attempt(user, test_key, started_at);
+CREATE TABLE test_answer(
+  attempt TEXT NOT NULL REFERENCES test_attempt(id) ON DELETE CASCADE, item TEXT NOT NULL,
+  chosen TEXT NOT NULL DEFAULT '[]', flagged INTEGER NOT NULL DEFAULT 0,
+  answer_hash TEXT, correct INTEGER, graded_at REAL, PRIMARY KEY(attempt, item));
+CREATE TABLE test_first_answer(
+  user TEXT NOT NULL REFERENCES users(name) ON DELETE CASCADE,
+  package_id TEXT NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+  test_key TEXT NOT NULL, item TEXT NOT NULL, answer_hash TEXT NOT NULL, chosen TEXT NOT NULL, correct INTEGER NOT NULL, at REAL NOT NULL,
+  PRIMARY KEY(user, test_key, item, answer_hash));
+CREATE INDEX test_first_item ON test_first_answer(test_key, item, answer_hash);
+CREATE TABLE test_pool(
+  user TEXT NOT NULL REFERENCES users(name) ON DELETE CASCADE,
+  package_id TEXT NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+  test_key TEXT NOT NULL, item TEXT NOT NULL, answer_hash TEXT NOT NULL, streak INTEGER NOT NULL DEFAULT 0,
+  last_correct_at REAL, added_at REAL NOT NULL, PRIMARY KEY(user, test_key, item));
+""",
 ]
 
 log = logging.getLogger("learn")

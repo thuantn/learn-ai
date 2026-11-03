@@ -51,10 +51,11 @@ def disk_low() -> bool:
     return shutil.disk_usage(staging_dir()).free < MIN_FREE_BYTES
 
 
-async def receive(stream, path, chunk_timeout=None, total_timeout=None) -> int:
+async def receive(stream, path, chunk_timeout=None, total_timeout=None, limit=None) -> int:
     """Writes the request body to path, counting bytes because Content-Length can lie."""
     chunk_timeout = CHUNK_TIMEOUT if chunk_timeout is None else chunk_timeout
     deadline = time.monotonic() + (TOTAL_TIMEOUT if total_timeout is None else total_timeout)
+    max_bytes = bundle.MAX_ZIP if limit is None else limit
     size = 0
     chunks = stream.__aiter__()
     with open(path, "wb") as f:
@@ -65,7 +66,7 @@ async def receive(stream, path, chunk_timeout=None, total_timeout=None) -> int:
             except StopAsyncIteration:
                 return size
             size += len(chunk)
-            if size > bundle.MAX_ZIP:
+            if size > max_bytes:
                 raise TooLarge
             f.write(chunk)
 
@@ -98,13 +99,16 @@ def too_many(owner: str, slug: str) -> bool:
         return c.execute("SELECT count(*) n FROM packages WHERE owner=? AND slug<>?", (owner, slug)).fetchone()["n"] >= MAX_PACKAGES
 
 
-def prepare(zip_path, owner: str) -> dict:
-    """Unpacks and checks a zip. On success the result has "dir"; otherwise "code" and "problems"."""
+def prepare(path, owner: str, kind="zip") -> dict:
+    """Unpacks and checks a zip or single test json. On success the result has "dir"; otherwise "code" and "problems"."""
     dest = staging_dir() / secrets.token_hex(12)
     roots = (dest, staging_dir(), catalog.packages_dir())
-    problems = bundle.safe_extract(zip_path, dest)
-    if not problems:
-        problems = contract.check_package(dest)
+    if kind == "json":
+        problems = contract.unpack_test_file(path, dest)
+    else:
+        problems = bundle.safe_extract(path, dest)
+        if not problems:
+            problems = contract.check_package(dest)
     if contract.errors(problems):
         shutil.rmtree(dest, ignore_errors=True)
         return {"code": "invalid", "problems": _public_problems(contract.errors(problems), roots)}
@@ -118,12 +122,14 @@ def prepare(zip_path, owner: str) -> dict:
         return {"code": "quota", "problems": [{"path": "", "message": f"Mỗi tài khoản có tối đa {MAX_PACKAGES} package."}]}
     with db.connect() as c:
         is_update = c.execute("SELECT 1 FROM packages WHERE owner=? AND slug=?", (owner, package["slug"])).fetchone() is not None
-    lessons = [contract.read_json_file(dest / "lessons" / x / "lesson.json")["title"] for x in package["lessons"]]
+    lessons = [contract.read_json_file(dest / "lessons" / x / "lesson.json")["title"] for x in package.get("lessons", [])]
+    tests = [contract.read_test_file(dest / "tests" / f"{x}.json")["title"] for x in package.get("tests", [])]
     return {
         "dir": dest,
         "title": package["title"],
         "slug": package["slug"],
         "lessons": lessons,
+        "tests": tests,
         "is_update": is_update,
         "removed": catalog.removed_ids(owner, dest),
         "warnings": _public_problems([p for p in problems if p.severity != "error"], roots),

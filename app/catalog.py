@@ -58,11 +58,42 @@ def _hash_ask(parts) -> str:
     return h.hexdigest()
 
 
+def answer_hash(item: dict) -> str:
+    payload = json.dumps([sorted(o["id"] for o in item["options"]), sorted(item["correct"])])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _normalize_test(raw: dict) -> dict:
+    return {
+        "title": raw.get("title", ""),
+        "description": raw.get("description", ""),
+        "lang": raw.get("lang", "vi"),
+        "time_limit_minutes": raw.get("time_limit_minutes", 0),
+        "pass_percent": raw.get("pass_percent", 70),
+        "items": [
+            {
+                "id": item["id"],
+                "domain": (item.get("domain") or "").strip() or "Khác",
+                "type": item["type"],
+                "question": item["question"],
+                "options": [{"id": o["id"], "text": o["text"], "why": o.get("why", "")} for o in item["options"]],
+                "correct": list(item["correct"]),
+                "explanation": item["explanation"],
+                "best_practice": item.get("best_practice", ""),
+                "docs": list(item.get("docs", [])),
+                "shuffle": bool(item.get("shuffle", True)),
+            }
+            for item in raw.get("items", [])
+        ],
+    }
+
+
 def _read_unpacked(unpacked: pathlib.Path):
     package = contract.read_json_file(unpacked / "package.json")
     lessons = []
+    tests = []
     ask_parts = []
-    for idx, lesson_id in enumerate(package["lessons"]):
+    for idx, lesson_id in enumerate(package.get("lessons", [])):
         lesson_dir = unpacked / "lessons" / lesson_id
         lesson = contract.read_json_file(lesson_dir / "lesson.json")
         tracks = {}
@@ -87,7 +118,12 @@ def _read_unpacked(unpacked: pathlib.Path):
         }
         lessons.append((lesson_id, data))
         ask_parts.extend([lesson.get("title", ""), content, lesson.get("summary", []), lesson.get("cards", []), lesson.get("quiz", [])])
-    return package, lessons, _hash_ask(ask_parts)
+    for test_id in package.get("tests", []):
+        raw = contract.read_test_file(unpacked / "tests" / f"{test_id}.json")
+        data = _normalize_test(raw)
+        tests.append((test_id, data))
+        ask_parts.append(data)
+    return package, lessons, tests, _hash_ask(ask_parts)
 
 
 def progress_id(package_id: str, bare_id: str) -> str:
@@ -110,7 +146,7 @@ def _has_access(c, user: str, package_id: str) -> bool:
 def install_version(owner: str, unpacked) -> dict:
     """Installs or updates a package and returns {id, version, created}."""
     unpacked = pathlib.Path(unpacked).resolve()
-    package, lessons, ask_hash = _read_unpacked(unpacked)
+    package, lessons, tests, ask_hash = _read_unpacked(unpacked)
     slug = package["slug"]
     title = package.get("title", "")
     topic = package.get("topic", "")
@@ -166,6 +202,8 @@ def install_version(owner: str, unpacked) -> dict:
                     (key, package_id, data["ord"], json.dumps(data, ensure_ascii=False)),
                 )
 
+            _install_tests(c, package_id, tests, now)
+
             if existing:
                 _add_new_cards(c, package_id, lessons, now)
 
@@ -180,6 +218,45 @@ def install_version(owner: str, unpacked) -> dict:
         shutil.rmtree(old_dir, ignore_errors=True)
 
     return {"id": package_id, "version": version, "created": existing is None}
+
+
+def _install_tests(c, package_id: str, tests, now: float):
+    c.execute("DELETE FROM package_tests WHERE package_id=?", (package_id,))
+    new_hashes = {}
+    for ord_idx, (test_id, data) in enumerate(tests):
+        key = progress_id(package_id, test_id)
+        body = json.dumps(data, ensure_ascii=False, sort_keys=True)
+        content_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        c.execute(
+            "INSERT INTO test_revision(package_id, test_key, content_hash, data, created_at) VALUES(?,?,?,?,?) ON CONFLICT(test_key, content_hash) DO NOTHING",
+            (package_id, key, content_hash, body, now),
+        )
+        rev_id = c.execute("SELECT id FROM test_revision WHERE test_key=? AND content_hash=?", (key, content_hash)).fetchone()["id"]
+        c.execute(
+            """INSERT INTO package_tests
+               (key, package_id, ord, title, description, item_count, time_limit_minutes, pass_percent, revision_id)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (key, package_id, ord_idx, data["title"], data["description"], len(data["items"]), data["time_limit_minutes"], data["pass_percent"], rev_id),
+        )
+        for item in data["items"]:
+            new_hashes[(key, item["id"])] = answer_hash(item)
+
+    for row in c.execute("SELECT DISTINCT test_key, item, answer_hash FROM test_pool WHERE package_id=?", (package_id,)).fetchall():
+        new_hash = new_hashes.get((row["test_key"], row["item"]))
+        if new_hash is None:
+            c.execute("DELETE FROM test_pool WHERE package_id=? AND test_key=? AND item=?", (package_id, row["test_key"], row["item"]))
+        elif new_hash != row["answer_hash"]:
+            c.execute(
+                "UPDATE test_pool SET answer_hash=?, streak=0, last_correct_at=NULL WHERE package_id=? AND test_key=? AND item=?",
+                (new_hash, package_id, row["test_key"], row["item"]),
+            )
+
+    c.execute(
+        """DELETE FROM test_revision WHERE package_id=?
+           AND NOT EXISTS(SELECT 1 FROM package_tests pt WHERE pt.revision_id = test_revision.id)
+           AND NOT EXISTS(SELECT 1 FROM test_attempt ta WHERE ta.revision_id = test_revision.id)""",
+        (package_id,),
+    )
 
 
 def _add_new_cards(c, package_id: str, lessons, now: float):
@@ -208,7 +285,7 @@ def _add_new_cards(c, package_id: str, lessons, now: float):
 
 
 def removed_ids(owner: str, unpacked) -> list[str]:
-    """Returns bare ids and whole lessons that exist in the installed package but are missing from unpacked."""
+    """Returns bare ids and whole lessons or tests that exist in the installed package but are missing from unpacked."""
     unpacked = pathlib.Path(unpacked)
     package = contract.read_json_file(unpacked / "package.json")
     slug = package["slug"]
@@ -224,7 +301,7 @@ def removed_ids(owner: str, unpacked) -> list[str]:
             existing[r["key"]].update(card["id"] for card in data["cards"])
             existing[r["key"]].update(q["id"] for q in data["quiz"])
         new = {}
-        for lesson_id in package["lessons"]:
+        for lesson_id in package.get("lessons", []):
             lesson = contract.read_json_file(unpacked / "lessons" / lesson_id / "lesson.json")
             key = progress_id(package_id, lesson_id)
             new[key] = set()
@@ -238,7 +315,46 @@ def removed_ids(owner: str, unpacked) -> list[str]:
                 continue
             for bare_id in sorted(existing[key] - new[key]):
                 removed.append(bare_id)
+        existing_tests = {}
+        for r in c.execute(
+            """SELECT pt.key, tr.data FROM package_tests pt
+               JOIN test_revision tr ON tr.id = pt.revision_id
+               WHERE pt.package_id=?""",
+            (package_id,),
+        ):
+            data = json.loads(r["data"])
+            existing_tests[r["key"]] = {item["id"] for item in data["items"]}
+        new_tests = {}
+        for test_id in package.get("tests", []):
+            test = contract.read_test_file(unpacked / "tests" / f"{test_id}.json")
+            key = progress_id(package_id, test_id)
+            new_tests[key] = {item["id"] for item in test.get("items", [])}
+        for key in sorted(existing_tests):
+            bare = key.split(".", 1)[1]
+            if key not in new_tests:
+                removed.append(f"test:{bare}")
+                continue
+            for item_id in sorted(existing_tests[key] - new_tests[key]):
+                removed.append(f"{bare}/{item_id}")
         return removed
+
+
+def test_row(c, user: str, key: str):
+    row = c.execute(
+        """SELECT pt.*, p.owner, p.title AS package_title, p.ask_status
+           FROM package_tests pt
+           JOIN packages p ON p.id = pt.package_id
+           WHERE pt.key=?""",
+        (key,),
+    ).fetchone()
+    if not row or not _has_access(c, user, row["package_id"]):
+        return None
+    return row
+
+
+def revision_data(c, revision_id: int) -> dict | None:
+    row = c.execute("SELECT data FROM test_revision WHERE id=?", (revision_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
 
 
 def _lesson_dict(package_id: str, key: str, owner: str, ask_status: str, data: dict, user: str) -> dict:

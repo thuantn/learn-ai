@@ -650,7 +650,7 @@ def join_url(row):
 async def list_packages(request: Request):
     user = request.state.user
     with db.connect() as c:
-        titles, first = defaultdict(list), {}
+        titles, first, tests = defaultdict(list), {}, defaultdict(list)
         for r in c.execute(
             """SELECT key, package_id, json_extract(data, '$.title') title FROM package_lessons
                WHERE package_id IN (SELECT id FROM packages WHERE owner=?
@@ -658,9 +658,18 @@ async def list_packages(request: Request):
                ORDER BY ord""", (user, user)):
             titles[r["package_id"]].append(r["title"])
             first.setdefault(r["package_id"], r["key"])
+        for r in c.execute(
+            """SELECT key, package_id, title, item_count, time_limit_minutes FROM package_tests
+               WHERE package_id IN (SELECT id FROM packages WHERE owner=?
+                                    UNION SELECT package_id FROM package_access WHERE user=? AND revoked_at IS NULL)
+               ORDER BY ord""", (user, user)):
+            tests[r["package_id"]].append({
+                "key": r["key"], "title": r["title"], "items": r["item_count"], "minutes": r["time_limit_minutes"],
+            })
         mine = [{
             "id": r["id"], "title": r["title"], "topic": r["topic"], "description": r["description"],
             "version": r["version"], "size_bytes": r["size_bytes"], "lessons": titles[r["id"]], "first_lesson": first.get(r["id"]),
+            "tests": tests[r["id"]],
             "people": c.execute("SELECT count(*) n FROM package_access WHERE package_id=? AND revoked_at IS NULL", (r["id"],)).fetchone()["n"],
             "link_on": bool(r["link_nonce"]), "ask_status": r["ask_status"], "has_content": admin.has_content(c, r["id"]),
             "feedback": c.execute("SELECT count(*) n FROM feedback WHERE package_id=?", (r["id"],)).fetchone()["n"],
@@ -668,6 +677,7 @@ async def list_packages(request: Request):
         shared = [{
             "id": r["id"], "title": r["title"], "topic": r["topic"], "description": r["description"],
             "author": r["owner"], "lessons": titles[r["id"]], "first_lesson": first.get(r["id"]),
+            "tests": tests[r["id"]],
         } for r in c.execute(
             """SELECT p.* FROM packages p JOIN package_access a ON a.package_id=p.id
                WHERE a.user=? AND a.revoked_at IS NULL ORDER BY a.granted_at DESC""", (user,)).fetchall()]
@@ -858,34 +868,42 @@ async def package_feedback(package_id: str, request: Request):
 @app.post("/api/uploads")
 async def upload_package(request: Request):
     user = request.state.user
-    if "application/zip" not in request.headers.get("content-type", ""):
-        return bad(400, "input", "Cần gửi file zip.")
+    ctype = request.headers.get("content-type", "")
+    if "application/zip" in ctype:
+        kind, max_bytes = "zip", bundle.MAX_ZIP
+    elif "application/json" in ctype:
+        kind, max_bytes = "json", catalog.contract.MAX_TESTS_TOTAL
+    else:
+        return bad(400, "input", "Cần gửi file zip hoặc json.")
     length = request.headers.get("content-length", "")
-    if length.isdigit() and int(length) > bundle.MAX_ZIP:
-        return bad(413, "too_large", "File zip quá lớn, tối đa 90 MB.")
+    if length.isdigit() and int(length) > max_bytes:
+        return bad(413, "too_large", "File tải lên quá lớn.")
     if not uploads.begin(user):
         return bad(429, "busy", "Đang có file khác được tải lên. Thử lại sau.")
-    zip_path = None
+    raw_path = None
     try:
         if await asyncio.to_thread(uploads.disk_low):
             return bad(507, "disk", "Máy chủ sắp hết dung lượng. Báo quản trị.")
-        zip_path = uploads.staging_dir() / f"{secrets.token_hex(12)}.zip"
+        raw_path = uploads.staging_dir() / f"{secrets.token_hex(12)}.{kind}"
         try:
-            await uploads.receive(request.stream(), zip_path)
+            if kind == "json":
+                await uploads.receive(request.stream(), raw_path, limit=max_bytes)
+            else:
+                await uploads.receive(request.stream(), raw_path)
         except uploads.TooLarge:
-            return bad(413, "too_large", "File zip quá lớn, tối đa 90 MB.")
+            return bad(413, "too_large", "File tải lên quá lớn.")
         except (ClientDisconnect, asyncio.TimeoutError):
             return bad(400, "interrupted", "Tải lên bị ngắt giữa chừng. Thử lại.")
-        info = await asyncio.to_thread(uploads.prepare, zip_path, user)
+        info = await asyncio.to_thread(uploads.prepare, raw_path, user, kind)
     finally:
-        if zip_path:
-            zip_path.unlink(missing_ok=True)
+        if raw_path:
+            raw_path.unlink(missing_ok=True)
         uploads.end(user)
     if "dir" not in info:
         return JSONResponse({"code": info["code"], "problems": info["problems"]}, status_code=413 if info["code"] == "quota" else 400)
     upload_id = uploads.keep(user, info)
     log.info("upload staged user=%r slug=%r size=%d", user, info["slug"], info["size"])
-    return {"upload_id": upload_id, **{k: info[k] for k in ("title", "slug", "lessons", "is_update", "removed", "warnings", "size")}}
+    return {"upload_id": upload_id, **{k: info[k] for k in ("title", "slug", "lessons", "tests", "is_update", "removed", "warnings", "size")}}
 
 
 @app.post("/api/uploads/{upload_id}/commit")
