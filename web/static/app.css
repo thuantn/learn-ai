@@ -1807,3 +1807,60 @@ a.stage-tab, a.drawer-nav-item { display: flex; align-items: center; text-decora
 .admin-page select.auth-input option { background: var(--bg-panel); color: var(--text-main); }
 .admin-page .stream-row { flex-wrap: wrap; }
 .admin-page .lib-info { flex: 1 1 260px; }
+
+/* ---------- Practice tests ---------- */
+.test-desc-box {
+  margin: 1rem 0;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--text-sub);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.test-desc-box p {
+  margin-bottom: 0.75rem;
+}
+.test-desc-box p:last-child {
+  margin-bottom: 0;
+}
+.test-desc-box pre {
+  max-width: 100%;
+  overflow-x: auto;
+  background: var(--bg-well);
+  padding: 0.75rem;
+  border-radius: 8px;
+}
+.test-desc-box code {
+  font-family: monospace;
+  font-size: 0.875em;
+}
+.test-desc-box a {
+  color: var(--accent-bright);
+  text-decoration: underline;
+}
+.up-pick-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.up-paste-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+#upJsonText {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 80px;
+  padding: 0.625rem 0.75rem;
+  border-radius: 12px;
+  background: var(--bg-well);
+  color: var(--text-main);
+  border: 1px solid var(--hairline);
+  font-family: monospace;
+  font-size: 0.8125rem;
+  resize: vertical;
+  overflow-wrap: anywhere;
+}

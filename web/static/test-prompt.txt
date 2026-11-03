@@ -1,0 +1,59 @@
+Hãy chuyển đổi hoặc soạn bộ đề trắc nghiệm luyện thi sang định dạng JSON theo mẫu dưới đây.
+
+{
+  "slug": "ma-bo-de",
+  "title": "Tên gói bộ đề",
+  "topic": "Chủ đề",
+  "description": "Mô tả ngắn về bộ đề",
+  "tests": [
+    {
+      "id": "de-1",
+      "title": "Đề số 1",
+      "description": "Mô tả cho đề 1",
+      "time_limit_minutes": 60,
+      "pass_percent": 70,
+      "items": [
+        {
+          "id": "q1",
+          "type": "single",
+          "domain": "Lĩnh vực chính",
+          "question": "Nội dung câu hỏi?",
+          "options": [
+            {
+              "id": "A",
+              "text": "Nội dung phương án A",
+              "why": "Vì sao phương án này đúng hoặc sai"
+            },
+            {
+              "id": "B",
+              "text": "Nội dung phương án B",
+              "why": "Vì sao phương án này đúng hoặc sai"
+            },
+            {
+              "id": "C",
+              "text": "Nội dung phương án C",
+              "why": "Vì sao phương án này đúng hoặc sai"
+            },
+            {
+              "id": "D",
+              "text": "Nội dung phương án D",
+              "why": "Vì sao phương án này đúng hoặc sai"
+            }
+          ],
+          "correct": ["A"],
+          "explanation": "Lời giải thích chi tiết cho toàn bộ câu hỏi.",
+          "best_practice": "Kinh nghiệm thực tế hoặc quy tắc ghi nhớ (không bắt buộc)",
+          "docs": ["https://vi.wikipedia.org/..."]
+        }
+      ]
+    }
+  ]
+}
+
+Quy tắc bắt buộc:
+1. `type`: "single" (chọn 1 đáp án, `correct` có đúng 1 id) hoặc "multi" (chọn nhiều đáp án, `correct` có từ 2 id trở lên).
+2. `options`: từ 2 đến 8 lựa chọn, id là các chữ cái in hoa 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'.
+3. KHÔNG nhắc tới chữ cái lựa chọn (như "Đáp án A", "chọn phương án B", "cả A và B đều đúng") trong câu hỏi, lựa chọn, giải thích hay why, vì các lựa chọn sẽ được xáo ngẫu nhiên khi người học làm bài. Hãy nhắc tới nội dung của lựa chọn.
+4. Tự kiểm tra lại từng câu để đảm bảo đáp án đúng chính xác và mỗi phương án đều có giải thích `why`.
+5. Link trong `docs` phải bắt đầu bằng `https://`.
+6. Với bộ đề lớn (trên 50 câu), hãy chia thành nhiều lần trả lời. Mỗi file là một bộ đề nhưng giữ nguyên trường "slug" để hệ thống tự động gộp lại khi tải lên.

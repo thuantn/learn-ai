@@ -2,8 +2,8 @@
 const $ = id => document.getElementById(id);
 const $$ = sel => [...document.querySelectorAll(sel)];
 const SPEEDS = [1, 1.25, 1.5, 2, 0.75];
-const SCREENS = ["home", "library", "review", "listen", "flashcard", "finish"];
-const state = { me: null, lessons: [], lesson: null, track: "long", due: 0, nextDue: null, cards: [], idx: 0, reviewed: 0 };
+const SCREENS = ["home", "library", "review", "listen", "flashcard", "finish", "tests", "test-detail", "test-run", "test-result"];
+const state = { me: null, lessons: [], lesson: null, track: "long", due: 0, nextDue: null, cards: [], idx: 0, reviewed: 0, tests: [] };
 function currentTrack() { return state.lesson && state.lesson.tracks[state.track]; }
 const audio = new Audio();
 audio.preload = "none";
@@ -32,21 +32,23 @@ function statusText(l) {
 }
 
 // ---------- Screens ----------
-function go(id, replace) {
+function go(id, replace, hash) {
   if (!SCREENS.includes(id)) id = "home";
   if (!state.lesson && ["review", "listen", "flashcard", "finish"].includes(id)) id = "home";
   if (id === "listen" && !hasAudio()) id = "flashcard";
   $$(".screen").forEach(s => s.classList.toggle("active", s.id === "screen-" + id));
   $$("[data-nav]").forEach(t => t.dataset.nav === id ? t.setAttribute("aria-current", "page") : t.removeAttribute("aria-current"));
-  const hash = "#" + id;
-  if (location.hash !== hash) history[replace ? "replaceState" : "pushState"](null, "", hash);
+  const targetHash = hash || ("#" + id);
+  if (location.hash !== targetHash) history[replace ? "replaceState" : "pushState"](null, "", targetHash);
   closeNav();
   window.scrollTo(0, 0);
   if (id === "flashcard") loadCards();
   if (id === "listen") loadTrack();
   if (id === "library") loadLibrary();
 }
-window.addEventListener("hashchange", () => { if (!joinFromLink()) go(location.hash.slice(1), true); });
+window.addEventListener("hashchange", () => {
+  if (!joinFromLink() && !(window.testRoute && window.testRoute())) go(location.hash.slice(1), true);
+});
 const hasAudio = () => !!state.lesson && Object.keys(state.lesson.tracks).length > 0;
 
 function closeNav() {
@@ -89,17 +91,24 @@ function renderFlow() {
 
 function renderLesson() {
   const l = state.lesson;
+  const hasTests = state.tests && state.tests.length > 0;
   document.body.classList.toggle("no-lesson", !l);
   document.body.classList.toggle("no-audio", !hasAudio());
   document.body.classList.toggle("no-ask", !(l && l.ask));
   $("homeCta").hidden = !l;
-  $("homeEmptyCta").hidden = !!l;
+  $("homeEmptyCta").hidden = !!l || hasTests;
   $("homeListHeading").hidden = !l;
   $$("[data-next-listen]").forEach(b => { b.textContent = hasAudio() ? "Tiếp tục: Nghe podcast" : "Tiếp tục: Flashcard"; });
   if (!l) {
-    $("homePill").textContent = "Tài khoản mới";
-    $("home-title").textContent = "Chưa có bài học nào";
-    $("homeNote").textContent = "Tải lên bài của bạn, hoặc nhờ đồng nghiệp share bài để bắt đầu học.";
+    if (hasTests) {
+      $("homePill").textContent = "Luyện thi";
+      $("home-title").textContent = "Bộ đề luyện thi";
+      $("homeNote").textContent = "Chọn bộ đề bên dưới để bắt đầu làm bài.";
+    } else {
+      $("homePill").textContent = "Tài khoản mới";
+      $("home-title").textContent = "Chưa có bài học nào";
+      $("homeNote").textContent = "Tải lên bài của bạn, hoặc nhờ đồng nghiệp share bài để bắt đầu học.";
+    }
     $("summary").textContent = "";
     $("askChips").textContent = "";
     $("dockKicker").textContent = "";
@@ -156,6 +165,50 @@ function renderLesson() {
   renderTime();
 }
 
+function renderHomeTests() {
+  const heading = $("homeTestsHeading");
+  const box = $("homeTestList");
+  if (!heading || !box) return;
+  const tests = state.tests || [];
+  heading.hidden = tests.length === 0;
+  box.textContent = "";
+  tests.forEach(t => {
+    const row = document.createElement("article");
+    row.className = "stream-row";
+    const info = document.createElement("div");
+    info.className = "stream-info";
+    const title = document.createElement("h3");
+    title.className = "stream-title";
+    title.textContent = t.title;
+    const pills = document.createElement("div");
+    pills.className = "meta-pills";
+    const pillTexts = [
+      `${t.items} câu`,
+      t.minutes ? `${t.minutes} phút` : "Không giới hạn giờ",
+      t.best_percent !== null && t.best_percent !== undefined ? `Điểm cao nhất: ${t.best_percent}%` : null,
+      t.pool ? `Chờ ôn: ${t.pool} câu` : null,
+    ].filter(Boolean);
+    pillTexts.forEach(txt => {
+      const p = document.createElement("span");
+      p.className = "meta-pill";
+      p.textContent = txt;
+      pills.append(p);
+    });
+    info.append(title, pills);
+    const act = document.createElement("div");
+    act.className = "stream-actions";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-studio-primary";
+    btn.dataset.act = "test-open";
+    btn.dataset.id = t.key;
+    btn.textContent = "Làm đề";
+    act.append(btn);
+    row.append(info, act);
+    box.append(row);
+  });
+}
+
 function renderList() {
   const box = $("lessonList");
   box.textContent = "";
@@ -192,6 +245,7 @@ function renderList() {
     row.append(info, act);
     box.append(row);
   });
+  renderHomeTests();
   const dueText = state.due ? `Còn ${state.due} thẻ đến hạn` : "Không có thẻ đến hạn";
   $$("[data-due-text]").forEach(e => { e.textContent = dueText; });
   $$("[data-due-short]").forEach(e => { e.textContent = state.due ? `${state.due} thẻ` : ""; });
@@ -552,7 +606,11 @@ document.addEventListener("keydown", e => {
 
 // ---------- Start ----------
 async function refresh() {
-  const d = await api("/api/lessons");
+  const [d, tData] = await Promise.all([
+    api("/api/lessons"),
+    api("/api/tests").catch(() => ({ tests: [] }))
+  ]);
+  state.tests = tData.tests || [];
   const current = state.lesson && state.lesson.id;
   const heard = state.lesson ? state.lesson.tracks : null;
   state.lessons = d.lessons;
@@ -591,6 +649,7 @@ function joinFromLink() {
     if (!p.mine && !confirm(`Tác giả ${p.author} share bài này:\n${p.title.replace(/\s+/g, " ")}\n\nThêm vào thư viện?`)) return;
     const d = await api("/api/join", send("POST", { token: m[1] }));
     if (d.first_lesson) location.replace("/lesson/" + d.first_lesson);
+    else location.hash = "#tests=" + d.package_id;
   }).catch(e => {
     if (e.message === "login" || e.message === "password") return;
     $("homeAlert").textContent = e.message;
@@ -607,5 +666,5 @@ document.addEventListener("DOMContentLoaded", () => (async function init() {
   renderThemeLabel();
   joinFromLink();
   await refresh();
-  go(location.hash.slice(1) || "home", true);
+  if (!(window.testRoute && window.testRoute())) go(location.hash.slice(1) || "home", true);
 })().catch(err => { if (err.message !== "login" && err.message !== "password") console.error(err); }));
