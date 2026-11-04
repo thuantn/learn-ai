@@ -575,29 +575,167 @@ def run(br, base, temp, work):
     note_speech = an.locator("#testSpeechNote")
     check("nút giọng đọc hoặc lý do ẩn đều hiện đúng", btn_speech.is_visible() or note_speech.is_visible())
 
-    # 17b. the voice follows the question's language, not the app's
-    spoken = an.evaluate("""() => {
-        const out = [];
-        const voices = [{ lang: "vi-VN", localService: true }, { lang: "en-US", localService: true }];
+    # 17b. read aloud, against a stub engine that behaves like a browser: speak() queues, cancel() reports
+    # "canceled" on what was queued a moment later, and each test decides which voices the device has.
+    an.evaluate("""() => {
         if (!("speechSynthesis" in window)) window.speechSynthesis = {};  // WebKit builds without speech
-        speechSynthesis.getVoices = () => voices;
-        speechSynthesis.speak = u => out.push({ lang: u.lang, text: u.text });
-        speechSynthesis.cancel = () => {};
+        const eng = window.__eng = { voices: [], said: [], live: [] };
+        speechSynthesis.getVoices = () => eng.voices;
+        speechSynthesis.resume = () => {};
+        speechSynthesis.speak = u => { eng.said.push({ lang: u.lang, text: u.text, rate: u.rate, voice: u.voice && u.voice.name }); eng.live.push(u); if (!eng.noStart) setTimeout(() => u.onstart && u.onstart({}), 0); };
+        speechSynthesis.cancel = () => { const was = eng.live; eng.live = []; setTimeout(() => was.forEach(u => u.onerror && u.onerror({ error: "canceled" })), 0); };
         window.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
+        window.__saved = _currentIndex;
+        window.__spoken = () => { const t = eng.said.map(x => x.text).join(" "); eng.said = []; return t; };
+        setupTts();
+    }""")
+    SETTLE = "new Promise(r => setTimeout(r, 40))"
+
+    # The voice follows the question's language, not the app's.
+    spoken = an.evaluate("""async () => {
+        __eng.voices = [{ lang: "vi-VN", localService: true }, { lang: "en-US", localService: true }];
         const item = _currentAttempt.items[_currentIndex];
         const saved = { q: item.question, o: item.options.map(x => x.text) };
+        const one = () => { const r = { lang: __eng.said[0] && __eng.said[0].lang, text: __spoken() }; toggleSpeech(); return r; };
         item.question = "Câu hỏi tiếng Việt có dấu?";
-        toggleSpeech();
+        toggleSpeech(); const vi = one();
         item.question = "Which feature should the administrator configure first?";
         item.options.forEach((x, i) => { x.text = "Option text " + i; });
-        toggleSpeech();
+        toggleSpeech(); const en = one();
         item.question = saved.q; item.options.forEach((x, i) => { x.text = saved.o[i]; });
-        return out;
+        await """ + SETTLE + """;
+        return [vi, en];
     }""")
     check("giọng đọc theo ngôn ngữ của câu",
-          len(spoken) == 2 and spoken[0]["lang"] == "vi-VN" and "Lựa chọn A" in spoken[0]["text"]
-          and spoken[1]["lang"] == "en-US" and "Option A" in spoken[1]["text"] and "Lựa chọn" not in spoken[1]["text"],
-          [(s["lang"], s["text"][:40]) for s in spoken])
+          spoken[0]["lang"] == "vi-VN" and "Lựa chọn A" in spoken[0]["text"]
+          and spoken[1]["lang"] == "en-US" and "Option A" in spoken[1]["text"] and "Lựa chọn" not in spoken[1]["text"], spoken)
+
+    # Reading stays on across questions until it is turned off, and a late "canceled" from the old question does not stop it.
+    flow = an.evaluate("""async () => {
+        const qText = i => { const d = document.createElement("div"); d.innerHTML = renderTestText(_currentAttempt.items[i].question); return d.textContent.trim().slice(0, 25); };
+        const start = _currentIndex, next = start + 1, btn = $("btnTestSpeech");
+        __spoken(); toggleSpeech(); const first = __spoken(); const onLabel = btn.textContent;
+        goToQuestion(next); await """ + SETTLE + """;
+        const second = __spoken(), stillOn = btn.textContent;
+        await """ + SETTLE + """;
+        const live = __eng.live.length;
+        toggleSpeech(); const offLabel = btn.textContent; __spoken();
+        goToQuestion(start); await """ + SETTLE + """;
+        return { first, second, onLabel, stillOn, live, offLabel, afterOff: __spoken(), wantFirst: qText(start), wantNext: qText(next) };
+    }""")
+    check("đang đọc thì qua câu sau đọc tiếp", flow["wantNext"] in flow["second"] and flow["wantFirst"] in flow["first"], flow)
+    check("lỗi canceled của câu cũ không tắt phần đọc mới", flow["stillOn"] == flow["onLabel"] and flow["live"] > 0, flow)
+    check("tắt đọc thì qua câu không đọc nữa", flow["afterOff"] == "" and flow["offLabel"] == "Đọc", flow)
+
+    # A long question goes out in pieces: Chrome cuts one long utterance off after about 15 seconds.
+    pieces = an.evaluate("""() => {
+        const item = _currentAttempt.items[_currentIndex], saved = item.question;
+        item.question = "First sentence here. Second sentence here! Is version 2.5 third?";
+        __eng.said = []; toggleSpeech(); const said = __eng.said.map(x => x.text); toggleSpeech();
+        item.question = saved; return said;
+    }""")
+    check("câu dài được đọc từng đoạn", len(pieces) >= 3 and "2.5" in " ".join(pieces) and not any(len(x) > 300 for x in pieces), pieces)
+
+    # Reading speed: a control beside the button, remembered, applied at once.
+    speed = an.evaluate("""async () => {
+        const rate = $("btnTestSpeechRate");
+        if (!rate) return { missing: true };
+        try { localStorage.removeItem("learn.test-speech-rate"); } catch (_) {}
+        setupTts();
+        const before = rate.textContent, visible = !!rate.offsetParent;
+        toggleSpeech(); __eng.said = []; rate.click(); await """ + SETTLE + """;
+        const r = { before, visible, after: rate.textContent, used: __eng.said.length ? __eng.said[0].rate : null, kept: localStorage.getItem("learn.test-speech-rate") };
+        toggleSpeech(); __eng.said = [];
+        for (let i = 0; i < 4; i++) rate.click();
+        r.back = rate.textContent; toggleSpeech(); r.usedAfterCycle = __eng.said[0].rate; toggleSpeech();
+        return r;
+    }""")
+    check("có nút chỉnh tốc độ đọc, áp dụng ngay, nhớ lại",
+          not speed.get("missing") and speed["before"] == "1x" and speed["visible"] and speed["after"] == "1,25x" and speed["used"] == 1.25 and speed["kept"] == "1.25"
+          and speed["back"] == "1x" and speed["usedAfterCycle"] == 1, speed)
+
+    # Phones: voices often load late or never get listed. The button stays, and speaking is tried anyway.
+    empty = an.evaluate("""async () => {
+        const saved = __eng.voices; __eng.voices = []; __eng.said = [];
+        setupTts();
+        const visible = !!$("btnTestSpeech").offsetParent, hidden = $("btnTestSpeech").hidden;
+        toggleSpeech(); await """ + SETTLE + """;
+        const r = { visible, hidden, said: __eng.said.length, lang: __eng.said[0] && __eng.said[0].lang };
+        toggleSpeech(); __eng.voices = saved; return r;
+    }""")
+    check("chưa có danh sách giọng vẫn hiện nút và vẫn thử đọc", empty["visible"] and empty["said"] > 0 and empty["lang"] in ("en-US", "vi-VN"), empty)
+
+    # A device that lists voices but has none for this language says so instead of reading in the wrong accent.
+    novoice = an.evaluate("""() => {
+        const saved = __eng.voices; __eng.voices = [{ lang: "ja-JP", localService: true }]; __eng.said = [];
+        toggleSpeech();
+        const note = $("testSpeechNote"), r = { said: __eng.said.length, note: note.textContent, shown: !note.hidden, label: $("btnTestSpeech").textContent };
+        __eng.voices = saved; note.hidden = true; return r;
+    }""")
+    check("không có giọng đúng tiếng thì báo, không đọc sai", novoice["said"] == 0 and novoice["shown"] and "giọng đọc" in novoice["note"] and novoice["label"] == "Đọc", novoice)
+
+    # Voice picker: the voices of the question's language, one choice per language, remembered, applied at once.
+    pick = an.evaluate("""async () => {
+        const sel = $("testSpeechVoice");
+        if (!sel) return { missing: true };
+        const saved = __eng.voices, start = _currentIndex, next = start + 1, item = _currentAttempt.items[next];
+        const keep = { q: item.question, o: item.options.map(x => x.text) };
+        const names = () => [...sel.options].map(o => o.textContent);
+        try { localStorage.removeItem("learn.test-speech-voice.vi"); localStorage.removeItem("learn.test-speech-voice.en"); } catch (_) {}
+        __eng.voices = [{ lang: "vi-VN", name: "An", voiceURI: "an", localService: true }, { lang: "vi_VN", name: "Binh", voiceURI: "binh" },
+                        { lang: "en-US", name: "Emma", voiceURI: "emma" }, { lang: "en-GB", name: "Oli", voiceURI: "oli" }];
+        setupTts();
+        const r = { vi: names(), visible: !!sel.offsetParent };
+        toggleSpeech(); __eng.said = [];
+        sel.value = "binh"; sel.dispatchEvent(new Event("change", { bubbles: true })); await """ + SETTLE + """;
+        r.used = __eng.said.length ? __eng.said[0].voice : null;
+        r.kept = localStorage.getItem("learn.test-speech-voice.vi");
+        toggleSpeech(); __eng.said = [];
+        item.question = "Which feature should the administrator configure first?";
+        item.options.forEach((x, i) => { x.text = "Option text " + i; });
+        goToQuestion(next);
+        r.en = names();
+        toggleSpeech(); r.enVoice = __eng.said[0] && __eng.said[0].voice; toggleSpeech(); __eng.said = [];
+        item.question = keep.q; item.options.forEach((x, i) => { x.text = keep.o[i]; });
+        goToQuestion(start);
+        r.backValue = sel.value;
+        toggleSpeech(); r.backVoice = __eng.said[0] && __eng.said[0].voice; toggleSpeech(); __eng.said = [];
+        localStorage.setItem("learn.test-speech-voice.vi", "gone");
+        setupTts();
+        toggleSpeech(); r.goneVoice = __eng.said[0] && __eng.said[0].voice; toggleSpeech(); __eng.said = [];
+        localStorage.removeItem("learn.test-speech-voice.vi");
+        __eng.voices = [__eng.voices[0]];
+        setupTts();
+        r.oneHidden = sel.hidden;
+        __eng.voices = saved; setupTts(); await """ + SETTLE + """;
+        return r;
+    }""")
+    check("có ô chọn giọng theo ngôn ngữ của câu, áp dụng ngay, nhớ theo từng tiếng",
+          not pick.get("missing") and pick["vi"] == ["An", "Binh"] and pick["visible"] and pick["used"] == "Binh" and pick["kept"] == "binh"
+          and pick["en"] == ["Emma", "Oli"] and pick["enVoice"] == "Emma" and pick["backValue"] == "binh" and pick["backVoice"] == "Binh", pick)
+    check("giọng đã lưu không còn trên máy thì dùng giọng mặc định", not pick.get("missing") and pick["goneVoice"] == "An", pick)
+    check("chỉ có một giọng thì ẩn ô chọn", not pick.get("missing") and pick["oneHidden"] is True, pick)
+
+    # An engine that has not started after a few seconds gets a note, and the note goes when it does start.
+    slow = an.evaluate("""async () => {
+        __eng.noStart = true; toggleSpeech();
+        const u = __eng.live[0];
+        for (let i = 0; i < 70 && $("testSpeechNote").hidden; i++) await new Promise(r => setTimeout(r, 100));
+        const note = $("testSpeechNote"), r = { shown: !note.hidden, label: $("btnTestSpeech").textContent };
+        __eng.noStart = false; u.onstart({}); r.afterStart = note.hidden; toggleSpeech(); __eng.said = [];
+        return r;
+    }""")
+    check("máy chưa phát được thì báo, phát được thì tự bỏ báo", slow["shown"] and slow["label"] == "Tắt đọc" and slow["afterStart"], slow)
+
+    # A real failure is shown, not swallowed: this was how a phone went silent with no explanation.
+    failed = an.evaluate("""async () => {
+        toggleSpeech(); const u = __eng.live[__eng.live.length - 1];
+        u.onerror({ error: "synthesis-failed" }); await """ + SETTLE + """;
+        const note = $("testSpeechNote"), r = { shown: !note.hidden, note: note.textContent, label: $("btnTestSpeech").textContent };
+        note.hidden = true; __eng.said = []; goToQuestion(__saved); await """ + SETTLE + """;
+        r.afterwards = __eng.said.length; return r;
+    }""")
+    check("đọc lỗi thì báo rõ và tắt", failed["shown"] and "synthesis-failed" in failed["note"] and failed["label"] == "Đọc" and failed["afterwards"] == 0, failed)
 
     # 18. rời màn làm bài bằng Back dọn sạch
     in_test_before = an.evaluate("document.body.classList.contains('in-test')")

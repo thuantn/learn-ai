@@ -2521,10 +2521,33 @@ body.in-test .stage-body {
   margin-bottom: 1rem;
 }
 
-.test-font-controls, .test-tts-controls {
+.test-font-controls {
   display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.test-tts-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.test-voice-select {
+  min-height: 36px;
+  max-width: 11rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 8px;
+  background: var(--bg-well);
+  color: var(--text-main);
+  border: 1px solid var(--control-line);
+  font-size: 0.8125rem;
+}
+
+.test-voice-select option {
+  background: var(--bg-panel);
+  color: var(--text-main);
 }
 
 .test-tool-label, .test-tool-note {
@@ -2538,7 +2561,7 @@ body.in-test .stage-body {
   padding: 0.25rem 0.6rem;
   border-radius: 8px;
   background: var(--bg-well);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--control-line);
   color: var(--text-main);
   font-size: 0.8125rem;
   font-weight: 600;

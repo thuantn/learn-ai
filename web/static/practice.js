@@ -394,75 +394,265 @@ const VI_MARKS = /[ăâđêôơưàáạảãằắặẳẵầấậẩẫèé�
 const textLang = text => (VI_MARKS.test(text) ? "vi" : "en");
 const LANG_NAME = { vi: "tiếng Việt", en: "tiếng Anh" };
 
+let _readingOn = false;
+let _speechRun = 0;
+let _speechStartTimer = null;
+
+function currentSpeechRate() {
+  try {
+    const raw = localStorage.getItem("learn.test-speech-rate");
+    if (raw !== null) {
+      const v = parseFloat(raw);
+      if (SPEEDS.includes(v)) return v;
+    }
+  } catch (_) {}
+  return 1;
+}
+
+function renderSpeechRate() {
+  const btn = $("btnTestSpeechRate");
+  if (!btn) return;
+  const v = currentSpeechRate();
+  btn.textContent = String(v).replace(".", ",") + "x";
+}
+
+function cycleSpeechRate() {
+  const next = SPEEDS[(SPEEDS.indexOf(currentSpeechRate()) + 1) % SPEEDS.length];
+  try {
+    localStorage.setItem("learn.test-speech-rate", String(next));
+  } catch (_) {}
+  renderSpeechRate();
+  if (_readingOn) readCurrentQuestion();
+}
+
+function voicesFor(lang) {
+  if (!lang || !("speechSynthesis" in window) || !window.speechSynthesis.getVoices) return [];
+  return window.speechSynthesis.getVoices().filter(v => v.lang && v.lang.toLowerCase().startsWith(lang.toLowerCase()));
+}
+
 function voiceFor(lang) {
-  const voices = window.speechSynthesis.getVoices().filter(v => v.lang && v.lang.toLowerCase().startsWith(lang));
+  const voices = voicesFor(lang);
+  if (!voices.length) return null;
+  let saved = null;
+  try {
+    saved = localStorage.getItem("learn.test-speech-voice." + lang);
+  } catch (_) {}
+  if (saved) {
+    const match = voices.find(v => v.voiceURI === saved);
+    if (match) return match;
+  }
   return voices.find(v => v.default) || voices.find(v => v.localService) || voices[0] || null;
+}
+
+function currentSpeechLang() {
+  if (!_currentAttempt || !_currentAttempt.items || !_currentAttempt.items[_currentIndex]) return null;
+  const item = _currentAttempt.items[_currentIndex];
+  const div = document.createElement("div");
+  div.innerHTML = renderTestText(item.question);
+  const qText = div.textContent || "";
+  const opts = (item.options || []).map(o => o.text).join(" ");
+  return textLang(qText + " " + opts);
+}
+
+function renderVoicePicker() {
+  const sel = $("testSpeechVoice");
+  if (!sel) return;
+  const lang = currentSpeechLang();
+  const voices = voicesFor(lang);
+  sel.innerHTML = "";
+  for (const v of voices) {
+    const opt = document.createElement("option");
+    opt.value = v.voiceURI;
+    opt.textContent = v.name;
+    sel.appendChild(opt);
+  }
+  sel.hidden = voices.length < 2;
+  const picked = voiceFor(lang);
+  if (picked) {
+    sel.value = picked.voiceURI;
+  }
+  sel.onchange = () => {
+    const curLang = currentSpeechLang();
+    if (curLang) {
+      try {
+        localStorage.setItem("learn.test-speech-voice." + curLang, sel.value);
+      } catch (_) {}
+    }
+    if (_readingOn) readCurrentQuestion();
+  };
 }
 
 function setupTts() {
   const btn = $("btnTestSpeech");
+  const rateBtn = $("btnTestSpeechRate");
+  const picker = $("testSpeechVoice");
   const note = $("testSpeechNote");
-  if (!btn || !note) return;
   if (!("speechSynthesis" in window)) {
-    btn.hidden = true;
-    note.textContent = "Trình duyệt không hỗ trợ giọng đọc.";
-    note.hidden = false;
+    if (btn) btn.hidden = true;
+    if (rateBtn) rateBtn.hidden = true;
+    if (picker) picker.hidden = true;
+    if (note) {
+      note.textContent = "Trình duyệt không hỗ trợ giọng đọc.";
+      note.hidden = false;
+    }
     return;
   }
-  function showButton() {
-    const any = window.speechSynthesis.getVoices().length > 0;
-    btn.hidden = !any;
-    note.textContent = any ? "" : "Thiết bị chưa có giọng đọc.";
-    note.hidden = any;
+  if (btn) btn.hidden = false;
+  if (rateBtn) rateBtn.hidden = false;
+  if (note) note.hidden = true;
+  renderSpeechRate();
+  renderVoicePicker();
+  if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    window.speechSynthesis.onvoiceschanged = renderVoicePicker;
   }
-  showButton();
-  if (window.speechSynthesis.onvoiceschanged !== undefined) window.speechSynthesis.onvoiceschanged = showButton;
+}
+
+// No lookbehind: older iOS WebKit cannot parse it.
+function speechChunks(text) {
+  if (!text) return [];
+  const lines = text.replace(/([.!?…])\s+/g, "$1\n").split("\n");
+  const chunks = [];
+  for (const raw of lines) {
+    let cur = raw.trim();
+    if (!cur) continue;
+    while (cur.length > 220) {
+      const cut = cur.lastIndexOf(" ", 220);
+      if (cut <= 0) {
+        chunks.push(cur.slice(0, 220));
+        cur = cur.slice(220).trim();
+      } else {
+        chunks.push(cur.slice(0, cut));
+        cur = cur.slice(cut + 1).trim();
+      }
+    }
+    if (cur.length > 0) chunks.push(cur);
+  }
+  return chunks;
+}
+
+// Increment run to make events from older utterances stale.
+function silenceSpeech() {
+  _speechRun++;
+  if (_speechStartTimer) {
+    clearTimeout(_speechStartTimer);
+    _speechStartTimer = null;
+  }
+  if (window.speechSynthesis && window.speechSynthesis.cancel) {
+    window.speechSynthesis.cancel();
+  }
 }
 
 function stopSpeech() {
-  if (window.speechSynthesis) {
-    window.speechSynthesis.cancel();
-  }
+  _readingOn = false;
+  silenceSpeech();
   const btn = $("btnTestSpeech");
-  if (btn) btn.textContent = "Đọc";
+  if (btn) {
+    btn.textContent = "Đọc";
+    btn.setAttribute("aria-label", "Đọc câu hỏi");
+  }
 }
 
-function toggleSpeech() {
-  if (!("speechSynthesis" in window)) return;
-  if (window.speechSynthesis.speaking) {
-    stopSpeech();
-    return;
-  }
+function readCurrentQuestion() {
+  silenceSpeech();
+  const run = _speechRun;
   if (!_currentAttempt || !_currentAttempt.items || !_currentAttempt.items[_currentIndex]) return;
   const item = _currentAttempt.items[_currentIndex];
+
+  const lang = currentSpeechLang();
+  const voices = (window.speechSynthesis && window.speechSynthesis.getVoices) ? window.speechSynthesis.getVoices() : [];
+  const voice = voiceFor(lang);
+  if (voices.length > 0 && !voice) {
+    stopSpeech();
+    const note = $("testSpeechNote");
+    if (note) {
+      note.textContent = "Thiết bị chưa có giọng đọc " + (LANG_NAME[lang] || lang) + ".";
+      note.hidden = false;
+    }
+    return;
+  }
 
   const div = document.createElement("div");
   div.innerHTML = renderTestText(item.question);
   const qText = div.textContent || "";
-  const lang = textLang(qText + " " + item.options.map(o => o.text).join(" "));
-  const voice = voiceFor(lang);
-  const note = $("testSpeechNote");
-  if (!voice) {
-    if (note) { note.textContent = "Thiết bị chưa có giọng đọc " + LANG_NAME[lang] + "."; note.hidden = false; }
-    return;
-  }
-  if (note) note.hidden = true;
-
+  const pieces = speechChunks(qText);
   const label = lang === "vi" ? "Lựa chọn" : "Option";
-  let speechText = qText + ".\n";
-  item.options.forEach((opt, idx) => {
-    speechText += `${label} ${String.fromCharCode(65 + idx)}: ${opt.text}.\n`;
+  (item.options || []).forEach((opt, idx) => {
+    const letter = String.fromCharCode(65 + idx);
+    pieces.push(`${label} ${letter}: ${opt.text}.`);
   });
 
-  const u = new SpeechSynthesisUtterance(speechText);
-  u.voice = voice;
-  u.lang = voice.lang;
-  u.onend = () => { stopSpeech(); };
-  u.onerror = () => { stopSpeech(); };
+  if (!pieces.length || !window.speechSynthesis) return;
 
+  if (typeof window.speechSynthesis.resume === "function") {
+    try {
+      window.speechSynthesis.resume();
+    } catch (_) {}
+  }
+
+  const rate = currentSpeechRate();
+  const defaultLang = lang === "vi" ? "vi-VN" : "en-US";
+
+  // Speak all pieces synchronously: iOS requires the first speak inside the tap gesture.
+  pieces.forEach((piece, idx) => {
+    const u = new SpeechSynthesisUtterance(piece);
+    u.rate = rate;
+    if (voice) {
+      u.voice = voice;
+      u.lang = voice.lang;
+    } else {
+      u.lang = defaultLang;
+    }
+    if (idx === 0) {
+      u.onstart = () => {
+        if (run !== _speechRun) return;
+        if (_speechStartTimer) {
+          clearTimeout(_speechStartTimer);
+          _speechStartTimer = null;
+        }
+        const startNote = $("testSpeechNote");
+        if (startNote) startNote.hidden = true;
+      };
+    }
+    u.onerror = e => {
+      if (run !== _speechRun) return;
+      if (e && (e.error === "canceled" || e.error === "interrupted")) return;
+      stopSpeech();
+      const note = $("testSpeechNote");
+      if (note) {
+        const err = (e && e.error) ? e.error : "unknown";
+        note.textContent = "Không đọc được (" + err + "). Kiểm tra âm lượng và giọng đọc của thiết bị.";
+        note.hidden = false;
+      }
+    };
+    window.speechSynthesis.speak(u);
+  });
+
+  _speechStartTimer = setTimeout(() => {
+    if (run !== _speechRun) return;
+    const note = $("testSpeechNote");
+    if (note) {
+      note.textContent = "Thiết bị chưa phát được giọng đọc. Kiểm tra âm lượng; iPhone cần tắt công tắc im lặng.";
+      note.hidden = false;
+    }
+  }, 5000);
+}
+
+function toggleSpeech() {
+  if (!("speechSynthesis" in window)) return;
+  if (_readingOn) {
+    stopSpeech();
+    return;
+  }
+  if (!_currentAttempt || !_currentAttempt.items || !_currentAttempt.items[_currentIndex]) return;
+  const note = $("testSpeechNote");
+  if (note) note.hidden = true;
+  _readingOn = true;
   const btn = $("btnTestSpeech");
-  if (btn) btn.textContent = "Dừng";
-  window.speechSynthesis.speak(u);
+  if (btn) {
+    btn.textContent = "Tắt đọc";
+    btn.setAttribute("aria-label", "Tắt đọc câu hỏi");
+  }
+  readCurrentQuestion();
 }
 
 function startClock() {
@@ -863,10 +1053,11 @@ function renderGrid() {
 function goToQuestion(idx) {
   if (!_currentAttempt || !_currentAttempt.items) return;
   if (idx < 0 || idx >= _currentAttempt.items.length) return;
-  stopSpeech();
   _currentIndex = idx;
   renderCurrentQuestion();
   renderGrid();
+  renderVoicePicker();
+  if (_readingOn) readCurrentQuestion();
   const pane = $("testGridPane");
   if (pane) pane.classList.remove("is-open");
 }
@@ -920,7 +1111,7 @@ async function checkCurrentItem() {
       updateSaveIndicator();
     }
     _currentAttempt.items[_currentIndex] = checkedItem;
-    stopSpeech();
+    silenceSpeech();
     renderCurrentQuestion();
     renderGrid();
   } catch (err) {
@@ -1560,6 +1751,7 @@ Object.assign(ACTIONS, {
   "test-font-dec": () => { changeFont(-1); },
   "test-font-inc": () => { changeFont(1); },
   "test-speech": () => { toggleSpeech(); },
+  "test-speech-rate": () => { cycleSpeechRate(); },
   "test-item-ask": el => { openItemAsk(el.dataset.itemId); },
   "test-item-feedback": el => { reportItem(el.dataset.itemId); },
   "test-ask-clear": () => { clearItemAsk(); },
