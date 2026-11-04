@@ -358,7 +358,8 @@ let _saveQueue = {};
 let _resultAttempt = null;
 let _resultFilter = "all";
 let _loadToken = 0;
-let _submitting = false;
+let _submitting = null;  // the attempt whose submit is on its way
+let _pausing = null;  // settles once a pause sent on leaving is done
 
 function showRunNotice(text) {
   const el = $("testRunNotice");
@@ -376,6 +377,7 @@ function clearRunNotice() {
 
 function endAttempt(pauseClock = false) {
   document.body.classList.remove("in-test");
+  _loadToken++;  // a load still on its way must not bring this attempt back
   if (_clockInterval) {
     clearInterval(_clockInterval);
     _clockInterval = null;
@@ -383,29 +385,24 @@ function endAttempt(pauseClock = false) {
 
   const attId = _currentAttemptId;
   const att = _currentAttempt;
-
-  if (pauseClock && att && att.mode === "exam" && att.time_limit_seconds > 0 && att.status === "open" && attId) {
-    fetch(`/api/attempts/${encodeURIComponent(attId)}/pause`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
-      keepalive: true
-    }).catch(() => {});
-  }
+  const saves = [];
 
   for (const itemId in _saveQueue) {
     const q = _saveQueue[itemId];
     if (q) {
       // Its reply sends what is pending; sending that now could arrive first and be overwritten by the older answer.
-      if (q.status === "sending") continue;
+      if (q.status === "sending") {
+        saves.push(q.flight);
+        continue;
+      }
       const payload = Object.assign({}, q.failed, q.pending);
       if (Object.keys(payload).length > 0 && attId) {
-        fetch(`/api/attempts/${encodeURIComponent(attId)}/items/${encodeURIComponent(itemId)}`, {
+        saves.push(fetch(`/api/attempts/${encodeURIComponent(attId)}/items/${encodeURIComponent(itemId)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
           keepalive: true
-        }).catch(() => {});
+        }).catch(() => {}));
       }
       q.failed = null;
       q.pending = null;
@@ -416,6 +413,19 @@ function endAttempt(pauseClock = false) {
     }
   }
   _saveQueue = {};
+
+  // The server refuses answers on a paused attempt, so the clock stops only after they have arrived.
+  // A submit on its way ends the attempt anyway, and a pause arriving first could get in its way.
+  if (pauseClock && _submitting !== attId && att && att.mode === "exam" && att.time_limit_seconds > 0 && att.status === "open" && attId) {
+    const giveUp = new Promise(done => setTimeout(done, 30000));
+    _pausing = Promise.race([Promise.allSettled(saves), giveUp]).then(() => fetch(`/api/attempts/${encodeURIComponent(attId)}/pause`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      keepalive: true
+    })).catch(() => {});
+  }
+
   stopSpeech();
   clearRunNotice();
   const autoErr = $("testAutoSubmitError");
@@ -803,7 +813,7 @@ function queueSave(itemId, changes) {
   }
   q.status = "sending";
   updateSaveIndicator();
-  sendSave(itemId, changes, _currentAttemptId, q);
+  q.flight = sendSave(itemId, changes, _currentAttemptId, q);
 }
 
 async function sendSave(itemId, payload, attId = _currentAttemptId, q = _saveQueue[itemId]) {
@@ -825,7 +835,7 @@ async function sendSave(itemId, payload, attId = _currentAttemptId, q = _saveQue
         const next = q.pending;
         q.pending = null;
         q.status = "sending";
-        sendSave(itemId, next, attId, q);
+        await sendSave(itemId, next, attId, q);
       }
       if (!isCurrent) return;
       updateSaveIndicator();
@@ -837,22 +847,21 @@ async function sendSave(itemId, payload, attId = _currentAttemptId, q = _saveQue
       showRunNotice("Máy chủ không nhận câu trả lời vừa rồi. Câu này chưa được lưu.");
       reloadAttempt();
     } else {
-      retrySave(itemId, attId, payload, q);
+      await retrySave(itemId, attId, payload, q);
     }
   } catch (err) {
-    retrySave(itemId, attId, payload, q);
+    await retrySave(itemId, attId, payload, q);
   }
 }
 
 function retrySave(itemId, attId, payload, q) {
   if (_currentAttemptId !== attId || !q) {
-    fetch(`/api/attempts/${encodeURIComponent(attId)}/items/${encodeURIComponent(itemId)}`, {
+    return fetch(`/api/attempts/${encodeURIComponent(attId)}/items/${encodeURIComponent(itemId)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(Object.assign({}, payload, q && q.pending)),
       keepalive: true
     }).catch(() => {});
-    return;
   }
   q.status = "failed";
   q.failed = Object.assign({}, payload, q.pending);
@@ -865,7 +874,7 @@ function retrySave(itemId, attId, payload, q) {
     const next = q.failed;
     q.failed = null;
     q.status = "sending";
-    sendSave(itemId, next, attId, q);
+    q.flight = sendSave(itemId, next, attId, q);
   }, 3000);
 }
 
@@ -1322,12 +1331,9 @@ function openSubmitDialog() {
 
 async function confirmSubmit(isAuto = false) {
   if (_submitting) return;
-  _submitting = true;
   const attId = _currentAttemptId;
-  if (!attId) {
-    _submitting = false;
-    return;
-  }
+  if (!attId) return;
+  _submitting = attId;
 
   const dia = $("testSubmitDialog");
   const btn = $("btnConfirmSubmit");
@@ -1337,9 +1343,16 @@ async function confirmSubmit(isAuto = false) {
   try {
     await api(`/api/attempts/${encodeURIComponent(attId)}/submit`, send("POST"));
     if (dia && dia.open) dia.close();
+    if (_currentAttemptId !== attId) return;  // moved on; the submit still counted
     endAttempt();
     location.hash = "#result=" + encodeURIComponent(attId);
   } catch (err) {
+    if (_currentAttemptId !== attId) {
+      if (dia && dia.open) dia.close();
+      // Left while it was on its way and it did not go through: the clock stops as it does on any other way out.
+      api(`/api/attempts/${encodeURIComponent(attId)}/pause`, send("POST")).catch(() => {});
+      return;
+    }
     if (err.code === "submitted") {
       if (dia && dia.open) dia.close();
       endAttempt();
@@ -1358,7 +1371,7 @@ async function confirmSubmit(isAuto = false) {
     }
   } finally {
     if (btn) btn.disabled = false;
-    _submitting = false;
+    _submitting = null;
   }
 }
 
@@ -1388,6 +1401,7 @@ async function showTestRun(attemptId) {
 
   const token = ++_loadToken;
   try {
+    await _pausing;  // coming straight back must see the attempt as paused, not as open and about to be
     const att = await api(`/api/attempts/${encodeURIComponent(attemptId)}`);
     if (token !== _loadToken) return;
     if (att.status === "submitted") {

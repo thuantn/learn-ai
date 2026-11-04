@@ -397,6 +397,20 @@ def test_frame_url_carries_only_a_known_theme(ctx, capsys):
         assert "/theme-" not in c.post(f"/api/lessons/{key}/frame").json()["url"]
 
 
+def test_theme_path_leaves_very_large_files_alone(ctx, capsys):
+    main, cli, _, tmp = ctx
+    c = ready_user(main, cli, capsys, "an")
+    key = install_sample(main, "an", tmp)
+    _page_with_theme_rules(main, tmp, key)
+    with main.db.connect() as conn:
+        big = main.catalog.lesson_dir(conn, key) / "page" / "big.js"
+    body = b"matchMedia('(prefers-color-scheme: dark)');" + b" " * main.REWRITE_LIMIT
+    big.write_bytes(body)
+    with c:
+        token = token_from(c.post(f"/api/lessons/{key}/frame").json()["url"])
+        assert c.get(f"/s/{token}/theme-light/page/big.js").content == body
+
+
 def test_theme_path_rewrites_colour_queries(ctx, capsys):
     main, cli, _, tmp = ctx
     c = ready_user(main, cli, capsys, "an")

@@ -1562,6 +1562,7 @@ async def ask(request: Request):
 
 # ---------- Static files ----------
 
+REWRITE_LIMIT = 2_000_000
 COLOR_QUERY = re.compile(r"\(\s*prefers-color-scheme\s*:\s*(dark|light)\s*\)", re.I)
 
 
@@ -1587,9 +1588,9 @@ def serve_listed(root, rel, extra=None, transform=None):
     headers = {"Cache-Control": "private, max-age=300"}
     if extra:
         headers.update(extra)
-    if transform is not None:
-        body = target.read_bytes()
-        return Response(transform(body), media_type=kind, headers=headers)
+    # ponytail: a text file above the limit keeps following the device's theme, which is only a colour mismatch.
+    if transform is not None and target.stat().st_size <= REWRITE_LIMIT:
+        return Response(transform(target.read_bytes()), media_type=kind, headers=headers)
     return FileResponse(target, media_type=kind, headers=headers)
 
 

@@ -533,6 +533,8 @@ def run(br, base, temp, work):
 
     # 14. không tràn ngang ở 360 px khi làm bài và ở kết quả
     w_run_360 = an.evaluate("document.documentElement.scrollWidth")
+    bar_h = an.evaluate("document.querySelector('.test-toolbar').getBoundingClientRect().height")
+    check("công cụ cỡ chữ và đọc nằm một hàng ở 360 px", bar_h < 50, bar_h)
     an.screenshot(path=str(SHOTS / "practice-run-360.png"))
     an.click("#btnTestPause")
     an.wait_for_timeout(200)
@@ -916,6 +918,78 @@ def run(br, base, temp, work):
     st.wait_for_timeout(500)
     shown = st.evaluate("[_currentAttempt && _currentAttempt.id, _currentAttemptId]")
     check("tải chậm đề cũ không đè đề mở sau", shown == [aid_b, aid_b], shown)
+
+    # Leaving a timed exam with answers on their way: they reach the server before the clock stops.
+    aid_x = st_open(key_t, "exam")
+    first_x = st.evaluate("_currentAttempt.items[_currentIndex].id")
+    opts_x = st.evaluate("[...document.querySelectorAll('.test-option-btn')].map(b => b.dataset.option)")
+    part_x = f"/api/attempts/{aid_x}/items/"
+    hold("PUT", part_x)
+    st.locator(".test-option-btn").nth(0).click()
+    poll(lambda: st.evaluate("part => __rules.some(x => x.part === part && x.taken && !x.gone)", part_x))
+    st.locator(".test-option-btn").nth(1).click()  # waits behind the first
+    st.click("#btnTestExit")
+    poll(lambda: st_hash() == f"#test={key_t}")
+    st.wait_for_timeout(300)
+    check("còn đáp án đang gửi thì chưa dừng đồng hồ", st_view(aid_x)["status"] == "open", st_view(aid_x)["status"])
+    letgo(part_x)
+    check("Thoát khi đang gửi: đồng hồ dừng sau khi đáp án tới", poll(lambda: st_view(aid_x)["status"] == "paused"), st_view(aid_x)["status"])
+    call(st, "POST", f"/api/attempts/{aid_x}/resume")  # a paused attempt shows no questions
+    chosen_x = next(x for x in st_view(aid_x)["items"] if x["id"] == first_x)["chosen"]
+    check("Thoát khi đang gửi: đáp án mới nhất không mất", chosen_x == [opts_x[1]], chosen_x)
+
+    # A load still on its way when you leave must not bring the attempt back.
+    st.evaluate("() => { location.hash = '#tests'; }")
+    st.wait_for_selector("#screen-tests.active")
+    hold("GET", f"/api/attempts/{aid_b}")
+    st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid_b)
+    poll(lambda: st.evaluate("part => __rules.some(x => x.part === part && x.taken && !x.gone)", f"/api/attempts/{aid_b}"))
+    st.evaluate("() => { location.hash = '#tests'; }")
+    st.wait_for_selector("#screen-tests.active")
+    letgo(f"/api/attempts/{aid_b}")
+    st.wait_for_timeout(500)
+    shown = st.evaluate("[_currentAttemptId, !!_clockInterval, document.body.classList.contains('in-test')]")
+    check("tải về muộn sau khi đã rời không mở lại đề", shown == [None, False, False], shown)
+
+    # A submit answered after moving to another attempt leaves that attempt alone.
+    aid_y = st_open(key_t, "exam")
+    hold("POST", f"/api/attempts/{aid_y}/submit")
+    st.click("#btnTestSubmit")
+    st.wait_for_selector("#testSubmitDialog[open]")
+    st.click("#btnConfirmSubmit")
+    poll(lambda: st.evaluate("part => __rules.some(x => x.part === part && x.taken && !x.gone)", f"/api/attempts/{aid_y}/submit"))
+    st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid_b)
+    poll(lambda: st.evaluate("aid => !!_currentAttempt && _currentAttempt.id === aid", aid_b))
+    letgo(f"/api/attempts/{aid_y}/submit")
+    st.wait_for_timeout(500)
+    shown = st.evaluate("[location.hash, _currentAttemptId, $('testSubmitDialog').open]")
+    check("nộp bài về muộn không đụng đề đang mở", shown == [f"#attempt={aid_b}", aid_b, False], shown)
+    check("nộp bài về muộn vẫn được ghi nhận", st_view(aid_y)["status"] == "submitted", st_view(aid_y)["status"])
+
+    # A second attempt left while the first is being submitted still stops, and so does the first if its submit fails.
+    aid_y = st_open(key_t, "exam")
+    hold("POST", f"/api/attempts/{aid_y}/submit")
+    st.click("#btnTestSubmit")
+    st.wait_for_selector("#testSubmitDialog[open]")
+    st.click("#btnConfirmSubmit")
+    poll(lambda: st.evaluate("part => __rules.some(x => x.part === part && x.taken && !x.gone)", f"/api/attempts/{aid_y}/submit"))
+    st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid_b)
+    poll(lambda: st.evaluate("aid => !!_currentAttempt && _currentAttempt.id === aid", aid_b))
+    letgo(f"/api/attempts/{aid_y}/submit", "fail")
+    check("nộp bài lỗi sau khi đã rời: đồng hồ của đề đó dừng", poll(lambda: st_view(aid_y)["status"] == "paused"), st_view(aid_y)["status"])
+
+    # Straight back to an attempt whose pause is still on its way: shown paused, not open.
+    aid_z = st_open(key_t, "exam")
+    hold("POST", f"/api/attempts/{aid_z}/pause")
+    st.click("#btnTestExit")
+    poll(lambda: st.evaluate("part => __rules.some(x => x.part === part && x.taken && !x.gone)", f"/api/attempts/{aid_z}/pause"))
+    st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid_z)
+    st.wait_for_timeout(200)
+    letgo(f"/api/attempts/{aid_z}/pause")
+    st.wait_for_selector("#testPausedPane:not([hidden])")
+    check("quay lại ngay khi đang dừng thì thấy đề đã tạm dừng", st.evaluate("_currentAttempt.status") == "paused", st.evaluate("_currentAttempt.status"))
+    st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid_b)
+    poll(lambda: st.evaluate("aid => !!_currentAttempt && _currentAttempt.id === aid", aid_b))
 
     # A check answered after moving on must not overwrite the question now on screen.
     st.wait_for_selector(".test-option-btn")

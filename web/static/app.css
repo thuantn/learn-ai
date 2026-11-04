@@ -1377,6 +1377,12 @@
       color: var(--text-dim);
     }
 
+    /* A button centres its text by itself; a link needs to be told. */
+    a.flow-step-item {
+      display: inline-flex;
+      align-items: center;
+    }
+
     button.flow-step-item:hover,
     a.flow-step-item:hover {
       color: var(--text-main);
@@ -1973,6 +1979,7 @@ a.drawer-nav-item { display: flex; align-items: center; text-decoration: none; c
 .dock-kicker { font-size: 0.8125rem; font-weight: 700; color: var(--accent-bright); }
 .dock-title { font-size: 1.0625rem; font-weight: 600; margin-top: 0.25rem; }
 .dock-note { font-size: 0.8125rem; color: var(--text-sub); margin-top: 0.25rem; }
+#fcScope { margin-bottom: 0.75rem; }
 .dock-foot { font-size: 0.8125rem; color: var(--text-sub); }
 .s-bar { opacity: 0.35; }
 .s-bar.played { opacity: 1; }
@@ -2644,6 +2651,14 @@ body.in-test .stage-body {
 .test-voice-select option {
   background: var(--bg-panel);
   color: var(--text-main);
+}
+
+/* On a phone the tools share one row, so the question starts higher. */
+@media (max-width: 480px) {
+  .test-toolbar { flex-wrap: nowrap; }
+  .test-font-controls .test-tool-label { display: none; }
+  .test-tts-controls { flex: 1; min-width: 0; }
+  .test-voice-select { flex: 1 1 0; min-width: 0; max-width: none; }
 }
 
 .test-tool-label, .test-tool-note {

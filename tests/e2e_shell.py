@@ -191,6 +191,8 @@ def run(br, base, temp, sample, hai):
     check("các bước gồm cả Đọc bài", steps == ["1. Ôn lại", "2. Flashcard", "3. Đọc bài"], steps)
     href = a.evaluate("document.querySelector('#screen-review .flow-steps a')?.getAttribute('href')")
     check("bước Đọc bài mở đúng bài", href == f"/lesson/{sample}", href)
+    centres = a.evaluate("[...document.querySelector('#screen-review .flow-steps').children].map(e => { const r = document.createRange(); r.selectNodeContents(e); const b = r.getBoundingClientRect(); return Math.round(b.top + b.height / 2); })")
+    check("chữ các bước nằm cùng một hàng", max(centres) - min(centres) <= 1, centres)
 
     # Coming back from the lesson page returns to where you were.
     a.locator("#screen-review a[data-article]").first.click()
