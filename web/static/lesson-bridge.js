@@ -158,4 +158,17 @@
     if (!audio) return;
     window.LearnBridge.call("media.error", { src: audio.currentSrc || "" }).catch(() => {});
   }, true);
+
+  // When the page has its own floating Ask button, pad bottom and notify host.
+  function checkOwnAsk() {
+    if (document.getElementById("fab")) {
+      document.body.style.paddingBottom = "72px";
+      window.LearnBridge.call("page.ownAsk", {}).catch(() => {});
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", checkOwnAsk);
+  } else {
+    checkOwnAsk();
+  }
 })();

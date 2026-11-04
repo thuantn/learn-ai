@@ -372,3 +372,62 @@ def test_lesson_host_sandbox_flags(ctx):
 def test_no_access_log_of_token():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "--no-access-log" in dockerfile
+
+
+def _page_with_theme_rules(main, tmp, key):
+    """Adds a stylesheet with dark and light rules to the installed sample lesson."""
+    with main.db.connect() as conn:
+        base = main.catalog.lesson_dir(conn, key)
+    css = "@media (prefers-color-scheme: dark){a{color:red}}\n@media (prefers-color-scheme:light) and (max-width:600px){a{color:blue}}\nb{color:green}"
+    (base / "page" / "theme.css").write_bytes(css.encode("utf-8"))
+    (base / "page" / "theme.js").write_text("matchMedia('(prefers-color-scheme: dark)')", encoding="utf-8")
+    (base / "page" / "binary.png").write_bytes(b"(prefers-color-scheme: dark)")
+    return css
+
+
+def test_frame_url_carries_only_a_known_theme(ctx, capsys):
+    main, cli, _, tmp = ctx
+    c = ready_user(main, cli, capsys, "an")
+    key = install_sample(main, "an", tmp)
+    with c:
+        assert "/theme-light/page/index.html" in c.post(f"/api/lessons/{key}/frame", json={"theme": "light"}).json()["url"]
+        assert "/theme-dark/page/index.html" in c.post(f"/api/lessons/{key}/frame", json={"theme": "dark"}).json()["url"]
+        for other in ("blue", "../x", 3, None):
+            assert "/theme-" not in c.post(f"/api/lessons/{key}/frame", json={"theme": other}).json()["url"]
+        assert "/theme-" not in c.post(f"/api/lessons/{key}/frame").json()["url"]
+
+
+def test_theme_path_rewrites_colour_queries(ctx, capsys):
+    main, cli, _, tmp = ctx
+    c = ready_user(main, cli, capsys, "an")
+    key = install_sample(main, "an", tmp)
+    css = _page_with_theme_rules(main, tmp, key)
+    with c:
+        token = token_from(c.post(f"/api/lessons/{key}/frame").json()["url"])
+        assert c.get(f"/s/{token}/page/theme.css").text == css
+        light = c.get(f"/s/{token}/theme-light/page/theme.css")
+        assert light.status_code == 200 and "text/css" in light.headers["content-type"]
+        assert "prefers-color-scheme" not in light.text and "b{color:green}" in light.text
+        assert "@media (max-width:-1px){a{color:red}}" in light.text
+        assert "@media (min-width:0) and (max-width:600px){a{color:blue}}" in light.text
+        dark = c.get(f"/s/{token}/theme-dark/page/theme.css").text
+        assert "@media (min-width:0){a{color:red}}" in dark and "@media (max-width:-1px) and (max-width:600px){a{color:blue}}" in dark
+        assert "matchMedia('(max-width:-1px)')" in c.get(f"/s/{token}/theme-light/page/theme.js").text
+        assert c.get(f"/s/{token}/theme-light/page/binary.png").content == b"(prefers-color-scheme: dark)"
+        page = frame_get(c, f"/s/{token}/theme-light/page/index.html")
+        assert page.status_code == 200 and page.headers.get("content-security-policy") == frame_get(c, f"/s/{token}/page/index.html").headers.get("content-security-policy")
+
+
+def test_theme_path_keeps_every_guard(ctx, capsys):
+    main, cli, _, tmp = ctx
+    c = ready_user(main, cli, capsys, "an")
+    key = install_sample(main, "an", tmp)
+    _page_with_theme_rules(main, tmp, key)
+    with c:
+        token = token_from(c.post(f"/api/lessons/{key}/frame").json()["url"])
+        assert c.get(f"/s/{token}/theme-light/page/index.html").status_code == 403  # html only inside a frame
+        assert c.get(f"/s/{token}/theme-blue/page/theme.css").status_code == 404
+        assert c.get(f"/s/{token}/theme-light/lesson.json").status_code == 404
+        assert c.get(f"/s/{token}/theme-light/theme-dark/page/theme.css").status_code == 404
+        assert c.get(f"/s/{token}/theme-light/page/../lesson.json").status_code == 404
+        assert c.get(f"/s/{token}x/theme-light/page/theme.css").status_code == 403

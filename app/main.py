@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import os
 import pathlib
+import re
 import secrets
 import time
 import struct
@@ -338,6 +339,7 @@ async def lessons(request: Request):
     with db.connect() as c:
         lessons = catalog.lessons_for(c, user)
         progress = {r["lesson"]: r for r in c.execute("SELECT * FROM lesson_progress WHERE user=?", (user,))}
+        steps = {r["lesson"]: r for r in c.execute("SELECT lesson, read_at, flow_at FROM lesson_step WHERE user=?", (user,))}
         positions = {r["episode"]: r["seconds"] for r in c.execute("SELECT episode, seconds FROM listen_pos WHERE user=?", (user,))}
         due_rows, lesson_map = _due_rows(c, user, now)
         due = {}
@@ -358,6 +360,7 @@ async def lessons(request: Request):
     out = []
     for x in lessons:
         p = progress.get(x["id"])
+        step = steps.get(x["id"])
         tracks = {}
         for key, t in x["tracks"].items():
             pos = positions.get(f"{x['id']}:{key}", 0)
@@ -375,6 +378,8 @@ async def lessons(request: Request):
             "summary": x["summary"],
             "status": p["status"] if p else "new",
             "track": p["track"] if p else default_track(tracks),
+            "read": bool(step and step["read_at"] is not None),
+            "flow_done": bool(step and step["flow_at"] is not None),
             "due": due.get(x["id"], 0),
             "tracks": tracks,
             "suggest": [card["q"] for card in x["cards"][:3]],
@@ -418,17 +423,30 @@ def add_card(c, user, bare_id, lesson_key, package_id, now):
 @app.post("/api/lessons/{lesson_id}/finish")
 async def finish_lesson(lesson_id: str, request: Request):
     user = request.state.user
+    now = time.time()
     with db.connect() as c:
         if not catalog.lesson_for(c, user, lesson_id):
             return bad(404, "lesson", "Không có bài này.")
-        c.execute("UPDATE lesson_progress SET status='done', updated_at=? WHERE user=? AND lesson=?", (time.time(), user, lesson_id))
-    return {"ok": True}
+        c.execute(
+            """INSERT INTO lesson_step(user, lesson, flow_at) VALUES(?,?,?)
+               ON CONFLICT(user, lesson) DO UPDATE SET flow_at=excluded.flow_at""",
+            (user, lesson_id, now),
+        )
+        step = c.execute("SELECT read_at FROM lesson_step WHERE user=? AND lesson=?", (user, lesson_id)).fetchone()
+        read = bool(step and step["read_at"] is not None)
+        if read:
+            c.execute("UPDATE lesson_progress SET status='done', updated_at=? WHERE user=? AND lesson=?", (now, user, lesson_id))
+        prog = c.execute("SELECT status FROM lesson_progress WHERE user=? AND lesson=?", (user, lesson_id)).fetchone()
+        status = prog["status"] if prog else "in_progress"
+    return {"ok": True, "status": status, "read": read}
 
 
 @app.post("/api/lessons/{lesson_id}/frame")
 async def lesson_frame(lesson_id: str, request: Request):
     if not sandbox._secret():
         return Response(status_code=404)
+    data = await read_json(request)
+    theme = data.get("theme") if isinstance(data, dict) else None
     user = request.state.user
     now = time.time()
     with db.connect() as c:
@@ -438,12 +456,21 @@ async def lesson_frame(lesson_id: str, request: Request):
         row = c.execute("SELECT rowid FROM users WHERE name=?", (user,)).fetchone()
         if not row:
             return bad(403, "user", "Tài khoản không tồn tại.")
+        c.execute(
+            """INSERT INTO lesson_step(user, lesson, read_at) VALUES(?,?,?)
+               ON CONFLICT(user, lesson) DO UPDATE SET read_at=excluded.read_at""",
+            (user, lesson_id, now),
+        )
+        step = c.execute("SELECT flow_at FROM lesson_step WHERE user=? AND lesson=?", (user, lesson_id)).fetchone()
+        if step and step["flow_at"] is not None:
+            c.execute("UPDATE lesson_progress SET status='done', updated_at=? WHERE user=? AND lesson=?", (now, user, lesson_id))
         user_id = row["rowid"]
         expires = now + int(os.environ.get("LINK_TTL_SECONDS", str(sandbox.LINK_TTL_SECONDS_DEFAULT)))
         token = sandbox.make_token(user_id, lesson_id, now)
         learner = sandbox.learner_code(user_id, lesson["package_id"])
+    url = f"/s/{token}/theme-{theme}/page/index.html" if theme in ("light", "dark") else f"/s/{token}/page/index.html"
     return JSONResponse({
-        "url": f"/s/{token}/page/index.html",
+        "url": url,
         "expires": expires,
         "doc": lesson["doc"],
         "title": lesson["title"],
@@ -845,6 +872,7 @@ async def leave_package(package_id: str, request: Request):
         ).rowcount
         if left:
             c.execute("DELETE FROM ask_message WHERE user=? AND substr(lesson,1,14)=?", (request.state.user, package_id + "."))
+            c.execute("DELETE FROM lesson_step WHERE user=? AND substr(lesson,1,14)=?", (request.state.user, package_id + "."))
     return {"ok": True} if left else bad(404, "package", "Không có package này.")
 
 
@@ -1534,7 +1562,21 @@ async def ask(request: Request):
 
 # ---------- Static files ----------
 
-def serve_listed(root, rel, extra=None):
+COLOR_QUERY = re.compile(r"\(\s*prefers-color-scheme\s*:\s*(dark|light)\s*\)", re.I)
+
+
+def theme_rewriter(theme: str):
+    """A lesson's colours follow prefers-color-scheme, which in a sandboxed frame is the OS, not the app's button."""
+    def rewrite(body: bytes) -> bytes:
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            return body
+        return COLOR_QUERY.sub(lambda m: "(min-width:0)" if m.group(1).lower() == theme else "(max-width:-1px)", text).encode("utf-8")
+    return rewrite
+
+
+def serve_listed(root, rel, extra=None, transform=None):
     """Serves only listed files, so traversal, directory listing and symlinks have nothing to reach."""
     target = root / rel
     if target.is_symlink() or not target.is_file() or root not in target.resolve().parents:
@@ -1545,6 +1587,9 @@ def serve_listed(root, rel, extra=None):
     headers = {"Cache-Control": "private, max-age=300"}
     if extra:
         headers.update(extra)
+    if transform is not None:
+        body = target.read_bytes()
+        return Response(transform(body), media_type=kind, headers=headers)
     return FileResponse(target, media_type=kind, headers=headers)
 
 
@@ -1563,6 +1608,11 @@ async def static(rel: str):
 
 @app.get("/s/{token}/{rel:path}")
 async def sandbox_file(token: str, rel: str, request: Request):
+    theme = None
+    m = re.fullmatch(r"theme-(light|dark)/(.*)", rel)
+    if m:
+        theme = m.group(1)
+        rel = m.group(2)
     if not sandbox._secret():
         return Response(status_code=404)
     if not rel.startswith(("page/", "audio/")):
@@ -1589,7 +1639,8 @@ async def sandbox_file(token: str, rel: str, request: Request):
         return Response(status_code=404)
     if resolved.suffix.lower() == ".html" and request.headers.get("Sec-Fetch-Dest") != "iframe":
         return Response(status_code=403)
-    return serve_listed(base, rel, extra=sandbox.page_headers(rel))
+    transform = theme_rewriter(theme) if theme and resolved.suffix.lower() in (".css", ".html", ".js") else None
+    return serve_listed(base, rel, extra=sandbox.page_headers(rel), transform=transform)
 
 
 app.include_router(admin.router)

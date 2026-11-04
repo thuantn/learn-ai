@@ -104,7 +104,7 @@
     }
     closePorts();
     try {
-      const r = await fetch(`/api/lessons/${lessonId}/frame`, send("POST", {}));
+      const r = await fetch(`/api/lessons/${lessonId}/frame`, send("POST", { theme: document.documentElement.getAttribute("data-theme") }));
       if (r.status === 404) {
         setCover("Bài này chưa sẵn sàng ở chế độ mới.", null);
         return;
@@ -264,6 +264,10 @@
           reply(id, true, { data: null });
           return;
         }
+        case "page.ownAsk":
+          $("lessonAskBtn").hidden = true;
+          reply(id, true, { data: null });
+          return;
         default:
           reply(id, false, { code: "unknown_op", message: "Không hỗ trợ thao tác này." });
       }
@@ -297,7 +301,7 @@
         setNotice("");
       })
       .catch(() => {
-        docPending = body;
+        if (docPending === null) docPending = body;
         setNotice("Chưa lưu được, đang thử lại");
         scheduleDocWrite();
       })

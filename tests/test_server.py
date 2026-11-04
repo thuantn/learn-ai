@@ -335,9 +335,53 @@ def test_cards_open_on_start_and_fsrs_order(ctx, capsys):
         assert forget < easy
         for bad in (0, 5, "3", True, None):
             assert c.post(f"/api/cards/{by_target['sample-c1']}/review", json={"rating": bad}).status_code == 400
+        c.post(f"/api/lessons/{key}/frame", json={})
         c.post(f"/api/lessons/{key}/finish")
         c.post(f"/api/lessons/{key}/start")
         assert c.get("/api/lessons").json()["lessons"][0]["status"] == "done"
+
+
+def _lesson(c):
+    return c.get("/api/lessons").json()["lessons"][0]
+
+
+def test_done_needs_the_lesson_read_in_either_order(ctx, capsys):
+    main, cli, tmp = ctx
+    c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
+    with c:
+        c.post(f"/api/lessons/{key}/start")
+        first = _lesson(c)
+        assert first["read"] is False and first["flow_done"] is False
+        r = c.post(f"/api/lessons/{key}/finish").json()
+        assert r["status"] == "in_progress" and r["read"] is False
+        after = _lesson(c)
+        assert after["status"] == "in_progress" and after["flow_done"] is True and after["read"] is False
+        c.post(f"/api/lessons/{key}/frame", json={})
+        after = _lesson(c)
+        assert after["status"] == "done" and after["read"] is True
+    other = ready_user(main, cli, capsys, "binh")
+    with c:
+        assert c.post(f"/api/packages/{key.split('.')[0]}/share", json={"email": "binh"}).status_code == 200
+    with other:
+        other.post(f"/api/lessons/{key}/start")
+        other.post(f"/api/lessons/{key}/frame", json={})
+        assert _lesson(other)["status"] == "in_progress"
+        r = other.post(f"/api/lessons/{key}/finish").json()
+        assert r["status"] == "done" and r["read"] is True
+
+
+def test_already_done_lessons_stay_done(ctx, capsys):
+    main, cli, tmp = ctx
+    c = ready_user(main, cli, capsys)
+    key = install_sample(main, "an", tmp)
+    with c:
+        c.post(f"/api/lessons/{key}/start")
+        with main.db.connect() as conn:
+            conn.execute("UPDATE lesson_progress SET status='done' WHERE lesson=?", (key,))
+        assert _lesson(c)["status"] == "done"
+        c.post(f"/api/lessons/{key}/finish")
+        assert _lesson(c)["status"] == "done"
 
 
 def test_wrong_quiz_answer_makes_one_card_and_right_makes_none(ctx, capsys):

@@ -106,6 +106,9 @@ CREATE TABLE test_pool(
   test_key TEXT NOT NULL, item TEXT NOT NULL, answer_hash TEXT NOT NULL, streak INTEGER NOT NULL DEFAULT 0,
   last_correct_at REAL, added_at REAL NOT NULL, PRIMARY KEY(user, test_key, item));
 """,
+    """
+CREATE TABLE lesson_step(user TEXT NOT NULL REFERENCES users(name) ON DELETE CASCADE, lesson TEXT NOT NULL, read_at REAL, flow_at REAL, PRIMARY KEY(user, lesson));
+""",
 ]
 
 log = logging.getLogger("learn")
