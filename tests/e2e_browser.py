@@ -141,9 +141,13 @@ try:
 
         # Real audio: play, seek, come back after reload at the same place.
         pg.locator("#screen-listen").get_by_role("button", name="Phát", exact=True).click()
-        pg.wait_for_timeout(2500)
-        state = pg.evaluate("({t:audio.currentTime,paused:audio.paused,err:audio.error&&audio.error.code})")
-        check("audio really plays", state["t"] > 0 and not state["paused"] and state["err"] is None, state)
+        pressed = time.time()
+        for _ in range(150):  # wait_for_function is refused by the app's CSP
+            state = pg.evaluate("({t:audio.currentTime,paused:audio.paused,err:audio.error&&audio.error.code})")
+            if state["t"] > 0 or state["err"] is not None:
+                break
+            pg.wait_for_timeout(100)
+        check("audio really plays", state["t"] > 0 and not state["paused"] and state["err"] is None, {**state, "after_s": round(time.time() - pressed, 2)})
         # Audio goes on across screens, so its controls go too; Listen and a wide lesson already have their own.
         mini = lambda: pg.locator(".mobile-now-playing").is_visible()
         check("no mini player on Listen", not mini())

@@ -111,6 +111,7 @@ function renderFlow() {
       s.dataset.act = "go";
       s.dataset.to = ["review", "listen", "flashcard"][i];
       if (i + 1 === at) s.setAttribute("aria-current", "step");
+      s.dataset.icon = ["review", "listen", "cards"][i];
       s.textContent = `${++shown}. ${n}`;
       steps.append(s);
     });
@@ -392,7 +393,7 @@ function renderBars(ratio) {
 
 function renderPlay() {
   const playing = !audio.paused;
-  $$("[data-play-label]").forEach(b => { b.textContent = playing ? "Dừng" : "Phát"; });
+  $$("[data-play-label]").forEach(b => { b.textContent = playing ? "Dừng" : "Phát"; b.dataset.icon = playing ? "pause" : "play"; });
 }
 
 // ---------- Podcast ----------
@@ -693,7 +694,7 @@ function toggleTheme() {
 }
 function renderThemeLabel() {
   const label = document.documentElement.getAttribute("data-theme") === "dark" ? "Nền Sáng" : "Nền Tối";
-  $$("[data-theme-label]").forEach(b => { b.textContent = label; });
+  $$("[data-theme-label]").forEach(b => { b.textContent = label; b.dataset.icon = document.documentElement.getAttribute("data-theme") === "dark" ? "sun" : "moon"; });
 }
 async function logout() {
   audio.pause();

@@ -43,7 +43,7 @@
         <input type="range" id="dockScrubber" class="studio-scrubber" data-scrub min="0" max="1" value="0">
         <div class="deck-buttons">
           <button type="button" class="btn-deck" data-act="seek" data-by="-15" aria-label="Tua lùi 15 giây">-15s</button>
-          <button type="button" class="btn-deck-play" data-act="play" data-play-label>Phát</button>
+          <button data-icon="play" type="button" class="btn-deck-play" data-act="play" data-play-label>Phát</button>
           <button type="button" class="btn-deck" data-act="seek" data-by="15" aria-label="Tua tới 15 giây">+15s</button>
           <button type="button" class="btn-deck" data-act="speed" data-speed-label aria-label="Đổi tốc độ phát">1x</button>
         </div>
@@ -56,19 +56,19 @@
     <header class="unified-top-bar">
       <a href="#home" class="topbar-brand" data-act="go" data-to="home"><img class="brand-logo" src="/static/icon.svg" alt="" width="24" height="24"><span>Học AI</span></a>
       <nav class="stage-nav" aria-label="Các màn hình">
-        <button type="button" class="stage-tab" data-act="go" data-to="home" data-nav="home">Trang đầu</button>
-        <button type="button" class="stage-tab" data-act="go" data-to="library" data-nav="library">Thư viện</button>
-        <a class="stage-tab" href="#tests" data-nav="tests">Bộ đề</a>
+        <button data-icon="home" type="button" class="stage-tab" data-act="go" data-to="home" data-nav="home">Trang đầu</button>
+        <button data-icon="library" type="button" class="stage-tab" data-act="go" data-to="library" data-nav="library">Thư viện</button>
+        <a data-icon="tests" class="stage-tab" href="#tests" data-nav="tests">Bộ đề</a>
       </nav>
       <div class="top-bar-right">
-        <button type="button" class="topbar-ask-btn" data-act="ask-open">Hỏi</button>
+        <button data-icon="ask" type="button" class="topbar-ask-btn" data-act="ask-open">Hỏi</button>
         <details class="account-menu" id="accountMenu">
-          <summary class="account-menu-summary" aria-label="Tài khoản">Tài khoản</summary>
+          <summary data-icon="user" class="account-menu-summary" aria-label="Tài khoản">Tài khoản</summary>
           <div class="account-menu-panel">
-            <button type="button" class="account-menu-item" data-act="theme" data-theme-label>Nền Sáng</button>
-            <a class="account-menu-item" href="/change-password">Đổi mật khẩu</a>
-            <a class="account-menu-item" href="/admin" data-admin-link hidden>Quản trị</a>
-            <button type="button" class="account-menu-item danger" data-act="logout">Đăng xuất</button>
+            <button data-icon="sun" type="button" class="account-menu-item" data-act="theme" data-theme-label>Nền Sáng</button>
+            <a data-icon="key" class="account-menu-item" href="/change-password">Đổi mật khẩu</a>
+            <a data-icon="shield" class="account-menu-item" href="/admin" data-admin-link hidden>Quản trị</a>
+            <button data-icon="logout" type="button" class="account-menu-item danger" data-act="logout">Đăng xuất</button>
           </div>
         </details>
       </div>
@@ -86,7 +86,7 @@
             <a class="btn-link-quiet home-read-link" data-article href="#">Đọc bài</a>
           </div>
           <div class="cta-cluster" id="homeEmptyCta" hidden>
-            <button type="button" class="btn-studio-primary" data-act="lib-upload">Tải lên bài học</button>
+            <button data-icon="upload" type="button" class="btn-studio-primary" data-act="lib-upload">Tải lên bài học</button>
             <button type="button" class="btn-studio-secondary" data-act="go" data-to="library">Mở Thư viện</button>
           </div>
         </div>
@@ -103,7 +103,7 @@
             <div class="auth-label"><span>Dung lượng đã dùng</span><strong id="libUsed"></strong></div>
             <div class="meter-track"><div class="meter-fill" id="libMeter"></div></div>
           </div>
-          <button type="button" class="btn-studio-primary" data-act="lib-upload">Tải lên</button>
+          <button data-icon="upload" type="button" class="btn-studio-primary" data-act="lib-upload">Tải lên</button>
           <a class="btn-studio-secondary" id="libAdmin" href="/admin" hidden>Quản trị</a>
         </div>
         <h2 class="list-heading">Bài của tôi</h2>
@@ -144,7 +144,7 @@
             <input type="range" id="mainScrubber" class="studio-scrubber" data-scrub min="0" max="1" value="0">
             <div class="main-buttons">
               <button type="button" class="btn-studio-secondary" data-act="seek" data-by="-15">Lùi 15 giây</button>
-              <button type="button" class="btn-studio-primary" data-act="play" data-play-label>Phát</button>
+              <button data-icon="play" type="button" class="btn-studio-primary" data-act="play" data-play-label>Phát</button>
               <button type="button" class="btn-studio-secondary" data-act="seek" data-by="15">Tới 15 giây</button>
               <button type="button" class="btn-studio-secondary" data-act="speed" data-speed-label aria-label="Đổi tốc độ phát">1x</button>
             </div>
@@ -372,7 +372,7 @@
     <form id="askForm">
       <label class="sr-only" for="askInput">Nhập câu hỏi</label>
       <textarea id="askInput" class="ask-dock-textarea" maxlength="2000" placeholder="Hỏi về bài này"></textarea>
-      <button type="submit" class="btn-studio-primary fc-wide" id="askSend">Gửi câu hỏi</button>
+      <button data-icon="send" type="submit" class="btn-studio-primary fc-wide" id="askSend">Gửi câu hỏi</button>
     </form>
   </aside>
 </div>
@@ -505,7 +505,7 @@
       <p class="studio-alert error" id="testAskError" role="alert" hidden></p>
       <div class="lesson-dialog-buttons">
         <button type="button" class="btn-studio-secondary" data-act="test-ask-close">Đóng</button>
-        <button type="submit" class="btn-studio-primary" id="testAskSend">Gửi câu hỏi</button>
+        <button data-icon="send" type="submit" class="btn-studio-primary" id="testAskSend">Gửi câu hỏi</button>
       </div>
     </form>
   </div>
@@ -528,10 +528,10 @@
       <button type="button" class="drawer-close-btn" data-act="nav-close" aria-label="Đóng menu">✕</button>
     </div>
     <nav class="drawer-nav-list" aria-label="Các màn hình">
-      <button type="button" class="drawer-nav-item" data-act="go" data-to="review" data-nav="review"><span>1. Ôn lại</span></button>
-      <button type="button" class="drawer-nav-item" data-act="go" data-to="listen" data-nav="listen"><span>2. Nghe</span></button>
-      <button type="button" class="drawer-nav-item" data-act="go" data-to="flashcard" data-nav="flashcard"><span>3. Flashcard</span><span class="nav-sub" data-due-short></span></button>
-      <a class="drawer-nav-item" data-article href="#"><span>Bài đầy đủ</span></a>
+      <button type="button" class="drawer-nav-item" data-act="go" data-to="review" data-nav="review"><span data-icon="review">1. Ôn lại</span></button>
+      <button type="button" class="drawer-nav-item" data-act="go" data-to="listen" data-nav="listen"><span data-icon="listen">2. Nghe</span></button>
+      <button type="button" class="drawer-nav-item" data-act="go" data-to="flashcard" data-nav="flashcard"><span data-icon="cards">3. Flashcard</span><span class="nav-sub" data-due-short></span></button>
+      <a class="drawer-nav-item" data-article href="#"><span data-icon="article">Bài đầy đủ</span></a>
     </nav>
   </div>
   <div class="drawer-footer">
@@ -548,7 +548,7 @@
       <span class="studio-led"></span><span class="capsule-label" id="miniLabel"></span>
     </button>
     <button type="button" class="capsule-skip-btn" data-act="seek" data-by="-15" aria-label="Tua lùi 15 giây">-15s</button>
-    <button type="button" class="capsule-play-btn" data-act="play" data-play-label>Phát</button>
+    <button data-icon="play" type="button" class="capsule-play-btn" data-act="play" data-play-label>Phát</button>
     <button type="button" class="capsule-skip-btn" data-act="seek" data-by="15" aria-label="Tua tới 15 giây">+15s</button>
   </div>
 </div>

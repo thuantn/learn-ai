@@ -52,6 +52,7 @@ function button(label, className, onClick) {
 function userButton(label, act, onClick, className) {
   const b = button(label, className || "btn-studio-secondary", onClick);
   b.dataset.userAct = act;
+  if (act === "remove") b.dataset.icon = "trash";
   return b;
 }
 
