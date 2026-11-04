@@ -205,6 +205,15 @@ def run(br, base, temp, sample, hai):
     # Late or doubled inputs on flashcards.
     a.evaluate("go('flashcard')")
     a.wait_for_selector("#fcCard:not([hidden])")
+    check("trước khi xem đáp án có lời nhắc tự nhớ", a.locator("#fcCue").is_visible())
+    a.set_viewport_size({"width": 390, "height": 844})
+    a.wait_for_timeout(150)
+    check("lời nhắc tự nhớ cũng hiện trên điện thoại", a.locator("#fcCue").is_visible())
+    a.screenshot(path=str(pathlib.Path(tempfile.gettempdir()) / "fc-cue-390.png"))
+    a.set_viewport_size({"width": 1280, "height": 900})
+    a.click("[data-act=reveal]")
+    check("xem đáp án rồi thì lời nhắc ẩn", not a.locator("#fcCue").is_visible())
+    a.evaluate("renderCard()")
     check("màn thẻ nói rõ là thẻ của mọi bài", a.locator("#fcScope").count() == 1 and "mọi bài" in a.inner_text("#fcScope"))
     posts = []
     a.on("request", lambda r: posts.append(r.url) if r.method == "POST" and "/review" in r.url else None)

@@ -167,6 +167,7 @@ def test_key_does_not_follow_a_redirect(ctx, ai, monkeypatch):
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
             hits.append(self.path)
+            self.rfile.read(int(self.headers["Content-Length"]))  # closing with the body unread can abort the client on Windows
             self.send_response(302)
             self.send_header("Location", "/stolen")
             self.end_headers()
