@@ -163,6 +163,10 @@ async function showTestsScreen(pkgFilter) {
       info.append(el("h3", "stream-title", t.title));
       const pills = el("div", "meta-pills");
       const pillTexts = [];
+      const hasOpen = t.open && (t.open.exam || t.open.practice || t.open.review);
+      if (hasOpen) {
+        pillTexts.push("Đang làm dở");
+      }
       if (shouldShowItemsPill(t.title, t.items)) {
         pillTexts.push(`${t.items} câu`);
       }
@@ -176,7 +180,7 @@ async function showTestsScreen(pkgFilter) {
       pillTexts.forEach(txt => pills.append(el("span", "meta-pill", txt)));
       info.append(pills);
       const act = el("div", "stream-actions");
-      const btn = actionButton("Làm đề", "test-open", t.key, "btn-studio-primary");
+      const btn = actionButton("Xem đề", "test-open", t.key, "btn-studio-secondary");
       act.append(btn);
       row.append(info, act);
       list.append(row);
@@ -279,21 +283,25 @@ async function showTestDetail(key) {
         actions.append(start);
       }
 
-      // 3. Ôn câu sai (ẩn khi pool == 0)
-      if (t.pool && t.pool > 0) {
-        const reviewOpen = t.open && t.open.review;
+      // 3. Ôn câu sai (chạy khi t.pool > 0 hoặc t.open.review tồn tại)
+      const reviewOpen = t.open && t.open.review;
+      if ((t.pool && t.pool > 0) || reviewOpen) {
         if (reviewOpen) {
-          const cont = el("button", "btn-studio-primary", `Tiếp tục Ôn (${t.pool} câu)`);
+          const contLabel = (t.pool && t.pool > 0) ? `Tiếp tục Ôn (${t.pool} câu)` : "Tiếp tục Ôn";
+          const cont = el("button", "btn-studio-primary", contLabel);
           cont.type = "button";
           cont.dataset.act = "attempt-open";
           cont.dataset.id = reviewOpen;
-          const restart = el("button", "btn-studio-secondary", "Ôn lại từ đầu");
-          restart.type = "button";
-          restart.dataset.act = "attempt-start";
-          restart.dataset.key = t.key;
-          restart.dataset.mode = "review";
-          restart.dataset.restart = "true";
-          actions.append(cont, restart);
+          actions.append(cont);
+          if (t.pool && t.pool > 0) {
+            const restart = el("button", "btn-studio-secondary", "Ôn lại từ đầu");
+            restart.type = "button";
+            restart.dataset.act = "attempt-start";
+            restart.dataset.key = t.key;
+            restart.dataset.mode = "review";
+            restart.dataset.restart = "true";
+            actions.append(restart);
+          }
         } else {
           const start = el("button", "btn-studio-secondary", `Ôn câu sai (${t.pool} câu)`);
           start.type = "button";
@@ -349,26 +357,74 @@ let _clockInterval = null;
 let _saveQueue = {};
 let _resultAttempt = null;
 let _resultFilter = "all";
+let _loadToken = 0;
+let _submitting = false;
 
-function leaveAttempt() {
+function showRunNotice(text) {
+  const el = $("testRunNotice");
+  if (!el) return;
+  el.textContent = text;
+  el.hidden = false;
+}
+
+function clearRunNotice() {
+  const el = $("testRunNotice");
+  if (!el) return;
+  el.textContent = "";
+  el.hidden = true;
+}
+
+function endAttempt(pauseClock = false) {
   document.body.classList.remove("in-test");
   if (_clockInterval) {
     clearInterval(_clockInterval);
     _clockInterval = null;
   }
+
+  const attId = _currentAttemptId;
+  const att = _currentAttempt;
+
+  if (pauseClock && att && att.mode === "exam" && att.time_limit_seconds > 0 && att.status === "open" && attId) {
+    fetch(`/api/attempts/${encodeURIComponent(attId)}/pause`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      keepalive: true
+    }).catch(() => {});
+  }
+
   for (const itemId in _saveQueue) {
     const q = _saveQueue[itemId];
-    if (q && q.timer) {
-      clearTimeout(q.timer);
-      q.timer = null;
+    if (q) {
+      // Its reply sends what is pending; sending that now could arrive first and be overwritten by the older answer.
+      if (q.status === "sending") continue;
+      const payload = Object.assign({}, q.failed, q.pending);
+      if (Object.keys(payload).length > 0 && attId) {
+        fetch(`/api/attempts/${encodeURIComponent(attId)}/items/${encodeURIComponent(itemId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          keepalive: true
+        }).catch(() => {});
+      }
+      q.failed = null;
+      q.pending = null;
+      if (q.timer) {
+        clearTimeout(q.timer);
+        q.timer = null;
+      }
     }
   }
   _saveQueue = {};
   stopSpeech();
+  clearRunNotice();
+  const autoErr = $("testAutoSubmitError");
+  if (autoErr) autoErr.hidden = true;
   _currentAttempt = null;
   _currentAttemptId = null;
 }
-window.leaveAttempt = leaveAttempt;
+// What the rest of the app calls on leaving: stops a timed exam's clock.
+window.leaveAttempt = () => endAttempt(true);
 
 function applySavedFont() {
   let fontLevel = "2";
@@ -747,12 +803,10 @@ function queueSave(itemId, changes) {
   }
   q.status = "sending";
   updateSaveIndicator();
-  sendSave(itemId, changes);
+  sendSave(itemId, changes, _currentAttemptId, q);
 }
 
-async function sendSave(itemId, payload) {
-  const attId = _currentAttemptId;
-  const q = _saveQueue[itemId];
+async function sendSave(itemId, payload, attId = _currentAttemptId, q = _saveQueue[itemId]) {
   if (!attId || !q) return;
 
   try {
@@ -762,31 +816,44 @@ async function sendSave(itemId, payload) {
       body: JSON.stringify(payload)
     });
     if (r.status === 401) { location.href = "/login"; return; }
+
+    const isCurrent = _currentAttemptId === attId;
+
     if (r.ok) {
       q.status = "idle";
       if (q.pending) {
         const next = q.pending;
         q.pending = null;
         q.status = "sending";
-        sendSave(itemId, next);
-      } else {
-        updateSaveIndicator();
+        sendSave(itemId, next, attId, q);
       }
+      if (!isCurrent) return;
+      updateSaveIndicator();
     } else if (r.status >= 400 && r.status < 500) {
       q.status = "idle";
       q.pending = null;
+      if (!isCurrent) return;
       updateSaveIndicator();
+      showRunNotice("Máy chủ không nhận câu trả lời vừa rồi. Câu này chưa được lưu.");
       reloadAttempt();
     } else {
-      retrySave(itemId, attId, payload);
+      retrySave(itemId, attId, payload, q);
     }
   } catch (err) {
-    retrySave(itemId, attId, payload);
+    retrySave(itemId, attId, payload, q);
   }
 }
 
-function retrySave(itemId, attId, payload) {
-  const q = _saveQueue[itemId];
+function retrySave(itemId, attId, payload, q) {
+  if (_currentAttemptId !== attId || !q) {
+    fetch(`/api/attempts/${encodeURIComponent(attId)}/items/${encodeURIComponent(itemId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.assign({}, payload, q && q.pending)),
+      keepalive: true
+    }).catch(() => {});
+    return;
+  }
   q.status = "failed";
   q.failed = Object.assign({}, payload, q.pending);
   q.pending = null;
@@ -798,33 +865,40 @@ function retrySave(itemId, attId, payload) {
     const next = q.failed;
     q.failed = null;
     q.status = "sending";
-    sendSave(itemId, next);
+    sendSave(itemId, next, attId, q);
   }, 3000);
 }
 
 async function reloadAttempt() {
-  if (!_currentAttemptId) return;
+  const attId = _currentAttemptId;
+  if (!attId) return false;
   try {
-    const att = await api(`/api/attempts/${encodeURIComponent(_currentAttemptId)}`);
+    const att = await api(`/api/attempts/${encodeURIComponent(attId)}`);
+    if (_currentAttemptId !== attId) return false;
     if (att.status === "submitted") {
-      leaveAttempt();
-      location.hash = "#result=" + encodeURIComponent(att.id);
-      return;
+      endAttempt();
+      location.hash = "#result=" + encodeURIComponent(attId);
+      return true;
     }
     _currentAttempt = att;
     renderRunScreen();
-  } catch (_) {}
+    return false;
+  } catch (_) {
+    return false;
+  }
 }
 
 document.addEventListener("visibilitychange", async () => {
   if (document.hidden) return;
-  if (!_currentAttemptId || location.hash.indexOf("#attempt=") === -1) return;
+  const attId = _currentAttemptId;
+  if (!attId || location.hash.indexOf("#attempt=") === -1) return;
 
   try {
-    const att = await api(`/api/attempts/${encodeURIComponent(_currentAttemptId)}`);
+    const att = await api(`/api/attempts/${encodeURIComponent(attId)}`);
+    if (_currentAttemptId !== attId) return;
     if (att.status === "submitted") {
-      leaveAttempt();
-      location.hash = "#result=" + encodeURIComponent(_currentAttemptId);
+      endAttempt();
+      location.hash = "#result=" + encodeURIComponent(attId);
       return;
     }
 
@@ -861,6 +935,9 @@ document.addEventListener("visibilitychange", async () => {
 
 function renderRunScreen() {
   if (!_currentAttempt) return;
+
+  const runTitle = $("testRunTitle");
+  if (runTitle) runTitle.textContent = _currentAttempt.title || "";
 
   const isPaused = _currentAttempt.status === "paused";
   const pausedPane = $("testPausedPane");
@@ -935,6 +1012,7 @@ function renderCurrentQuestion() {
     btn.type = "button";
     btn.dataset.act = "test-choose";
     btn.dataset.option = opt.id;
+    btn.setAttribute("aria-pressed", String(!!isChosen));
     if (item.checked) btn.disabled = true;
 
     btn.append(el("span", "test-opt-badge", letter));
@@ -1051,6 +1129,7 @@ function renderGrid() {
 }
 
 function goToQuestion(idx) {
+  clearRunNotice();
   if (!_currentAttempt || !_currentAttempt.items) return;
   if (idx < 0 || idx >= _currentAttempt.items.length) return;
   _currentIndex = idx;
@@ -1088,37 +1167,49 @@ function chooseOption(optId) {
 }
 
 async function checkCurrentItem() {
+  clearRunNotice();
   if (!_currentAttempt || !_currentAttemptId) return;
   const item = _currentAttempt.items[_currentIndex];
   if (!item) return;
 
   if (item.type === "multi" && item.chosen.length !== item.required) {
-    alert(`Cần chọn đủ ${item.required} đáp án.`);
+    showRunNotice(`Cần chọn đủ ${item.required} đáp án.`);
     return;
   }
 
   const btn = $("btnTestCheck");
   if (btn) btn.disabled = true;
 
+  const attemptId = _currentAttemptId;
+  const itemId = item.id;
+
   try {
     const checkedItem = await api(
-      `/api/attempts/${encodeURIComponent(_currentAttemptId)}/items/${encodeURIComponent(item.id)}/check`,
+      `/api/attempts/${encodeURIComponent(attemptId)}/items/${encodeURIComponent(itemId)}/check`,
       send("POST", { chosen: item.chosen })
     );
-    if (_saveQueue[item.id]) {
-      _saveQueue[item.id].pending = null;
-      _saveQueue[item.id].status = "idle";
+    if (_currentAttemptId !== attemptId) return;
+
+    if (_saveQueue[itemId]) {
+      _saveQueue[itemId].pending = null;
+      _saveQueue[itemId].status = "idle";
       updateSaveIndicator();
     }
-    _currentAttempt.items[_currentIndex] = checkedItem;
-    silenceSpeech();
-    renderCurrentQuestion();
+    const idx = _currentAttempt.items.findIndex(x => x.id === itemId);
+    if (idx !== -1) {
+      _currentAttempt.items[idx] = checkedItem;
+    }
+    if (idx === _currentIndex) {
+      silenceSpeech();
+      renderCurrentQuestion();
+    }
     renderGrid();
   } catch (err) {
+    if (_currentAttemptId !== attemptId) return;
     if (err.code === "checked") {
       reloadAttempt();
     } else {
-      alert(err.message || "Không thể kiểm tra câu trả lời.");
+      showRunNotice(err.message || "Không thể kiểm tra câu trả lời.");
     }
   } finally {
     if (btn) btn.disabled = false;
@@ -1145,15 +1236,17 @@ async function togglePause() {
     }
   } catch (err) {
     if (err.code === "submitted") {
-      leaveAttempt();
-      location.hash = "#result=" + encodeURIComponent(_currentAttemptId);
+      const attId = _currentAttemptId;
+      endAttempt();
+      location.hash = "#result=" + encodeURIComponent(attId);
     } else {
-      alert(err.message || "Thao tác không thành công.");
+      showRunNotice(err.message || "Thao tác không thành công.");
     }
   }
 }
 
 function openSubmitDialog() {
+  clearRunNotice();
   if (!_currentAttempt || !_currentAttemptId) return;
 
   let hasSending = false;
@@ -1166,11 +1259,11 @@ function openSubmitDialog() {
     }
   }
   if (hasFailed) {
-    alert("Chưa lưu xong các câu trả lời. Vui lòng kiểm tra kết nối mạng.");
+    showRunNotice("Chưa lưu xong các câu trả lời. Vui lòng kiểm tra kết nối mạng.");
     return;
   }
   if (hasSending) {
-    alert("Đang lưu câu trả lời, vui lòng chờ trong giây lát.");
+    showRunNotice("Đang lưu câu trả lời, vui lòng chờ trong giây lát.");
     return;
   }
 
@@ -1228,36 +1321,44 @@ function openSubmitDialog() {
 }
 
 async function confirmSubmit(isAuto = false) {
-  if (!_currentAttemptId) return;
+  if (_submitting) return;
+  _submitting = true;
+  const attId = _currentAttemptId;
+  if (!attId) {
+    _submitting = false;
+    return;
+  }
+
   const dia = $("testSubmitDialog");
   const btn = $("btnConfirmSubmit");
   const alertEl = $("testSubmitAlert");
   if (btn) btn.disabled = true;
 
   try {
-    await api(`/api/attempts/${encodeURIComponent(_currentAttemptId)}/submit`, send("POST"));
+    await api(`/api/attempts/${encodeURIComponent(attId)}/submit`, send("POST"));
     if (dia && dia.open) dia.close();
-    const attId = _currentAttemptId;
-    leaveAttempt();
+    endAttempt();
     location.hash = "#result=" + encodeURIComponent(attId);
   } catch (err) {
     if (err.code === "submitted") {
       if (dia && dia.open) dia.close();
-      const attId = _currentAttemptId;
-      leaveAttempt();
+      endAttempt();
       location.hash = "#result=" + encodeURIComponent(attId);
     } else if (isAuto) {
-      reloadAttempt();
+      const moved = await reloadAttempt();
+      if (!moved) {
+        const autoErr = $("testAutoSubmitError");
+        if (autoErr) autoErr.hidden = false;
+      }
     } else {
       if (alertEl) {
         alertEl.textContent = err.message || "Không thể nộp bài. Vui lòng thử lại.";
         alertEl.hidden = false;
-      } else {
-        alert(err.message || "Không thể nộp bài.");
       }
     }
   } finally {
     if (btn) btn.disabled = false;
+    _submitting = false;
   }
 }
 
@@ -1270,7 +1371,10 @@ async function showTestRun(attemptId) {
     return;
   }
 
-  leaveAttempt();
+  const autoErr = $("testAutoSubmitError");
+  if (autoErr) autoErr.hidden = true;
+
+  endAttempt(true);
   document.body.classList.add("in-test");
   _currentAttemptId = attemptId;
   _currentIndex = 0;
@@ -1282,10 +1386,12 @@ async function showTestRun(attemptId) {
     box.textContent = "Đang tải bài thi...";
   }
 
+  const token = ++_loadToken;
   try {
     const att = await api(`/api/attempts/${encodeURIComponent(attemptId)}`);
+    if (token !== _loadToken) return;
     if (att.status === "submitted") {
-      leaveAttempt();
+      endAttempt();
       location.hash = "#result=" + encodeURIComponent(attemptId);
       return;
     }
@@ -1294,6 +1400,7 @@ async function showTestRun(attemptId) {
     startClock();
     setupTts();
   } catch (err) {
+    if (token !== _loadToken) return;
     if (err.message !== "login" && err.message !== "password") {
       if (box) box.textContent = err.message || "Không tải được lượt làm bài.";
     }
@@ -1301,7 +1408,7 @@ async function showTestRun(attemptId) {
 }
 
 async function showTestResult(attemptId) {
-  leaveAttempt();
+  endAttempt();
   go("test-result", true, "#result=" + encodeURIComponent(attemptId));
   _resultFilter = "all";
 
@@ -1311,6 +1418,7 @@ async function showTestResult(attemptId) {
   const scoreNum = $("testResultScore");
   const passStatus = $("testResultStatus");
   const actions = $("testResultActions");
+  const resultAlert = $("testResultAlert");
   const domainsSection = $("testResultDomainsSection");
   const domainsBody = $("testResultDomainBody");
   const itemsList = $("testResultItemsList");
@@ -1320,11 +1428,14 @@ async function showTestResult(attemptId) {
   if (scoreNum) scoreNum.textContent = "";
   if (passStatus) passStatus.textContent = "";
   if (actions) actions.textContent = "";
+  if (resultAlert) resultAlert.hidden = true;
   if (domainsBody) domainsBody.textContent = "";
   if (itemsList) itemsList.textContent = "Đang tải câu hỏi...";
 
+  const token = ++_loadToken;
   try {
     const att = await api(`/api/attempts/${encodeURIComponent(attemptId)}`);
+    if (token !== _loadToken || location.hash !== "#result=" + encodeURIComponent(attemptId)) return;
     if (att.status !== "submitted") {
       location.hash = "#attempt=" + encodeURIComponent(attemptId);
       return;
@@ -1381,22 +1492,38 @@ async function showTestResult(attemptId) {
 
     if (actions) {
       actions.textContent = "";
-      const restartBtn = el("button", "btn-studio-primary", "Làm lại");
-      restartBtn.type = "button";
-      restartBtn.dataset.act = "attempt-start";
-      restartBtn.dataset.key = att.test_key;
-      restartBtn.dataset.mode = att.mode;
-      restartBtn.dataset.restart = "true";
-      actions.append(restartBtn);
+      const pool = att.pool || 0;
+      const isReviewMode = att.mode === "review";
 
-      const wrongCount = (att.items || []).filter(it => !it.is_correct).length;
-      if (wrongCount > 0 || att.mode === "review") {
-        const reviewBtn = el("button", "btn-studio-secondary", "Ôn câu sai");
+      const showReview = !isReviewMode && pool > 0;
+      const showRestart = isReviewMode ? pool > 0 : true;
+
+      if (showReview) {
+        const reviewBtn = el("button", "btn-studio-primary", "Ôn câu sai");
         reviewBtn.type = "button";
         reviewBtn.dataset.act = "attempt-start";
         reviewBtn.dataset.key = att.test_key;
         reviewBtn.dataset.mode = "review";
         actions.append(reviewBtn);
+      }
+
+      if (showRestart) {
+        const restartCls = showReview ? "btn-studio-secondary" : "btn-studio-primary";
+        const restartBtn = el("button", restartCls, "Làm lại");
+        restartBtn.type = "button";
+        restartBtn.dataset.act = "attempt-start";
+        restartBtn.dataset.key = att.test_key;
+        restartBtn.dataset.mode = att.mode;
+        restartBtn.dataset.restart = "true";
+        actions.append(restartBtn);
+      }
+
+      if (!showReview && !showRestart) {
+        const backBtn = el("button", "btn-studio-primary", "Về trang đề");
+        backBtn.type = "button";
+        backBtn.dataset.act = "test-detail";
+        backBtn.dataset.id = att.test_key;
+        actions.append(backBtn);
       }
     }
 
@@ -1406,8 +1533,13 @@ async function showTestResult(attemptId) {
       btnDetail.dataset.id = att.test_key;
     }
 
+    const hasBlank = (att.items || []).some(it => !it.chosen || it.chosen.length === 0);
+    const blankTab = document.querySelector('[data-act="result-filter"][data-filter="blank"]');
+    if (blankTab) blankTab.hidden = !hasBlank;
+
     renderResultItems();
   } catch (err) {
+    if (token !== _loadToken || location.hash !== "#result=" + encodeURIComponent(attemptId)) return;
     if (err.message !== "login" && err.message !== "password") {
       if (title) title.textContent = err.message || "Không tải được kết quả.";
     }
@@ -1421,7 +1553,9 @@ function renderResultItems() {
   list.textContent = "";
 
   const filtered = _resultAttempt.items.map((it, idx) => ({ it, originalIdx: idx })).filter(({ it }) => {
-    if (_resultFilter === "wrong") return !it.is_correct;
+    const isBlank = !it.chosen || it.chosen.length === 0;
+    if (_resultFilter === "wrong") return !it.is_correct && !isBlank;
+    if (_resultFilter === "blank") return isBlank;
     if (_resultFilter === "flagged") return !!it.flagged;
     return true;
   });
@@ -1432,12 +1566,24 @@ function renderResultItems() {
   }
 
   filtered.forEach(({ it, originalIdx }) => {
-    const card = el("article", "test-result-card " + (it.is_correct ? "is-correct" : "is-wrong"));
+    const isBlank = !it.chosen || it.chosen.length === 0;
+    let cardCls = "test-result-card";
+    if (it.is_correct) cardCls += " is-correct";
+    else if (isBlank) cardCls += " is-blank";
+    else cardCls += " is-wrong";
+
+    const card = el("article", cardCls);
 
     const head = el("div", "result-card-head");
     const titleNum = el("h3", "stream-title", `Câu ${originalIdx + 1}`);
     const badges = el("div", "result-card-badges");
-    badges.append(el("span", "meta-pill " + (it.is_correct ? "is-pass" : "is-warn"), it.is_correct ? "Đúng" : "Sai"));
+    if (it.is_correct) {
+      badges.append(el("span", "meta-pill is-pass", "Đúng"));
+    } else if (isBlank) {
+      badges.append(el("span", "meta-pill", "Bỏ trống"));
+    } else {
+      badges.append(el("span", "meta-pill is-warn", "Sai"));
+    }
     if (it.domain) badges.append(el("span", "meta-pill", it.domain));
     if (it.flagged) badges.append(el("span", "meta-pill is-warn", "Gắn cờ"));
     head.append(titleNum, badges);
@@ -1556,6 +1702,9 @@ async function openItemAsk(itemId) {
   if (!att) return;
   _askAttemptId = att.id;
   _askItemId = itemId;
+  const attemptId = _askAttemptId;
+  const itId = _askItemId;
+
   const idx = (att.items || []).findIndex(x => x.id === itemId);
   const numStr = idx >= 0 ? `Câu ${idx + 1}` : itemId;
 
@@ -1575,7 +1724,8 @@ async function openItemAsk(itemId) {
   dia.showModal();
 
   try {
-    const d = await api(`/api/attempts/${encodeURIComponent(_askAttemptId)}/items/${encodeURIComponent(_askItemId)}/ask`);
+    const d = await api(`/api/attempts/${encodeURIComponent(attemptId)}/items/${encodeURIComponent(itId)}/ask`);
+    if (_askItemId !== itId || _askAttemptId !== attemptId) return;
     thread.textContent = "";
     const msgs = d.messages || [];
     if (msgs.length > 0 && clearBtn) clearBtn.hidden = false;
@@ -1601,6 +1751,7 @@ async function openItemAsk(itemId) {
       }
     }
   } catch (e) {
+    if (_askItemId !== itId || _askAttemptId !== attemptId) return;
     thread.textContent = e.message || "Không tải được lịch sử hỏi.";
   }
 }
@@ -1656,12 +1807,16 @@ async function clearItemAsk() {
   if (!confirm("Xóa toàn bộ câu hỏi của bạn về câu này?")) return;
   const thread = $("testAskThread");
   const clearBtn = $("testAskClear");
+  const err = $("testAskError");
   try {
     await api(`/api/attempts/${encodeURIComponent(_askAttemptId)}/items/${encodeURIComponent(_askItemId)}/ask`, { method: "DELETE" });
     if (thread) thread.textContent = "";
     if (clearBtn) clearBtn.hidden = true;
   } catch (e) {
-    alert(e.message || "Không thể xóa hội thoại.");
+    if (err) {
+      err.textContent = e.message || "Không thể xóa hội thoại.";
+      err.hidden = false;
+    }
   }
 }
 
@@ -1677,6 +1832,30 @@ function attachSafeLinks(container) {
     }
   });
 }
+
+function exitAttempt() {
+  const dia = $("testExitDialog");
+  if (dia && dia.open) dia.close();
+  if (_currentAttempt && _currentAttempt.test_key) {
+    location.hash = "#test=" + encodeURIComponent(_currentAttempt.test_key);
+  } else {
+    location.hash = "#tests";
+  }
+}
+
+window.addEventListener("beforeunload", e => {
+  let hasUnsaved = false;
+  for (const k in _saveQueue) {
+    const q = _saveQueue[k];
+    if (q && (q.status === "sending" || q.status === "failed" || (q.pending !== null && q.pending !== undefined) || (q.failed !== null && q.failed !== undefined))) {
+      hasUnsaved = true;
+      break;
+    }
+  }
+  if (hasUnsaved) {
+    e.preventDefault();
+  }
+});
 
 document.addEventListener("DOMContentLoaded", () => {
   attachSafeLinks($("testDetailDesc"));
@@ -1695,6 +1874,37 @@ Object.assign(ACTIONS, {
   "test-open": el => { location.hash = "#test=" + encodeURIComponent(el.dataset.id); },
   "test-detail": el => { location.hash = "#test=" + encodeURIComponent(el.dataset.id); },
   "test-back": () => { location.hash = "#tests"; },
+  "test-exit": () => {
+    let n = 0;
+    for (const k in _saveQueue) {
+      const q = _saveQueue[k];
+      if (q && (q.status === "failed" || (q.failed !== null && q.failed !== undefined))) {
+        n++;
+      }
+    }
+    if (n > 0) {
+      const txt = $("testExitText");
+      if (txt) {
+        txt.textContent = `Có ${n} câu chưa lưu được. Thoát thì sẽ gửi thử lần cuối, nhưng có thể mất nếu mạng chưa có lại.`;
+      }
+      const dia = $("testExitDialog");
+      if (dia) dia.showModal();
+    } else {
+      exitAttempt();
+    }
+  },
+  "test-exit-cancel": () => {
+    const dia = $("testExitDialog");
+    if (dia && dia.open) dia.close();
+  },
+  "test-exit-confirm": () => {
+    exitAttempt();
+  },
+  "test-retry-submit": () => {
+    const autoErr = $("testAutoSubmitError");
+    if (autoErr) autoErr.hidden = true;
+    confirmSubmit(true);
+  },
   "attempt-open": el => { location.hash = "#attempt=" + encodeURIComponent(el.dataset.id); },
   "attempt-result": el => { location.hash = "#result=" + encodeURIComponent(el.dataset.id); },
   "attempt-start": async el => {
@@ -1709,7 +1919,9 @@ Object.assign(ACTIONS, {
       const att = await api(`/api/tests/${encodeURIComponent(key)}/attempts`, send("POST", { mode, restart }));
       location.hash = "#attempt=" + encodeURIComponent(att.id);
     } catch (err) {
-      const alert = $("testDetailAlert");
+      const resAlert = $("testResultAlert");
+      const resScreen = $("screen-test-result");
+      const alert = (resAlert && resScreen && resScreen.classList.contains("active")) ? resAlert : $("testDetailAlert");
       if (alert) {
         alert.textContent = err.message || "Không bắt đầu được lượt làm bài.";
         alert.hidden = false;
@@ -1774,4 +1986,3 @@ window.testPrompt = testPrompt;
 window.copyTestPrompt = copyTestPrompt;
 window.parseTestJson = parseTestJson;
 window.mergeTestFiles = mergeTestFiles;
-window.leaveAttempt = leaveAttempt;

@@ -2391,6 +2391,15 @@ a.drawer-nav-item { display: flex; align-items: center; text-decoration: none; c
 .test-desc-box p:last-child {
   margin-bottom: 0;
 }
+#testModeHelp {
+  margin: 1rem 0;
+}
+#testModeHelp p {
+  margin-bottom: 0.5rem;
+}
+#testModeHelp p:last-child {
+  margin-bottom: 0;
+}
 .test-desc-box pre {
   max-width: 100%;
   overflow-x: auto;
@@ -2486,11 +2495,37 @@ body.in-test .stage-body {
   color: var(--text-main);
 }
 
+.test-run-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
 .test-run-meta {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+  max-width: 100%;
+}
+
+@media (max-width: 480px) {
+  .test-run-title {
+    max-width: 150px;
+  }
+  .test-run-bar {
+    gap: 0.5rem;
+  }
+  .test-run-meta {
+    width: 100%;
+    gap: 0.35rem;
+  }
+  .test-run-meta .btn-studio-secondary {
+    padding: 0 0.625rem;
+    font-size: 0.8125rem;
+  }
 }
 
 .test-save-indicator {
@@ -2573,6 +2608,18 @@ body.in-test .stage-body {
 
 .btn-tool-sm:hover {
   background: var(--bg-hover);
+}
+
+#testAutoSubmitError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+#testAutoSubmitError[hidden] {
+  display: none !important;
 }
 
 .test-run-layout {
@@ -3030,6 +3077,11 @@ body.in-test .stage-body {
 
 .test-result-card.is-wrong {
   border-left: 4px solid var(--rose);
+}
+
+.test-result-card.is-blank {
+  border: 1px solid var(--hairline);
+  border-left: 1px solid var(--hairline);
 }
 
 .result-card-head {

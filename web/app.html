@@ -220,6 +220,7 @@
           <div class="meta-pills" id="testDetailPills"></div>
           <div class="test-desc-box" id="testDetailDesc"></div>
           <div class="cta-cluster" id="testDetailActions"></div>
+          <div class="dock-note" id="testModeHelp"><p>Thi thử: có đồng hồ nếu đề có giới hạn giờ, nộp bài mới chấm. Câu chọn sai vào mục Ôn câu sai.</p><p>Luyện tập: không tính giờ, bấm Kiểm tra để xem đúng sai và giải thích ngay. Câu bấm Kiểm tra mà sai vào mục Ôn câu sai.</p></div>
           <p class="studio-alert error" id="testDetailAlert" role="alert" hidden></p>
         </div>
         <h2 class="list-heading" id="testHistoryHeading">Lịch sử làm bài</h2>
@@ -230,6 +231,7 @@
       <section id="screen-test-run" class="screen" aria-label="Làm bài thi">
         <div class="test-run-bar">
           <div class="test-run-info">
+            <span class="test-run-title" id="testRunTitle"></span>
             <span class="status-pill" id="testRunModePill"></span>
             <span class="test-run-counter" id="testRunCounter"></span>
           </div>
@@ -238,6 +240,7 @@
             <div class="test-timer-box" id="testTimerBox">
               <span class="console-clock test-timer" id="testTimer">0:00</span>
             </div>
+            <button type="button" class="btn-studio-secondary" data-act="test-exit" id="btnTestExit">Thoát</button>
             <button type="button" class="btn-studio-secondary test-btn-pause" data-act="test-pause" id="btnTestPause" aria-label="Tạm dừng">Tạm dừng</button>
             <button type="button" class="btn-studio-secondary test-btn-grid-toggle" data-act="test-toggle-grid" id="btnTestGridToggle" aria-label="Lưới câu hỏi">Lưới câu</button>
           </div>
@@ -256,6 +259,8 @@
             <span class="test-tool-note" id="testSpeechNote" hidden></span>
           </div>
         </div>
+        <p class="studio-alert error" id="testRunNotice" role="alert" hidden></p>
+        <div class="studio-alert error" id="testAutoSubmitError" role="alert" hidden><span>Hết giờ nhưng chưa nộp được bài. Kiểm tra mạng rồi thử lại.</span> <button type="button" class="btn-studio-primary" data-act="test-retry-submit">Thử nộp lại</button></div>
 
         <div class="test-run-layout">
           <div class="test-stage">
@@ -264,6 +269,7 @@
               <p class="hero-note">Thời gian đã dừng lại. Bấm tiếp tục để làm tiếp bài thi.</p>
               <div class="cta-cluster">
                 <button type="button" class="btn-studio-primary" data-act="test-pause">Tiếp tục làm bài</button>
+                <button type="button" class="btn-studio-secondary" data-act="test-exit">Thoát</button>
               </div>
             </div>
 
@@ -307,6 +313,8 @@
             </div>
           </div>
         </dialog>
+
+        <dialog class="lesson-dialog" id="testExitDialog" aria-labelledby="testExitTitle"><div class="lesson-dialog-form"><h2 class="fc-title" id="testExitTitle">Còn câu chưa lưu</h2><p class="dock-note" id="testExitText"></p><div class="lesson-dialog-buttons"><button type="button" class="btn-studio-secondary" data-act="test-exit-cancel">Ở lại</button><button type="button" class="btn-studio-primary" data-act="test-exit-confirm">Vẫn thoát</button></div></div></dialog>
       </section>
 
       <section id="screen-test-result" class="screen" aria-label="Kết quả bài thi">
@@ -323,6 +331,7 @@
             <div class="result-pass-status" id="testResultStatus"></div>
           </div>
           <div class="cta-cluster" id="testResultActions"></div>
+          <p class="studio-alert error" id="testResultAlert" role="alert" hidden></p>
         </div>
 
         <div class="result-domains-section" id="testResultDomainsSection">
@@ -347,6 +356,7 @@
             <div class="result-filter-tabs" role="group" aria-label="Lọc câu hỏi">
               <button type="button" class="filter-tab active" data-act="result-filter" data-filter="all">Tất cả</button>
               <button type="button" class="filter-tab" data-act="result-filter" data-filter="wrong">Câu sai</button>
+              <button type="button" class="filter-tab" data-act="result-filter" data-filter="blank" hidden>Bỏ trống</button>
               <button type="button" class="filter-tab" data-act="result-filter" data-filter="flagged">Câu gắn cờ</button>
             </div>
           </div>
