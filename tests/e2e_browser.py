@@ -251,6 +251,8 @@ try:
 
         pg.evaluate("go('home')")
         pg.click("#accountMenu summary")
+        pg.wait_for_timeout(200); pg.screenshot(path=str(SHOTS / "account-menu.png"))
+        check("account menu items line up", len(set(pg.evaluate("""[...document.querySelectorAll('#accountMenu .account-menu-item')].filter(e => e.offsetParent).map(e => getComputedStyle(e).justifyContent + e.getBoundingClientRect().left)"""))) == 1)
         pg.get_by_role("button", name="Đăng xuất").first.click()
         pg.wait_for_url("**/login")
         pg.goto(BASE + "/api/me")

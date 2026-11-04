@@ -435,9 +435,9 @@ def run(br, base, temp, work):
     check("first password change lands on /", dung_pg.url == f"{base}/")
 
     # Opens app, clicks "Đổi mật khẩu", page shows #pass0
-    if not dung_pg.locator("a.btn-logout:has-text('Đổi mật khẩu')").is_visible():
+    if not dung_pg.locator("a.account-menu-item:has-text('Đổi mật khẩu')").is_visible():
         dung_pg.click("details.account-menu summary")
-    dung_pg.click("a.btn-logout:has-text('Đổi mật khẩu')")
+    dung_pg.click("a.account-menu-item:has-text('Đổi mật khẩu')")
     dung_pg.wait_for_url(f"{base}/change-password*")
     dung_pg.wait_for_selector("#pass0Block:not([hidden])")
     check("voluntary change shows pass0", dung_pg.locator("#pass0").is_visible())
