@@ -246,6 +246,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.locator("#homeCta [data-act=start]").click()
     a.wait_for_selector("#screen-review.active")
     check("no audio hides Listen", "Nghe" not in a.locator("#screen-review .flow-strip").inner_text(), a.locator("#screen-review .flow-strip").inner_text())
+    check("no audio: steps count 1, 2", "2. Flashcard" in a.locator("#screen-review .flow-strip").inner_text(), a.locator("#screen-review .flow-strip").inner_text())
     check("next step says Flashcard", "Flashcard" in a.locator("#screen-review [data-next-listen]").inner_text())
     a.locator("#screen-review [data-next-listen]").click()
     a.wait_for_selector("#screen-flashcard.active")

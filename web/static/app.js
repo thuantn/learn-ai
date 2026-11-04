@@ -101,7 +101,9 @@ function renderFlow() {
     box.textContent = "";
     const steps = document.createElement("div");
     steps.className = "flow-steps";
+    let shown = 0;
     names.forEach((n, i) => {
+      if (i === 1 && !hasAudio()) return;
       const s = document.createElement("button");
       s.type = "button";
       s.className = "flow-step-item" + (i + 1 === at ? " active" : "");
@@ -109,7 +111,7 @@ function renderFlow() {
       s.dataset.act = "go";
       s.dataset.to = ["review", "listen", "flashcard"][i];
       if (i + 1 === at) s.setAttribute("aria-current", "step");
-      s.textContent = `${i + 1}. ${n}`;
+      s.textContent = `${++shown}. ${n}`;
       steps.append(s);
     });
     const b = document.createElement("button");
@@ -127,6 +129,8 @@ function renderLesson() {
   const hasTests = state.tests && state.tests.length > 0;
   document.body.classList.toggle("no-lesson", !l);
   document.body.classList.toggle("no-audio", !hasAudio());
+  renderFlow();
+  document.querySelector('[data-nav="flashcard"] span').textContent = `${hasAudio() ? 3 : 2}. Flashcard`;
   $("homeCta").hidden = !l;
   $("homeEmptyCta").hidden = !!l || hasTests;
   $("homeListHeading").hidden = !l;
@@ -900,7 +904,6 @@ document.addEventListener("DOMContentLoaded", () => (async function init() {
   state.me = await api("/api/me");
   const isAdmin = !!(state.me && state.me.admin);
   document.querySelectorAll("[data-admin-link]").forEach(a => a.hidden = !isAdmin);
-  renderFlow();
   renderSpeed();
   renderThemeLabel();
   joinFromLink();

@@ -1345,7 +1345,7 @@
       font-family: 'Space Grotesk', sans-serif;
       font-weight: 700;
       font-size: 1.0625rem;
-      color: var(--mint);
+      color: var(--accent);
       flex-shrink: 0;
     }
 
@@ -2350,7 +2350,7 @@ a.drawer-nav-item { display: flex; align-items: center; text-decoration: none; c
 .lesson-dialog { margin: auto; width: min(560px, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; }
 #feedbackDialog .studio-textarea { width: 100%; margin: 0; }
 .no-lesson [data-nav="review"], .no-lesson [data-nav="flashcard"], .no-lesson [data-article], .no-lesson .dock-now { display: none; }
-.no-audio [data-nav="listen"], .no-audio .flow-step-item[data-step="2"], .no-audio .studio-dock .console-well, .no-audio .capsule-audio-cluster { display: none; }
+.no-audio [data-nav="listen"], .no-audio .studio-dock .console-well, .no-audio .capsule-audio-cluster { display: none; }
 .no-ask .ask-dock, .no-ask .ask-backdrop, .no-ask .capsule-ask-btn, .no-ask .topbar-ask-btn, .no-ask .ask-prompt-chips { display: none !important; }
 @media (min-width: 1024px) {
   .no-ask .workbench, .no-ask .workbench.ask-expanded { grid-template-columns: 320px minmax(0, 1fr); }
