@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 const $$ = sel => [...document.querySelectorAll(sel)];
 const SPEEDS = [1, 1.25, 1.5, 2, 0.75];
 const SCREENS = ["home", "library", "review", "listen", "flashcard", "finish", "tests", "test-detail", "test-run", "test-result"];
+const SCREEN_TITLES = { home: "Trang đầu", library: "Thư viện", tests: "Bộ đề", "test-detail": "Bộ đề", "test-run": "Làm bài", "test-result": "Kết quả", review: "Ôn lại", listen: "Nghe", flashcard: "Flashcard", finish: "Kết thúc buổi học" };
 const state = { me: null, lessons: [], lesson: null, track: "long", due: 0, nextDue: null, cards: [], idx: 0, reviewed: 0, tests: [] };
 function currentTrack() { return state.lesson && state.lesson.tracks[state.track]; }
 const audio = new Audio();
@@ -34,8 +35,11 @@ function fmt(sec) {
 const lessonNo = l => "Bài " + l.order;
 
 function statusText(l) {
-  if (l.status === "done") return l.due ? `Đã xong, còn ${l.due} thẻ đến hạn` : "Đã xong";
-  if (l.status === "in_progress") return l.due ? `Đang học, còn ${l.due} thẻ đến hạn` : "Đang học";
+  if (l.status === "done") return l.due ? `Đã xong, còn ${l.due} thẻ cần ôn` : "Đã xong";
+  if (l.status === "in_progress") {
+    if (l.flow_done && !l.read) return l.due ? `Đã ôn, chưa đọc bài, còn ${l.due} thẻ cần ôn` : "Đã ôn, chưa đọc bài";
+    return l.due ? `Đang học, còn ${l.due} thẻ cần ôn` : "Đang học";
+  }
   return "Chưa học";
 }
 
@@ -45,6 +49,7 @@ function go(id, replace, hash) {
   if (!SCREENS.includes(id)) id = "home";
   if (!state.lesson && ["review", "listen", "flashcard", "finish"].includes(id)) id = "home";
   if (id === "listen" && !hasAudio()) id = "flashcard";
+  document.title = `${SCREEN_TITLES[id]} | Học AI`;
   const isLesson = ["review", "listen", "flashcard", "finish"].includes(id);
   document.body.classList.toggle("in-lesson", isLesson);
   document.body.classList.toggle("on-listen", id === "listen");
@@ -54,7 +59,14 @@ function go(id, replace, hash) {
     openAsk(false);
   }
   syncAsk();
-  $$(".screen").forEach(s => s.classList.toggle("active", s.id === "screen-" + id));
+  const prevActive = document.querySelector(".screen.active");
+  const targetScreen = $("screen-" + id);
+  const changed = prevActive && prevActive !== targetScreen;
+  $$(".screen").forEach(s => s.classList.toggle("active", s === targetScreen));
+  if (changed && targetScreen) {
+    targetScreen.tabIndex = -1;
+    targetScreen.focus({ preventScroll: true });
+  }
   const navTarget = id.startsWith("test") ? "tests" : id;
   $$("[data-nav]").forEach(t => t.dataset.nav === navTarget ? t.setAttribute("aria-current", "page") : t.removeAttribute("aria-current"));
   const targetHash = hash || ("#" + id);
@@ -94,6 +106,7 @@ function openAsk(open) {
 
 // ---------- Rendering ----------
 function renderFlow() {
+  const l = state.lesson;
   const names = ["Ôn lại", "Nghe", "Flashcard"];
   const skip = { 1: "listen", 2: "flashcard", 3: "finish" };
   $$("[data-flow]").forEach(box => {
@@ -115,6 +128,15 @@ function renderFlow() {
       s.textContent = `${++shown}. ${n}`;
       steps.append(s);
     });
+    if (l) {
+      const a = document.createElement("a");
+      a.className = "flow-step-item";
+      a.dataset.article = "";
+      a.dataset.icon = "article";
+      a.href = l.page;
+      a.textContent = `${++shown}. Đọc bài`;
+      steps.append(a);
+    }
     const b = document.createElement("button");
     b.type = "button";
     b.className = "btn-studio-secondary flow-skip";
@@ -144,7 +166,7 @@ function renderLesson() {
     } else {
       $("homePill").textContent = "Tài khoản mới";
       $("home-title").textContent = "Chưa có bài học nào";
-      $("homeNote").textContent = "Tải lên bài của bạn, hoặc nhờ đồng nghiệp share bài để bắt đầu học.";
+      $("homeNote").textContent = "Tải lên bài của bạn, hoặc nhờ đồng nghiệp chia sẻ bài để bắt đầu học.";
     }
     $("summary").textContent = "";
     $("dockKicker").textContent = "";
@@ -330,7 +352,7 @@ function renderList() {
   }
 
   renderHomeTests();
-  const dueText = state.due ? `Còn ${state.due} thẻ đến hạn` : "Không có thẻ đến hạn";
+  const dueText = state.due ? `Còn ${state.due} thẻ cần ôn` : "Không có thẻ cần ôn";
   $$("[data-due-text]").forEach(e => { e.textContent = dueText; });
   $$("[data-due-short]").forEach(e => { e.textContent = state.due ? `${state.due} thẻ` : ""; });
 }
@@ -437,7 +459,12 @@ window.addEventListener("scroll", () => {
   document.body.classList.toggle("bars-away", y > lastScrollY && y > 80 && !atEnd);
   lastScrollY = y;
 }, { passive: true });
-audio.addEventListener("error", () => { if (audio.src) { $("audioError").hidden = false; go("listen"); } });
+audio.addEventListener("error", () => {
+  if (audio.src) {
+    $("audioError").hidden = false;
+    $("dockNote").textContent = "Không tải được audio. Kiểm tra mạng rồi thử lại.";
+  }
+});
 audio.addEventListener("playing", () => { $("audioError").hidden = true; });
 
 function savePosition(keepalive) {
@@ -530,9 +557,11 @@ function revealCard() {
   $("fcAnswerPane").hidden = false;
   $("fcReveal").hidden = true;
 }
+let rating = false;
 async function rateCard(r) {
   const c = state.cards[state.idx];
-  if (!c || $("fcAnswerPane").hidden) return;
+  if (!c || $("fcAnswerPane").hidden || rating) return;
+  rating = true;
   $$(".btn-rate").forEach(b => { b.disabled = true; });
   try {
     await api(`/api/cards/${encodeURIComponent(c.id)}/review`, send("POST", { rating: r }));
@@ -542,16 +571,40 @@ async function rateCard(r) {
     else renderCard();
   } catch (e) {
     $("fcBadge").textContent = "Chưa lưu được. Chấm lại nhé.";
+  } finally {
+    rating = false;
+    $$(".btn-rate").forEach(b => { b.disabled = false; });
   }
-  $$(".btn-rate").forEach(b => { b.disabled = false; });
 }
 async function finish() {
   if (state.lesson) await api(`/api/lessons/${state.lesson.id}/finish`, send("POST")).catch(() => {});
   await refresh();
+  const l = state.lesson;
   const parts = [];
   if (state.reviewed) parts.push(`Bạn đã ôn ${state.reviewed} thẻ.`);
   if (state.nextDue) parts.push(`Lần ôn tiếp theo: ${new Date(state.nextDue * 1000).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}.`);
+
+  const done = !!l && l.status === "done";
+  const prefix = l ? l.id.split(".")[0] : "";
+  const next = l ? state.lessons.find(x => x.id.split(".")[0] === prefix && x.order === l.order + 1) : null;
+  if (!done) parts.push("Đọc bài đầy đủ để hoàn tất bài này.");
+  $("finishPill").textContent = done ? "Đã xong" : "Chưa xong";
+  $("finishPill").classList.toggle("is-done", done);
+  $("finish-title").textContent = done ? "Kết thúc buổi học" : "Còn một bước";
   $("finishNote").textContent = parts.join(" ") || "Đã hoàn tất buổi học.";
+  const nextBtn = $("finishNext"), homeBtn = $("finishHome"), readBtn = $("finishRead");
+  nextBtn.hidden = !(done && next);
+  if (next) {
+    nextBtn.dataset.lesson = next.id;
+    nextBtn.textContent = `Học tiếp ${lessonNo(next)}`;
+  }
+  // The main action comes first and is the only primary one.
+  const order = !done ? [readBtn, homeBtn] : next ? [nextBtn, homeBtn, readBtn] : [homeBtn, readBtn];
+  order.forEach((b, i) => {
+    b.classList.toggle("btn-studio-primary", i === 0);
+    b.classList.toggle("btn-studio-secondary", i > 0);
+  });
+  document.querySelector("#screen-finish .finish-cta").append(...order);
   state.reviewed = 0;
   go("finish");
 }
@@ -736,6 +789,13 @@ const ACTIONS = {
     $("askDock").classList.toggle("mobile-expanded", on);
     el.setAttribute("aria-expanded", String(on));
     el.textContent = on ? "Thu gọn" : "Mở rộng";
+  },
+  "skip-main": () => {
+    const s = document.querySelector(".screen.active");
+    if (s) {
+      s.tabIndex = -1;
+      s.focus();
+    }
   }
 };
 document.addEventListener("click", e => {
@@ -760,7 +820,21 @@ document.addEventListener("input", e => {
   renderTime();
 });
 document.addEventListener("change", e => { if (e.target.matches("[data-scrub]")) savePosition(); });
-document.querySelector("[data-article]") && $$("[data-article]").forEach(a => a.addEventListener("click", () => { audio.pause(); savePosition(true); closeNav(); }));
+document.addEventListener("click", e => {
+  const a = e.target.closest("a[data-article]");
+  if (!a) return;
+  audio.pause();
+  savePosition(true);
+  closeNav();
+  try {
+    const href = a.getAttribute("href") || a.href || "";
+    const idx = href.indexOf("/lesson/");
+    const lessonId = idx !== -1 ? href.slice(idx + "/lesson/".length).split(/[?#]/)[0] : (state.lesson ? state.lesson.id : "");
+    const activeScreen = document.querySelector(".screen.active");
+    const screenId = activeScreen ? activeScreen.id.replace(/^screen-/, "") : "";
+    sessionStorage.setItem("learn.return", JSON.stringify({ lesson: lessonId, screen: screenId }));
+  } catch (err) {}
+});
 $("navDrawer") && $("navDrawer").addEventListener("click", e => { if (e.target.closest("a")) closeNav(); });
 
 document.addEventListener("keydown", e => {
@@ -888,7 +962,7 @@ function joinFromLink() {
   if (!m) return false;
   history.replaceState(null, "", "#home");
   api("/api/join", send("POST", { token: m[1], preview: true })).then(async p => {
-    if (!p.mine && !confirm(`Tác giả ${p.author} share bài này:\n${p.title.replace(/\s+/g, " ")}\n\nThêm vào thư viện?`)) return;
+    if (!p.mine && !confirm(`Tác giả ${p.author} chia sẻ bài này:\n${p.title.replace(/\s+/g, " ")}\n\nThêm vào thư viện?`)) return;
     const d = await api("/api/join", send("POST", { token: m[1] }));
     if (d.first_lesson) location.replace("/lesson/" + d.first_lesson);
     else location.hash = "#tests=" + d.package_id;
@@ -909,5 +983,24 @@ document.addEventListener("DOMContentLoaded", () => (async function init() {
   renderThemeLabel();
   joinFromLink();
   await refresh();
+  let returnData = null;
+  try {
+    const raw = sessionStorage.getItem("learn.return");
+    if (raw) {
+      sessionStorage.removeItem("learn.return");
+      returnData = JSON.parse(raw);
+    }
+  } catch (e) {}
+  if (!location.hash && returnData && returnData.lesson && state.lessons.some(l => l.id === returnData.lesson)) {
+    setLesson(returnData.lesson);
+    if (["review", "listen", "flashcard"].includes(returnData.screen)) {
+      go(returnData.screen, true);
+      return;
+    }
+    if (returnData.screen === "finish") {
+      finish();
+      return;
+    }
+  }
   if (!(window.testRoute && window.testRoute())) go(location.hash.slice(1) || "home", true);
 })().catch(err => { if (err.name !== "AbortError" && err.message !== "login" && err.message !== "password") console.error(err); }));

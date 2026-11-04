@@ -42,7 +42,9 @@ const ASK_LABEL = { pending: "Ô Hỏi: chờ admin duyệt", approved: "Ô Hỏ
 function renderLibrary(d) {
   $("libAdmin").hidden = !(state.me && state.me.admin);
   $("libUsed").textContent = `${size(d.used)} / ${size(d.quota)}`;
-  $("libMeter").style.width = Math.min(100, d.used / d.quota * 100) + "%";
+  const usedPercent = Math.min(100, Math.round(d.used / d.quota * 100));
+  $("libMeter").style.width = usedPercent + "%";
+  $("libMeter").parentElement.setAttribute("aria-valuenow", String(usedPercent));
   const mine = $("libMine");
   mine.textContent = "";
   d.mine.forEach(p => {
@@ -55,7 +57,7 @@ function renderLibrary(d) {
       p.lessons && p.lessons.length ? `${p.lessons.length} bài` : null,
       p.tests && p.tests.length ? `${p.tests.length} đề` : null,
       size(p.size_bytes),
-      `${p.people} người được share`,
+      `${p.people} người được chia sẻ`,
       p.link_on && "Link đang bật"
     ].filter(Boolean);
     pillList.forEach(t => pills.append(el("span", "meta-pill", t)));
@@ -68,12 +70,13 @@ function renderLibrary(d) {
       act.append(learn);
     }
     if (p.tests && p.tests.length > 0) {
-      const doTests = actionButton("Làm đề", "lib-tests", p.id, p.first_lesson ? "btn-studio-secondary" : "btn-studio-primary");
+      const doTests = actionButton("Xem đề", "lib-tests", p.id, p.first_lesson ? "btn-studio-secondary" : "btn-studio-primary");
       act.append(doTests);
       act.append(actionButton("Thống kê đề", "lib-test-stats", p.id));
     }
-    act.append(actionButton("Share", "lib-share", p.id), actionButton(`Góp ý (${p.feedback})`, "lib-feedback", p.id),
-      actionButton("Tải bản mới", "lib-upload"), actionButton("Xóa", "lib-delete", p.id, "btn-studio-secondary btn-danger-soft"));
+    act.append(actionButton("Chia sẻ", "lib-share", p.id));
+    if (p.feedback > 0) act.append(actionButton(`Xem góp ý (${p.feedback})`, "lib-feedback", p.id));
+    act.append(actionButton("Tải bản mới", "lib-upload"), actionButton("Xóa", "lib-delete", p.id, "btn-studio-secondary btn-danger-soft"));
     if (p.has_content && (p.ask_status === "none" || p.ask_status === "rejected")) act.append(actionButton("Xin bật ô Hỏi", "lib-ask", p.id));
     row.append(info, act);
     mine.append(row);
@@ -95,7 +98,7 @@ function renderLibrary(d) {
       act.append(learn);
     }
     if (p.tests && p.tests.length > 0) {
-      const doTests = actionButton("Làm đề", "lib-tests", p.id, p.first_lesson ? "btn-studio-secondary" : "btn-studio-primary");
+      const doTests = actionButton("Xem đề", "lib-tests", p.id, p.first_lesson ? "btn-studio-secondary" : "btn-studio-primary");
       act.append(doTests);
     }
     act.append(actionButton("Bỏ khỏi thư viện", "lib-leave", p.id));
@@ -189,6 +192,7 @@ async function sendPartsFile(file, name) {
   $("upBusyText").textContent = "Đang tải lên";
   $("upPercent").textContent = "0%";
   $("upMeter").style.width = "0%";
+  $("upMeter").parentElement.setAttribute("aria-valuenow", "0");
   if ($("upReuseStatus")) {
     $("upReuseStatus").hidden = true;
     $("upReuseStatus").textContent = "";
@@ -283,6 +287,7 @@ async function sendPartsFile(file, name) {
     const percent = totalProgressBytes ? Math.min(100, Math.floor((acknowledgedBytes + moving) / totalProgressBytes * 100)) : 0;
     $("upPercent").textContent = percent + "%";
     $("upMeter").style.width = percent + "%";
+    $("upMeter").parentElement.setAttribute("aria-valuenow", String(percent));
   }
 
   function updateBusyText() {
@@ -497,6 +502,7 @@ function sendFile(file, contentType, name) {
   $("upBusyText").textContent = "Đang tải lên";
   $("upPercent").textContent = "0%";
   $("upMeter").style.width = "0%";
+  $("upMeter").parentElement.setAttribute("aria-valuenow", "0");
   const xhr = new XMLHttpRequest();
   upload.xhr = xhr;
   xhr.open("POST", "/api/uploads");
@@ -506,6 +512,7 @@ function sendFile(file, contentType, name) {
     const percent = Math.round(e.loaded / e.total * 100);
     $("upPercent").textContent = percent + "%";
     $("upMeter").style.width = percent + "%";
+    $("upMeter").parentElement.setAttribute("aria-valuenow", String(percent));
     if (percent === 100) $("upBusyText").textContent = "Đang kiểm tra";
   };
   xhr.onload = () => {
@@ -639,7 +646,7 @@ async function renderPeople() {
     row.append(b);
     box.append(row);
   });
-  $("sharePeopleLabel").textContent = `Người đang được share (${d.people.length})`;
+  $("sharePeopleLabel").textContent = `Người đang được chia sẻ (${d.people.length})`;
 }
 async function renderLink() {
   const d = await api(`/api/packages/${sharing}/link`);
@@ -772,7 +779,7 @@ Object.assign(ACTIONS, {
     go("library", true);
   },
   "lib-leave": async b => {
-    if (!confirm("Bỏ bài này khỏi thư viện? Muốn học lại, bạn cần nhờ tác giả share lại.")) return;
+    if (!confirm("Bỏ bài này khỏi thư viện? Muốn học lại, bạn cần nhờ tác giả chia sẻ lại.")) return;
     await api(`/api/packages/${b.dataset.id}/leave`, send("POST", {}));
     await refresh();
     go("library", true);

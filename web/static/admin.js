@@ -27,7 +27,7 @@ const TEST_RESULT = {
 const LOG_LABEL = {
   ask_approve: "Duyệt ô Hỏi", ask_reject: "Từ chối ô Hỏi", ask_off: "Tắt ô Hỏi", package_remove: "Gỡ package",
   ai_save: "Đổi nhà cung cấp hoặc khóa AI", set_admin: "Đổi quyền admin", set_quota: "Đổi hạn mức",
-  user_add: "Tạo tài khoản", user_reset: "Đặt lại mật khẩu", user_end_sessions: "Đăng xuất mọi nơi", user_remove: "Xoá tài khoản",
+  user_add: "Tạo tài khoản", user_reset: "Đặt lại mật khẩu", user_end_sessions: "Đăng xuất mọi nơi", user_remove: "Xóa tài khoản",
 };
 let providers = [];
 let reviewing = null;
@@ -228,7 +228,7 @@ async function load() {
         userButton("Đăng xuất mọi nơi", "end", guarded(() => endSessions(u.name))),
         userButton(u.admin ? "Tắt admin" : "Bật admin", "admin", guarded(() => toggleAdmin(u.name, !u.admin))),
         userButton("Hạn mức", "quota", guarded(() => setQuota(u.name, u.quota))),
-        userButton("Xoá", "remove", guarded(() => openRemoveDialog(u.name)), "btn-studio-secondary btn-danger-soft"),
+        userButton("Xóa", "remove", guarded(() => openRemoveDialog(u.name)), "btn-studio-secondary btn-danger-soft"),
       ];
     }
     return row(u.name, [pills(pillList)], actions);

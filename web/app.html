@@ -21,6 +21,7 @@
 <script src="/static/practice.js" defer></script>
 </head>
 <body>
+<button type="button" class="skip-link" data-act="skip-main">Bỏ qua tới nội dung</button>
 <div class="workbench" id="workbenchGrid">
   <aside class="studio-dock" aria-label="Trình phát podcast">
     <div>
@@ -56,9 +57,9 @@
     <header class="unified-top-bar">
       <a href="#home" class="topbar-brand" data-act="go" data-to="home"><img class="brand-logo" src="/static/icon.svg" alt="" width="24" height="24"><span>Học AI</span></a>
       <nav class="stage-nav" aria-label="Các màn hình">
-        <button data-icon="home" type="button" class="stage-tab" data-act="go" data-to="home" data-nav="home">Trang đầu</button>
-        <button data-icon="library" type="button" class="stage-tab" data-act="go" data-to="library" data-nav="library">Thư viện</button>
-        <a data-icon="tests" class="stage-tab" href="#tests" data-nav="tests">Bộ đề</a>
+        <button data-icon="home" type="button" class="stage-tab" data-act="go" data-to="home" data-nav="home" aria-label="Trang đầu" title="Trang đầu">Trang đầu</button>
+        <button data-icon="library" type="button" class="stage-tab" data-act="go" data-to="library" data-nav="library" aria-label="Thư viện" title="Thư viện">Thư viện</button>
+        <a data-icon="tests" class="stage-tab" href="#tests" data-nav="tests" aria-label="Bộ đề" title="Bộ đề">Bộ đề</a>
       </nav>
       <div class="top-bar-right">
         <button data-icon="ask" type="button" class="topbar-ask-btn" data-act="ask-open">Hỏi</button>
@@ -86,8 +87,8 @@
             <a class="btn-link-quiet home-read-link" data-article href="#">Đọc bài</a>
           </div>
           <div class="cta-cluster" id="homeEmptyCta" hidden>
-            <button data-icon="upload" type="button" class="btn-studio-primary" data-act="lib-upload">Tải lên bài học</button>
-            <button type="button" class="btn-studio-secondary" data-act="go" data-to="library">Mở Thư viện</button>
+            <button type="button" class="btn-studio-primary" data-act="go" data-to="library">Mở Thư viện</button>
+            <button data-icon="upload" type="button" class="btn-studio-secondary" data-act="lib-upload">Tải lên bài học</button>
           </div>
         </div>
         <h2 class="list-heading" id="homeListHeading">Danh sách bài học</h2>
@@ -101,7 +102,7 @@
         <div class="flow-strip lib-top">
           <div class="lib-used">
             <div class="auth-label"><span>Dung lượng đã dùng</span><strong id="libUsed"></strong></div>
-            <div class="meter-track"><div class="meter-fill" id="libMeter"></div></div>
+            <div class="meter-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Dung lượng đã dùng"><div class="meter-fill" id="libMeter"></div></div>
           </div>
           <button data-icon="upload" type="button" class="btn-studio-primary" data-act="lib-upload">Tải lên</button>
           <a class="btn-studio-secondary" id="libAdmin" href="/admin" hidden>Quản trị</a>
@@ -109,9 +110,9 @@
         <h2 class="list-heading">Bài của tôi</h2>
         <div class="lesson-stream" id="libMine"></div>
         <p class="dock-note" id="libMineEmpty" hidden>Bạn chưa tải lên bài nào.</p>
-        <h2 class="list-heading lib-second">Được share</h2>
+        <h2 class="list-heading lib-second">Được chia sẻ</h2>
         <div class="lesson-stream" id="libShared"></div>
-        <p class="dock-note" id="libSharedEmpty" hidden>Chưa có ai share bài cho bạn.</p>
+        <p class="dock-note" id="libSharedEmpty" hidden>Chưa có ai chia sẻ bài cho bạn.</p>
       </section>
 
       <section id="screen-review" class="screen" aria-labelledby="review-title">
@@ -163,6 +164,7 @@
           <h1 id="fc-title" class="fc-title">Flashcard</h1>
           <span class="fc-count" id="fcIndex"></span>
         </div>
+        <p class="dock-note" id="fcScope">Thẻ cần ôn của mọi bài, không chỉ bài đang học.</p>
         <div class="card-theater" id="fcCard" aria-live="polite">
           <div>
             <span class="status-pill" id="fcBadge"></span>
@@ -185,7 +187,7 @@
           <button type="button" class="btn-link-quiet" data-act="fb-card">Báo sai thẻ này</button>
         </div>
         <div class="hero-banner fc-empty" id="fcEmpty" hidden>
-          <h2 class="hero-title small-title">Không còn thẻ đến hạn</h2>
+          <h2 class="hero-title small-title">Không còn thẻ cần ôn</h2>
           <p class="hero-note">Các thẻ sẽ quay lại khi đến lịch ôn.</p>
           <div class="cta-cluster"><button type="button" class="btn-studio-primary" data-act="finish">Kết thúc buổi học</button></div>
         </div>
@@ -193,12 +195,13 @@
 
       <section id="screen-finish" class="screen" aria-labelledby="finish-title">
         <div class="hero-banner finish-banner">
-          <div class="status-pill is-done">Đã xong</div>
+          <div class="status-pill is-done" id="finishPill">Đã xong</div>
           <h1 id="finish-title" class="hero-title">Kết thúc buổi học</h1>
           <p class="hero-note" id="finishNote"></p>
           <div class="cta-cluster finish-cta">
-            <button type="button" class="btn-studio-primary" data-act="go" data-to="home">Về trang đầu</button>
-            <a class="btn-studio-secondary" data-article href="#">Đọc bài đầy đủ</a>
+            <button type="button" id="finishNext" class="btn-studio-primary" data-act="start" hidden></button>
+            <button type="button" id="finishHome" class="btn-studio-secondary" data-act="go" data-to="home">Về trang đầu</button>
+            <a id="finishRead" class="btn-studio-secondary" data-article href="#">Đọc bài đầy đủ</a>
           </div>
         </div>
       </section>
@@ -415,7 +418,7 @@
       <p class="dock-note" id="upBusyName"></p>
       <div>
         <div class="auth-label"><span id="upBusyText"></span><strong id="upPercent"></strong></div>
-        <div class="meter-track"><div class="meter-fill" id="upMeter"></div></div>
+        <div class="meter-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Tiến độ tải lên"><div class="meter-fill" id="upMeter"></div></div>
       </div>
       <p class="dock-note" id="upReuseStatus" hidden></p>
       <div class="lesson-dialog-buttons"><button type="button" class="btn-studio-secondary" data-act="up-close">Hủy tải lên</button></div>
@@ -471,9 +474,9 @@
       <div class="lesson-stream" id="sharePeople"></div>
     </div>
     <div class="console-well">
-      <div class="auth-label"><span>Link share, chỉ mở được sau khi đăng nhập</span></div>
+      <div class="auth-label"><span>Link chia sẻ, chỉ mở được sau khi đăng nhập</span></div>
       <div id="shareLinkOn" hidden>
-        <input class="auth-input share-link" id="shareLink" readonly aria-label="Link share">
+        <input class="auth-input share-link" id="shareLink" readonly aria-label="Link chia sẻ">
         <div class="stream-actions">
           <button type="button" class="btn-studio-primary" data-act="share-copy">Copy link</button>
           <button type="button" class="btn-studio-secondary" data-act="share-new">Tạo link mới</button>
@@ -582,9 +585,9 @@
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9c-1.5 0-2.9-.36-4.16-1L3 21l1.2-4.2A8.96 8.96 0 0 1 3 12a9 9 0 1 1 18 0z"/></svg>
     <span class="capsule-tab-label">Hỏi</span>
   </button>
-  <button type="button" class="capsule-tab capsule-menu-btn" data-act="nav-open" aria-label="Tài khoản">
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a8.5 8.5 0 0 1 13 0"/></svg>
-    <span class="capsule-tab-label">Tài khoản</span>
+  <button type="button" class="capsule-tab capsule-menu-btn" data-act="nav-open" aria-label="Menu">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    <span class="capsule-tab-label">Menu</span>
   </button>
 </div>
 </body>

@@ -397,7 +397,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.goto(f"{base}/#home")
     a.wait_for_selector("#screen-home.active")
     has_ask = a.locator(".capsule-ask-btn").is_visible()
-    want_tabs = ["Trang đầu", "Thư viện", "Bộ đề", "Hỏi", "Tài khoản"] if has_ask else ["Trang đầu", "Thư viện", "Bộ đề", "Tài khoản"]
+    want_tabs = ["Trang đầu", "Thư viện", "Bộ đề", "Hỏi", "Menu"] if has_ask else ["Trang đầu", "Thư viện", "Bộ đề", "Menu"]
     tab_items = [e.inner_text().strip() for e in a.locator(".mobile-floating-capsule > *").all() if e.is_visible()]
     check("tab bar shows exact items at 390px", tab_items == want_tabs, f"items={tab_items}, want={want_tabs}")
     a.locator(".mobile-floating-capsule [data-nav=library]").click()

@@ -258,6 +258,28 @@
       outline-offset: 2px;
     }
 
+    .skip-link {
+      position: fixed;
+      top: -9999px;
+      left: -9999px;
+      z-index: 1000;
+      padding: 0.6rem 1rem;
+      background: var(--bg-panel);
+      color: var(--text-main);
+      border: 1px solid var(--control-line);
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .skip-link:focus,
+    .skip-link:focus-visible {
+      top: 1rem;
+      left: 1rem;
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important;
@@ -573,10 +595,15 @@
     .btn-deck-play {
       min-height: 46px;
       border-radius: 11px;
-      background: var(--accent);
-      color: var(--accent-contrast);
+      background: var(--bg-canvas);
+      color: var(--text-main);
       font-weight: 700;
       font-size: 0.875rem;
+    }
+
+    body.on-listen .btn-deck-play {
+      background: var(--accent);
+      color: var(--accent-contrast);
     }
 
     /* =====================================================================
@@ -691,6 +718,27 @@
       color: var(--text-main);
       background: var(--bg-active);
       font-weight: 600;
+    }
+
+    @media (min-width: 1024px) {
+      body.in-lesson .topbar-ask-btn {
+        display: none !important;
+      }
+    }
+
+    @media (min-width: 1024px) and (max-width: 1365px) {
+      body.in-lesson .stage-tab {
+        font-size: 0;
+        padding: 0 0.6rem;
+      }
+      body.in-lesson .stage-tab::before {
+        width: 16px;
+        height: 16px;
+        margin-right: 0;
+      }
+      body.in-lesson .topbar-brand span {
+        display: none;
+      }
     }
 
     .top-bar-right {
@@ -836,6 +884,10 @@
 
     .screen.active {
       display: block;
+    }
+
+    .screen:focus {
+      outline: none;
     }
 
     /* =====================================================================
@@ -1313,17 +1365,26 @@
       color: var(--accent-bright);
     }
 
-    button.flow-step-item {
+    button.flow-step-item,
+    a.flow-step-item {
       background: none;
       border: 0;
       padding: 0 0.125rem;
       min-height: 44px;
       font-family: inherit;
       cursor: pointer;
+      text-decoration: none;
+      color: var(--text-dim);
     }
 
-    button.flow-step-item:hover {
+    button.flow-step-item:hover,
+    a.flow-step-item:hover {
       color: var(--text-main);
+    }
+
+    .flow-skip {
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .summary-stack {
