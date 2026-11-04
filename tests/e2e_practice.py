@@ -504,7 +504,7 @@ def run(br, base, temp, work):
     dom_rows = an.locator("#testResultDomainTable tbody tr").count()
     res_aid = an.evaluate("location.hash").split("#result=")[1]
     res_items = json.loads(call(an, "GET", f"/api/attempts/{res_aid}")["text"])["items"]
-    n_wrong = sum(1 for it in res_items if not it["is_correct"])
+    n_wrong = sum(1 for it in res_items if not it["is_correct"] and it["chosen"])  # blank has its own filter
     an.click("[data-act=result-filter][data-filter=wrong]")
     wrong_cards = an.locator("#testResultItemsList .test-result-card")
     all_wrong = all("Sai" in card.inner_text() for card in wrong_cards.all())
@@ -586,6 +586,9 @@ def run(br, base, temp, work):
         speechSynthesis.cancel = () => { const was = eng.live; eng.live = []; setTimeout(() => was.forEach(u => u.onerror && u.onerror({ error: "canceled" })), 0); };
         window.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
         window.__saved = _currentIndex;
+        // this is a review attempt: how many questions it holds depends on which shuffled answers were wrong above
+        window.__extra = _currentAttempt.items.length < 2;
+        if (__extra) _currentAttempt.items.push({ ...JSON.parse(JSON.stringify(_currentAttempt.items[0])), id: "extra", question: "Câu hỏi phụ?" });
         window.__spoken = () => { const t = eng.said.map(x => x.text).join(" "); eng.said = []; return t; };
         setupTts();
     }""")
@@ -613,7 +616,7 @@ def run(br, base, temp, work):
     # Reading stays on across questions until it is turned off, and a late "canceled" from the old question does not stop it.
     flow = an.evaluate("""async () => {
         const qText = i => { const d = document.createElement("div"); d.innerHTML = renderTestText(_currentAttempt.items[i].question); return d.textContent.trim().slice(0, 25); };
-        const start = _currentIndex, next = start + 1, btn = $("btnTestSpeech");
+        const start = _currentIndex, next = start + 1 < _currentAttempt.items.length ? start + 1 : start - 1, btn = $("btnTestSpeech");
         __spoken(); toggleSpeech(); const first = __spoken(); const onLabel = btn.textContent;
         goToQuestion(next); await """ + SETTLE + """;
         const second = __spoken(), stillOn = btn.textContent;
@@ -678,7 +681,7 @@ def run(br, base, temp, work):
     pick = an.evaluate("""async () => {
         const sel = $("testSpeechVoice");
         if (!sel) return { missing: true };
-        const saved = __eng.voices, start = _currentIndex, next = start + 1, item = _currentAttempt.items[next];
+        const saved = __eng.voices, start = _currentIndex, next = start + 1 < _currentAttempt.items.length ? start + 1 : start - 1, item = _currentAttempt.items[next];
         const keep = { q: item.question, o: item.options.map(x => x.text) };
         const names = () => [...sel.options].map(o => o.textContent);
         try { localStorage.removeItem("learn.test-speech-voice.vi"); localStorage.removeItem("learn.test-speech-voice.en"); } catch (_) {}
@@ -733,7 +736,9 @@ def run(br, base, temp, work):
         u.onerror({ error: "synthesis-failed" }); await """ + SETTLE + """;
         const note = $("testSpeechNote"), r = { shown: !note.hidden, note: note.textContent, label: $("btnTestSpeech").textContent };
         note.hidden = true; __eng.said = []; goToQuestion(__saved); await """ + SETTLE + """;
-        r.afterwards = __eng.said.length; return r;
+        r.afterwards = __eng.said.length;
+        if (__extra) { _currentAttempt.items.pop(); renderGrid(); }
+        return r;
     }""")
     check("đọc lỗi thì báo rõ và tắt", failed["shown"] and "synthesis-failed" in failed["note"] and failed["label"] == "Đọc" and failed["afterwards"] == 0, failed)
 
@@ -750,6 +755,303 @@ def run(br, base, temp, work):
     check("rời màn làm bài bằng Back dọn sạch",
           in_test_before and not in_test_after and dock_visible and not submits and rev_state != "submitted",
           f"in_test_after={in_test_after}, dock={dock_visible}, submits={submits}, status={rev_state}")
+
+    # 18b. leaving a test, replies that arrive late, and what the result screen offers. A fresh user, so nothing above interferes.
+    st = new_page(br, errs)
+    st_dialogs = []
+    st.on("dialog", lambda d: st_dialogs.append(d.message))
+    login_first(st, base, "st@example.com", temp["st@example.com"])
+    st_same = [make_item(f"p{i}") for i in range(1, 5)]
+    st_pkg = one_file({
+        "st-a": make_test(title="Đề Trạng Thái A", items=st_same),
+        "st-b": make_test(title="Đề Trạng Thái B", items=st_same),
+        "st-c": make_test(title="Đề Trạng Thái C", items=[make_item("c1"), make_item("c2", type="multi", correct=("A", "B"))]),
+        "st-t": make_test(title="Đề Trạng Thái Giờ", items=[make_item("x1"), make_item("x2")], time_limit_minutes=30),
+    }, slug="de-trang-thai")
+    st.goto(base + "/#library")
+    st.wait_for_selector("#screen-library.active")
+    open_upload(st)
+    st.fill("#upJsonText", json.dumps(st_pkg))
+    st.click("[data-act=up-paste-send]")
+    st.wait_for_selector("#upConfirm:not([hidden])")
+    st.check("#upAttest")
+    st.click("#upCommit")
+    st.wait_for_selector("#uploadDialog", state="hidden")
+    key_a = find_test(st, "Đề Trạng Thái A")["key"]
+    key_b = find_test(st, "Đề Trạng Thái B")["key"]
+    key_c = find_test(st, "Đề Trạng Thái C")["key"]
+    key_t = find_test(st, "Đề Trạng Thái Giờ")["key"]
+    # Holds chosen requests until the test lets them go, so "the reply came late" happens every time.
+    st.evaluate("""() => {
+        const real = window.fetch;
+        window.__rules = [];
+        window.fetch = (u, o) => {
+            const url = String(u), m = (o && o.method) || "GET";
+            const r = __rules.find(x => !x.taken && x.m === m && url.includes(x.part));
+            if (!r) return real(u, o);
+            r.taken = true;
+            return new Promise((res, rej) => {
+                r.release = () => real(u, o).then(res, rej);
+                r.fail = () => rej(new TypeError("offline"));
+                r.respond = body => res(new Response(JSON.stringify(body), { status: 200 }));
+            });
+        };
+    }""")
+
+    def hold(method, part):
+        st.evaluate("([m, part]) => { __rules.push({ m, part }); }", [method, part])
+
+    def letgo(part, how="release", body=None):
+        poll(lambda: st.evaluate("part => { const r = __rules.find(x => x.part === part && x.taken && !x.gone); return !!r; }", part), timeout=6)
+        st.evaluate("([part, how, body]) => { const r = __rules.find(x => x.part === part && x.taken && !x.gone); r.gone = true; how === 'respond' ? r.respond(body) : r[how](); }", [part, how, body])
+
+    def st_open(key, mode):
+        aid = json.loads(call(st, "POST", f"/api/tests/{key}/attempts", {"mode": mode, "restart": True})["text"])["id"]
+        st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid)
+        poll(lambda: st.evaluate("aid => _currentAttemptId === aid && !!_currentAttempt", aid))
+        st.wait_for_selector("#screen-test-run.active")
+        st.wait_for_selector(".test-option-btn")
+        return aid
+
+    def st_view(aid):
+        return json.loads(call(st, "GET", f"/api/attempts/{aid}")["text"])
+
+    def st_hash():
+        return st.evaluate("location.hash")
+
+    # Exit from a running timed exam stops its clock. Any other way of leaving does too.
+    aid = st_open(key_t, "exam")
+    exit_seen = st.locator("#btnTestExit").is_visible() if st.locator("#btnTestExit").count() else False
+    check("có nút Thoát khi đang làm đề", exit_seen)
+    if exit_seen:
+        st.click("#btnTestExit")
+        poll(lambda: st_hash() == f"#test={key_t}")
+        check("Thoát về trang đề và dừng đồng hồ", st_hash() == f"#test={key_t}" and poll(lambda: st_view(aid)["status"] == "paused"), st_view(aid)["status"])
+        st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid)
+        st.wait_for_selector("#testPausedPane:not([hidden])")
+        check("màn tạm dừng cũng có nút Thoát", st.locator("#testPausedPane [data-act=test-exit]").is_visible())
+        st.click("#testPausedPane [data-act=test-pause]")
+        poll(lambda: st_view(aid)["status"] == "open")
+        st.evaluate("() => { location.hash = '#tests'; }")
+        check("rời đề bằng đường khác cũng dừng đồng hồ", poll(lambda: st_view(aid)["status"] == "paused"), st_view(aid)["status"])
+    call(st, "POST", f"/api/attempts/{aid}/submit")
+
+    # An answer that could not be saved: warned on exit, and one last try goes out.
+    aid = st_open(key_a, "practice")
+    item_id = st.evaluate("_currentAttempt.items[_currentIndex].id")
+    hold("PUT", "/items/")
+    st.locator(".test-option-btn").first.click()
+    letgo("/items/", "fail")
+    poll(lambda: "Chưa lưu" in st.inner_text("#testSave"))
+    if st.locator("#btnTestExit").count():
+        st.click("#btnTestExit")
+        warned = st.locator("#testExitDialog[open]").count() == 1 and "chưa lưu" in st.inner_text("#testExitDialog").lower()
+        check("thoát khi còn câu chưa lưu thì cảnh báo", warned)
+        if warned:
+            st.click("[data-act=test-exit-cancel]")
+            still_here = st_hash() == f"#attempt={aid}" and not st.locator("#testExitDialog[open]").count()
+            st.click("#btnTestExit")
+            st.click("[data-act=test-exit-confirm]")
+            poll(lambda: st_hash() != f"#attempt={aid}")
+            saved = poll(lambda: next(x for x in st_view(aid)["items"] if x["id"] == item_id)["chosen"])
+            check("Ở lại vẫn ở đề; Vẫn thoát thì thử gửi lần cuối", still_here and saved, saved)
+
+    # Time ran out and neither the submit nor the reload got through: the person is told and can retry.
+    aid = st_open(key_b, "practice")
+    hold("POST", f"/{aid}/submit")
+    hold("GET", f"/api/attempts/{aid}")
+    st.evaluate("() => { confirmSubmit(true); }")
+    letgo(f"/{aid}/submit", "fail")
+    letgo(f"/api/attempts/{aid}", "fail")
+    told = poll(lambda: st.locator("#testAutoSubmitError").is_visible(), timeout=4) if st.locator("#testAutoSubmitError").count() else False
+    check("hết giờ mà nộp lỗi thì báo rõ", told)
+    if told:
+        st.click("[data-act=test-retry-submit]")
+    else:
+        call(st, "POST", f"/api/attempts/{aid}/submit")
+        st.evaluate("() => { leaveAttempt(); }")
+    check("bấm thử lại thì nộp được", poll(lambda: st_hash() == f"#result={aid}", timeout=4) or not told, st_hash())
+
+    # Finding out a test is already submitted must land on its result, not on #result=null.
+    aid = st_open(key_b, "practice")
+    call(st, "POST", f"/api/attempts/{aid}/submit")
+    st.evaluate("() => { togglePause(); }")
+    check("tạm dừng bài đã nộp thì tới đúng kết quả", poll(lambda: st_hash() == f"#result={aid}", timeout=4), st_hash())
+    aid = st_open(key_b, "practice")
+    call(st, "POST", f"/api/attempts/{aid}/submit")
+    st.evaluate("() => { document.dispatchEvent(new Event('visibilitychange')); }")
+    check("quay lại tab khi bài đã nộp thì tới đúng kết quả", poll(lambda: st_hash() == f"#result={aid}", timeout=4), st_hash())
+    aid = st_open(key_b, "practice")
+    st.evaluate("() => { confirmSubmit(true); confirmSubmit(); }")
+    poll(lambda: st_hash().startswith("#result="), timeout=4)
+    st.wait_for_timeout(500)
+    check("nộp hai lần cùng lúc vẫn tới đúng kết quả", st_hash() == f"#result={aid}", st_hash())
+
+    # A choice still queued on attempt A must not be sent to attempt B, where the same question exists.
+    aid_b = st_open(key_b, "practice")
+    aid_a = st_open(key_a, "practice")
+    first_item = st.evaluate("_currentAttempt.items[0].id")
+    ids = st.evaluate("[...document.querySelectorAll('.test-option-btn')].map(b => b.dataset.option)")
+    hold("PUT", f"/{aid_a}/items/")
+    st.click(f".test-option-btn[data-option='{ids[0]}']")
+    st.click(f".test-option-btn[data-option='{ids[1]}']")
+    st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid_b)
+    poll(lambda: st.evaluate("aid => _currentAttemptId === aid && !!_currentAttempt", aid_b))
+    letgo(f"/{aid_a}/items/")
+    st.wait_for_timeout(1200)
+    in_b = [x["chosen"] for x in st_view(aid_b)["items"] if x["chosen"]]
+    in_a = next(x for x in st_view(aid_a)["items"] if x["id"] == first_item)["chosen"]
+    check("câu đang chờ gửi của đề này không lọt sang đề khác", not in_b, in_b)
+    check("câu chọn sau cùng vẫn được lưu vào đúng đề", in_a == [ids[1]], in_a)
+
+    # A slow load of A must not replace B, which was opened after it.
+    st.evaluate("() => { location.hash = '#tests'; }")
+    st.wait_for_selector("#screen-tests.active")
+    hold("GET", f"/api/attempts/{aid_a}")
+    st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid_a)
+    poll(lambda: st.evaluate("part => __rules.some(x => x.part === part && x.taken && !x.gone)", f"/api/attempts/{aid_a}"))
+    st.evaluate("aid => { location.hash = '#attempt=' + aid; }", aid_b)
+    poll(lambda: st.evaluate("aid => !!_currentAttempt && _currentAttempt.id === aid", aid_b))
+    letgo(f"/api/attempts/{aid_a}")
+    st.wait_for_timeout(500)
+    shown = st.evaluate("[_currentAttempt && _currentAttempt.id, _currentAttemptId]")
+    check("tải chậm đề cũ không đè đề mở sau", shown == [aid_b, aid_b], shown)
+
+    # A check answered after moving on must not overwrite the question now on screen.
+    st.wait_for_selector(".test-option-btn")
+    hold("POST", "/check")
+    st.locator(".test-option-btn").first.click()
+    poll(lambda: "Đã lưu" in st.inner_text("#testSave"))
+    st.click("#btnTestCheck")
+    poll(lambda: st.evaluate("() => __rules.some(x => x.part === '/check' && x.taken && !x.gone)"))
+    st.click("#btnTestNext")
+    letgo("/check")
+    st.wait_for_timeout(500)
+    state_after = st.evaluate("""() => { const a = _currentAttempt.items; return { index: _currentIndex, ids: new Set(a.map(x => x.id)).size, total: a.length,
+        first: a[0].checked, second: a[1].checked, banner: !!document.querySelector('#testQuestionBox .test-checked-banner') }; }""")
+    check("trả lời Kiểm tra muộn không đè câu đang xem",
+          state_after["index"] == 1 and state_after["ids"] == state_after["total"] and state_after["first"] and not state_after["second"] and not state_after["banner"], state_after)
+
+    # The server refuses a save: say so, never "Đã lưu".
+    st.route("**/api/attempts/*/items/*", lambda r: r.fulfill(status=403, content_type="application/json", body="{}") if r.request.method == "PUT" else r.continue_())
+    st.click("#btnTestNext")
+    st.wait_for_timeout(100)
+    st.locator(".test-option-btn").first.click()
+    told = poll(lambda: st.locator("#testRunNotice").is_visible(), timeout=4) if st.locator("#testRunNotice").count() else False
+    check("máy chủ từ chối lưu thì báo rõ", told)
+    st.unroute("**/api/attempts/*/items/*")
+
+    # Options say which one is chosen to a screen reader, and the run screen names the test.
+    st.wait_for_selector(".test-option-btn")
+    st.locator(".test-option-btn").nth(1).click()
+    poll(lambda: st.evaluate("!!document.querySelector('.test-option-btn.is-selected')"))
+    pressed = st.evaluate("[...document.querySelectorAll('#testQuestionBox .test-option-btn')].map(b => [b.classList.contains('is-selected'), b.getAttribute('aria-pressed')])")
+    check("lựa chọn báo trạng thái cho trình đọc màn hình", pressed and all((sel and ar == "true") or (not sel and ar == "false") for sel, ar in pressed), pressed)
+    check("màn làm bài có tên đề", st.locator("#testRunTitle").count() == 1 and "Đề Trạng Thái B" in st.inner_text("#testRunTitle"))
+
+    # A late result must not replace the one opened after it.
+    call(st, "POST", f"/api/attempts/{aid_a}/submit")
+    call(st, "POST", f"/api/attempts/{aid_b}/submit")
+    st.evaluate("() => { location.hash = '#tests'; }")
+    st.wait_for_selector("#screen-tests.active")
+    hold("GET", f"/api/attempts/{aid_a}")
+    st.evaluate("aid => { location.hash = '#result=' + aid; }", aid_a)
+    poll(lambda: st.evaluate("part => __rules.some(x => x.part === part && x.taken && !x.gone)", f"/api/attempts/{aid_a}"))
+    st.evaluate("aid => { location.hash = '#result=' + aid; }", aid_b)
+    poll(lambda: "Đề Trạng Thái B" in st.inner_text("#testResultTitle"))
+    letgo(f"/api/attempts/{aid_a}")
+    st.wait_for_timeout(500)
+    check("kết quả về muộn không đè kết quả mở sau", "Đề Trạng Thái B" in st.inner_text("#testResultTitle"), st.inner_text("#testResultTitle"))
+
+    # A late Ask history belongs to the question it was asked for.
+    hold("GET", "/items/p1/ask")
+    hold("GET", "/items/p2/ask")
+    st.evaluate("() => { openItemAsk('p1'); }")
+    poll(lambda: st.evaluate("() => __rules.some(x => x.part === '/items/p1/ask' && x.taken)"))
+    st.evaluate("() => { $('testAskDialog').close(); openItemAsk('p2'); }")
+    letgo("/items/p2/ask", "respond", {"messages": []})
+    st.wait_for_timeout(100)
+    letgo("/items/p1/ask", "respond", {"messages": [{"role": "user", "text": "STALE"}]})
+    st.wait_for_timeout(300)
+    check("lịch sử Hỏi về muộn không hiện sang câu khác", "STALE" not in st.inner_text("#testAskThread"), st.inner_text("#testAskThread"))
+    st.evaluate("() => { $('testAskDialog').close(); }")
+
+    # Blank is not wrong: its own label and filter, and the review button follows the real list.
+    aid = st_open(key_a, "exam")
+    st.click(".test-option-btn[data-option='B']")
+    poll(lambda: "Đã lưu" in st.inner_text("#testSave"))
+    call(st, "POST", f"/api/attempts/{aid}/submit")
+    st.evaluate("aid => { leaveAttempt(); location.hash = '#result=' + aid; }", aid)
+    st.wait_for_selector("#testResultItemsList .test-result-card")
+    badges = st.evaluate("[...document.querySelectorAll('#testResultItemsList .result-card-badges .meta-pill:first-child')].map(e => e.textContent)")
+    check("câu bỏ trống ghi Bỏ trống, không ghi Sai", badges.count("Bỏ trống") == 3 and badges.count("Sai") == 1, badges)
+    st.click("[data-act=result-filter][data-filter=wrong]")
+    only_wrong = st.locator("#testResultItemsList .test-result-card").count()
+    blank_tab = st.locator("[data-act=result-filter][data-filter=blank]").count() == 1
+    if blank_tab:
+        st.click("[data-act=result-filter][data-filter=blank]")
+    only_blank = st.locator("#testResultItemsList .test-result-card").count()
+    check("lọc Câu sai không gồm câu bỏ trống, có lọc Bỏ trống", only_wrong == 1 and blank_tab and only_blank == 3, [only_wrong, blank_tab, only_blank])
+    review_btn = st.locator("#testResultActions [data-act=attempt-start][data-mode=review]")
+    check("có câu sai thì Ôn câu sai là nút chính", review_btn.count() == 1 and "btn-studio-primary" in review_btn.get_attribute("class"))
+
+    # Practice without Check adds nothing to the list (by design), so the button must not promise it.
+    aid = st_open(key_c, "practice")
+    st.click(".test-option-btn[data-option='B']")
+    poll(lambda: "Đã lưu" in st.inner_text("#testSave"))
+    call(st, "POST", f"/api/attempts/{aid}/submit")
+    st.evaluate("aid => { leaveAttempt(); location.hash = '#result=' + aid; }", aid)
+    st.wait_for_selector("#testResultItemsList .test-result-card")
+    st.wait_for_timeout(200)
+    check("mục ôn trống thì không có nút Ôn câu sai", st.locator("#testResultActions [data-act=attempt-start][data-mode=review]").count() == 0)
+
+    # An open review stays reachable when its list has emptied, and its result offers no dead buttons.
+    rev = json.loads(call(st, "POST", f"/api/tests/{key_a}/attempts", {"mode": "review"})["text"])["id"]
+    with sqlite3.connect(work / "data" / "learn.db") as conn:
+        conn.execute("DELETE FROM test_pool WHERE user='st@example.com' AND test_key=?", (key_a,))
+    st.evaluate("key => { location.hash = '#test=' + key; }", key_a)
+    st.wait_for_selector("#screen-test-detail.active")
+    st.wait_for_selector("#testDetailActions button")
+    check("lượt ôn đang dở vẫn mở được khi mục ôn đã trống", st.locator(f"#testDetailActions [data-act=attempt-open][data-id='{rev}']").count() == 1)
+    call(st, "POST", f"/api/attempts/{rev}/submit")
+    st.evaluate("aid => { location.hash = '#result=' + aid; }", rev)
+    st.wait_for_selector("#screen-test-result.active")
+    poll(lambda: "Đang tải" not in st.inner_text("#testResultTitle"))
+    st.wait_for_timeout(200)
+    check("kết quả lượt ôn không có nút bấm vào sẽ lỗi", st.locator("#testResultActions [data-mode=review]").count() == 0)
+
+    # Wording on the list and detail screens.
+    st.evaluate("() => { location.hash = '#tests'; }")
+    st.wait_for_selector("#screen-tests.active")
+    st.wait_for_selector("#testsList .stream-row")
+    open_aid = json.loads(call(st, "POST", f"/api/tests/{key_c}/attempts", {"mode": "practice", "restart": True})["text"])["id"]
+    st.reload()
+    st.wait_for_selector("#testsList .stream-row")
+    row_c = st.locator("#testsList .stream-row", has_text="Đề Trạng Thái C")
+    open_btn = row_c.locator("[data-act=test-open]")
+    check("danh sách đề: nút Xem đề, hạng phụ, có ghi đang làm dở",
+          open_btn.inner_text().strip() == "Xem đề" and "btn-studio-secondary" in open_btn.get_attribute("class") and "Đang làm dở" in row_c.inner_text(), row_c.inner_text())
+    call(st, "POST", f"/api/attempts/{open_aid}/submit")
+    st.evaluate("key => { location.hash = '#test=' + key; }", key_c)
+    st.wait_for_selector("#screen-test-detail.active")
+    help_text = st.inner_text("#testModeHelp") if st.locator("#testModeHelp").count() else ""
+    check("trang đề giải thích Thi thử và Luyện tập", "Thi thử" in help_text and "Luyện tập" in help_text, help_text)
+
+    # Too few answers on a multi question is said on the page, never with a browser alert.
+    aid = st_open(key_c, "practice")
+    idx = st.evaluate("_currentAttempt.items.findIndex(x => x.type === 'multi')")
+    st.evaluate("i => goToQuestion(i)", idx)
+    st.locator(".test-option-btn").first.click()
+    poll(lambda: "Đã lưu" in st.inner_text("#testSave"))
+    st.click("#btnTestCheck")
+    told = st.locator("#testRunNotice").count() == 1 and st.locator("#testRunNotice").is_visible() and "2" in st.inner_text("#testRunNotice")
+    check("thiếu đáp án thì báo ngay trên trang", told)
+    st.evaluate("i => goToQuestion(i === 0 ? 1 : 0)", idx)
+    check("đổi câu thì thông báo mất đi", not st.locator("#testRunNotice").is_visible() if st.locator("#testRunNotice").count() else False)
+    check("không còn hộp alert của trình duyệt", not st_dialogs, st_dialogs)
+    st.evaluate("() => { location.hash = '#tests'; }")
+    st.wait_for_selector("#screen-tests.active")
+    st.close()
 
     # ---------- Task 8 Checks ----------
     # Test and item ids allow letters, digits and dashes only (no underscore).
@@ -993,7 +1295,7 @@ def main():
         out = cli("add-user", name)
         return out.stdout.rsplit(": ", 1)[1].strip()
 
-    user_names = ("boss@example.com", "an@example.com", "binh@example.com", "u1@example.com", "u2@example.com", "u3@example.com")
+    user_names = ("st@example.com", "boss@example.com", "an@example.com", "binh@example.com", "u1@example.com", "u2@example.com", "u3@example.com")
     temp = {n: add_user(n) for n in user_names}
     cli("set-admin", "boss@example.com", "on")
 

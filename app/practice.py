@@ -328,6 +328,11 @@ def view(c, user: str, row) -> dict | None:
             "by_domain": _domain_breakdown(layout, items_by_id, answers),
         }
 
+    pool = c.execute(
+        "SELECT count(*) n FROM test_pool WHERE user=? AND test_key=?",
+        (row["user"], row["test_key"]),
+    ).fetchone()["n"]
+
     return {
         "id": row["id"],
         "test_key": row["test_key"],
@@ -343,6 +348,7 @@ def view(c, user: str, row) -> dict | None:
         "ask": bool(ai.current() is not None and rev["ask_status"] == "approved"),
         "items": items,
         "result": result,
+        "pool": pool,
     }
 
 

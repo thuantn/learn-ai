@@ -259,6 +259,16 @@ def test_open_review_with_unchecked_items_resumes(ctx, capsys, tmp_path):
         assert items["q2"]["checked"] is False
 
 
+def test_attempt_view_says_how_many_wait_for_review(ctx, capsys, tmp_path):
+    c = _ready_client(ctx, capsys)
+    _, key = _install(ctx, tmp_path)
+    with c:
+        first = c.post(f"/api/tests/{key}/attempts", json={"mode": "practice"}).json()["id"]
+        assert c.get(f"/api/attempts/{first}").json()["pool"] == 0
+        _check_wrong(c, key, "q1")  # this replaces the practice attempt, so ask through a new one
+        assert c.post(f"/api/tests/{key}/attempts", json={"mode": "exam"}).json()["pool"] == 1
+
+
 def test_review_result_is_null(ctx, capsys, tmp_path):
     c = _ready_client(ctx, capsys)
     _, key = _install(ctx, tmp_path)
