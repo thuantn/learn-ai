@@ -121,6 +121,7 @@ def test_ask_prompt_holds_one_item_only(ctx, capsys, tmp_path, fake_ai):
         assert "CAU-" in sys_msg
         boundaries = re.findall(r"CAU-[0-9a-f]{16}", sys_msg)
         assert len(boundaries) >= 2
+        assert sys_msg.endswith(ctx.main.ai.DATA_REMINDER)
         assert "Chữ A" in sys_msg
 
 

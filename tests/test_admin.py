@@ -1,6 +1,7 @@
 """Tests for the admin API, the Ask approval flow and the prompt."""
 import base64
 import pathlib
+import re
 
 import pytest
 
@@ -195,11 +196,11 @@ def test_prompt_keeps_author_text_in_the_data_block(ctx):
     }
     prompt = ctx.main.lesson_context(lesson)
     other = ctx.main.lesson_context(lesson)
-    mark = prompt.split("\n")[-1]
-    assert mark.startswith("BAI-") and mark != other.split("\n")[-1], "the boundary is new for each request"
+    mark = re.findall(r"BAI-[0-9a-f]{16}", prompt)[0]
+    assert mark.startswith("BAI-") and mark != re.findall(r"BAI-[0-9a-f]{16}", other)[0], "the boundary is new for each request"
     *before, block, end = prompt.split(mark)
     instructions = "".join(before)
-    assert end == "" and bad_title not in instructions and "cướp biển" not in instructions
+    assert end == "\n" + ctx.main.ai.DATA_REMINDER and bad_title not in instructions and "cướp biển" not in instructions
     for text in (bad_title, "ý 1", "Hỏi thẻ", "Câu quiz", "cướp biển"):
         assert text in block
     assert "dữ liệu" in instructions and "không đề cập" in instructions
