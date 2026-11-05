@@ -1,6 +1,6 @@
 # learn-ai thành nền tảng tạo và chia sẻ bài học: thiết kế
 
-Trạng thái: **đang xây.** Phần 1 (contract, sandbox), phần 2 (thư viện, tải lên, share, góp ý) và phần 3 (trang quản trị, duyệt ô Hỏi, nhà cung cấp AI, skill) đã xong. Chưa làm: gọi AI thật, công tắc Internet, thử chèn lệnh với mô hình thật, bài do người thật tạo, thử trên điện thoại thật. Chưa cấp cho team.
+Trạng thái: **đã xây, đã deploy.** Phần 1 (contract, sandbox), phần 2 (thư viện, tải lên, share, góp ý) và phần 3 (trang quản trị, duyệt ô Hỏi, nhà cung cấp AI, skill) đã xong, ô Hỏi đã gọi AI thật. Chưa làm: công tắc Internet, thử chèn lệnh với mô hình thật, bài do người thật tạo, thử trên điện thoại thật. Chưa cấp cho team.
 
 Trong tài liệu, **[Chủ dự án]** là điều người dùng đã quyết định. **[Đề xuất]** là quyết định của người viết, chủ dự án có thể đổi.
 
@@ -69,7 +69,7 @@ Quy tắc máy kiểm tra:
 - Chỉ nhận đuôi file trong danh sách: html, js, css, json, svg, png, jpg, webp, woff2, mp3.
 - Trang bài không có thuộc tính `on*` hay script inline, không tải tài nguyên từ ngoài; dùng thư viện app cấp sẵn ở `/static/vendor/`. Đây là cảnh báo để trang không bị hỏng dưới CSP, không phải lớp bảo mật; an toàn nằm ở mục 5.
 - Trang giao tiếp với app chỉ qua cầu nối ở mục 5.
-- Mỗi zip tối đa 90 MB, vì Cloudflare gói miễn phí giới hạn mỗi request 100 MB. Tổng dung lượng giải nén, số file và tỉ lệ nén cũng có giới hạn; builder chọn con số.
+- Mỗi zip tối đa 90 MB, vì Cloudflare gói miễn phí giới hạn mỗi request 100 MB. Tổng dung lượng giải nén, số file và tỉ lệ nén cũng có giới hạn; builder chọn con số. Cập nhật: nay zip tối đa 300 MB, vì tải theo phần 2 MB nên không vướng giới hạn mỗi request.
 
 Bài không có `tracks` thì buổi học bỏ bước Nghe. [Đề xuất]
 

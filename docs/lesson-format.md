@@ -23,6 +23,7 @@ lessons/<lesson-id>/
 - Id giữ nguyên qua các phiên bản, vì tiến độ gắn theo id. Sửa nội dung thẻ không đổi id. Id biến mất thì tác giả phải xác nhận lúc tải lên.
 - Trong package chỉ dùng id trần. Server tự thêm tiền tố `p<12 hex>.` vào id trong các bảng tiến độ.
 - Bài không có `tracks` thì buổi học bỏ bước Nghe.
+- Bài được tính là Đã xong khi người học xong các bước và đã mở trang bài.
 
 ## Kiểm tra và đóng gói
 
@@ -35,7 +36,7 @@ Tải zip lên ở màn hình Thư viện. Server chạy lại đúng bộ kiể
 
 ## Giới hạn
 
-Zip tối đa 300 MB. Mỗi tài khoản có hạn mức 1 GB tính trên dung lượng đã giải nén. Góp ý tối đa 2.000 ký tự.
+Zip tối đa 300 MB, giải nén tối đa 600 MB và 2.000 file, tỉ lệ nén tối đa 100 lần. Mỗi package tối đa 50 bài. `page/index.html` tối đa 5 MB, `content.md` tối đa 1 MB. Mỗi tài khoản có hạn mức 1 GB tính trên dung lượng đã giải nén. Góp ý tối đa 2.000 ký tự.
 
 ## Trang bài
 
@@ -55,6 +56,8 @@ Trang nói chuyện với app qua `window.LearnBridge`, có sẵn khi nạp `/st
 `id` truyền vào `quiz.answer` là `id` của câu trong `lesson.json`. Đáp án đúng chỉ nằm trong `lesson.json`, trang không cần biết; phần giải thích `why` có thể nằm trong trang. Khung bài mẫu trong skill dùng sẵn các lệnh này.
 
 Link `<a href>` ra ngoài tự đi qua `link.open`. Link trong trang (`#muc`) chỉ cuộn tới mục đó, không đổi `location.hash` và không kích hoạt `:target`, vì WebKit nạp lại trang sandbox khi gặp loại link này. Trên màn hình dưới 1024 px, thanh của app và `nav.top` của trang ẩn khi cuộn xuống, hiện lại khi cuộn lên; menu của trang nên đặt trong `nav.top` để được hưởng việc này. Câu kiểm tra nhanh không cần ghi nhận có thể tự chấm trong trang; người học đọc mã nguồn sẽ thấy đáp án nên đừng dùng cách này cho quiz cuối bài. Công thức dùng `/static/vendor/tex-svg.min.js` (MathJax) cùng `/static/mathjax-config.js`.
+
+Màu theo nền viết bằng `@media (prefers-color-scheme: dark)` như bình thường. Trong khung bài, truy vấn này theo nút Nền của app, không theo hệ điều hành: server đổi nó khi phục vụ file `.css`, `.html`, `.js` tới 2 MB, file lớn hơn thì vẫn theo hệ điều hành.
 
 ## Khung nội dung đầy đủ
 

@@ -9,10 +9,10 @@ Không credential nào nằm trong repo, image hay log.
 | Thứ | Nằm ở đâu | Đi qua đâu |
 |---|---|---|
 | Mật khẩu người dùng | Chỉ người đó biết, server lưu bản băm Argon2id | HTTPS tới app |
-| Mật khẩu tạm | Lệnh `add-user` in ra một lần | Người quản trị tự đưa cho người dùng; app không gửi email |
+| Mật khẩu tạm | Lệnh `add-user` hoặc trang `/admin` hiện ra một lần | Người quản trị tự đưa cho người dùng. App không gửi email; nút "Soạn email mời" ở `/admin` chỉ mở chương trình mail của người quản trị |
 | Token tunnel | `.env` quyền 600 trên VM | SFTP qua SSH từ máy quản trị |
 | Khóa AI | Admin nhập ở `/admin`, lưu mã hóa AES-GCM trong database. `AI_API_KEY` trong `.env` chỉ dùng khi chưa nhập | Server gọi nhà cung cấp AI; không xuống trình duyệt, không đọc lại được, màn hình chỉ hiện 4 ký tự cuối |
-| Khóa chủ (`KEY_ENCRYPTION_KEY`) | `.env` trên VM, không nằm trong bản sao lưu | Mã hóa khóa AI. Mất hoặc đổi thì ô Hỏi tắt, app vẫn chạy; admin nhập lại khóa AI |
+| Khóa chủ (`KEY_ENCRYPTION_KEY`) | `.env` trên VM, không nằm trong bản sao lưu | Mã hóa khóa AI. Mất hoặc đổi thì khóa đã lưu không đọc được nữa và ô Hỏi tắt, trừ khi có `AI_API_KEY`; app vẫn chạy, admin nhập lại khóa AI |
 | Khóa liên kết bài (`LINK_SECRET`) | `.env` trên VM | Ký URL `/s/<token>/...` của trang bài và link share; không xuống trình duyệt. Bắt buộc, thiếu thì app không khởi động. Đổi khóa thì mọi link share cũ hết tác dụng |
 | Khóa SSH của user deploy | Máy quản trị, ngoài repo và ngoài thư mục đồng bộ đám mây | Không rồi máy |
 | Mật khẩu admin VM | Máy quản trị | Chỉ dùng cho SSH và stdin của `sudo` lúc tạo user |
@@ -82,11 +82,11 @@ python -m app.cli set-quota <email> <GB>    đổi hạn mức, từ 1 đến 10
 python -m app.cli list-users
 ```
 
-Chạy trong container bằng `docker compose exec app`.
+Chạy trong container bằng `docker compose exec app`. Trừ `import-package`, các việc này cũng làm được ở trang `/admin`. Người dùng tự đổi mật khẩu trong app, cần nhập mật khẩu hiện tại.
 
 ## Quản trị và ô Hỏi
 
-Trang `/admin` chỉ tài khoản admin mở được, người khác nhận 404 như route không tồn tại. Trang có: duyệt ô Hỏi, nhà cung cấp AI và khóa, báo vi phạm, gỡ package, dung lượng, nhật ký.
+Trang `/admin` chỉ tài khoản admin mở được, người khác nhận 404 như route không tồn tại. Trang có: tài khoản, duyệt ô Hỏi, nhà cung cấp AI và khóa, báo vi phạm, gỡ package, dung lượng, nhật ký.
 
 Bật ô Hỏi cần hai việc:
 1. Nhập khóa ở `/admin`, bấm Thử kết nối. Dùng khóa riêng có trần chi tiêu, không dùng chung với app khác. Báo model không chạy được theo ZDR thì đổi model, không tắt ZDR.
@@ -113,6 +113,7 @@ Chưa có tùy chọn Internet; điều kiện là kiểm tra được ZDR với
 
 - **Tunnel không lên, log báo `failed to dial to edge with quic`:** mạng chặn QUIC. Compose đã đặt `--protocol http2`.
 - **Build lỗi mạng hoặc kết nối treo trong container:** VM có MTU thấp. Đặt `MTU=1280` trong `.env`; build dùng `network: host`.
+- **Tải lên qua tunnel rất chậm:** từng đo 0,07 MB/s trong khi SFTP tới cùng VM nhanh hơn nhiều; nghi mạng của VM bóp kết nối của tunnel, chưa ai xác nhận. App tải theo phần 2 MB và chỉ gửi file mới nên vẫn dùng được. Package lớn thì chép lên VM rồi chạy `import-package`.
 - **Console báo CSP chặn `cloudflareinsights`:** Cloudflare tự chèn script thống kê. Vô hại; tắt Web Analytics ở zone nếu muốn hết.
 
 ## Sao lưu và khôi phục
