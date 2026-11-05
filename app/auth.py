@@ -20,6 +20,7 @@ HASHING = asyncio.Semaphore(2)  # each Argon2 call uses about 19 MB
 
 MIN_PASSWORD, MAX_PASSWORD = 15, 256
 IDLE_SECONDS, ABSOLUTE_SECONDS = 7 * 86400, 30 * 86400
+ADMIN_IDLE_SECONDS, ADMIN_ABSOLUTE_SECONDS = 4 * 3600, 24 * 3600
 TOUCH_EVERY = 3600
 # ponytail: short list of long common passwords; load a full breach list if accounts ever open up.
 COMMON = {
@@ -70,12 +71,13 @@ def lookup_session(token):
     now = time.time()
     with db.connect() as c:
         row = c.execute(
-            "SELECT s.user, s.created_at, s.last_seen, u.must_change FROM sessions s JOIN users u ON u.name=s.user WHERE s.token_hash=?",
+            "SELECT s.user, s.created_at, s.last_seen, u.must_change, u.is_admin FROM sessions s JOIN users u ON u.name=s.user WHERE s.token_hash=?",
             (key,),
         ).fetchone()
         if not row:
             return None
-        if now - row["last_seen"] > IDLE_SECONDS or now - row["created_at"] > ABSOLUTE_SECONDS:
+        idle, absolute = (ADMIN_IDLE_SECONDS, ADMIN_ABSOLUTE_SECONDS) if row["is_admin"] else (IDLE_SECONDS, ABSOLUTE_SECONDS)
+        if now - row["last_seen"] > idle or now - row["created_at"] > absolute:
             c.execute("DELETE FROM sessions WHERE token_hash=?", (key,))
             return None
         if now - row["last_seen"] > TOUCH_EVERY:

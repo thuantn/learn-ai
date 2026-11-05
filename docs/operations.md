@@ -94,7 +94,11 @@ Bật ô Hỏi cần hai việc:
 
 Mỗi người có một hội thoại riêng cho từng bài, dùng chung giữa trang app và trang bài, lưu ở bảng `ask_message` nên nằm trong bản sao lưu. AI nhận tối đa 6 lượt hỏi đáp gần nhất, trong giới hạn 16.000 ký tự. Mỗi bài giữ tối đa 200 dòng cho mỗi người. Tác giả không có cách xem qua app, còn người có quyền vào database thì đọc được. Hội thoại mất khi người học bấm Xóa hoặc bỏ bài khỏi thư viện, khi xóa package hoặc xóa tài khoản. Bị thu hồi quyền thì hội thoại ở lại, được share lại thì thấy lại.
 
-Chưa có tùy chọn Internet; điều kiện là kiểm tra được ZDR với khóa thật. Chưa thử chèn lệnh với mô hình thật; làm việc này trước khi bật ô Hỏi cho người ngoài chủ dự án.
+Chưa có tùy chọn Internet; điều kiện là kiểm tra được ZDR với khóa thật.
+
+Phiên của admin ngắn hơn: hết sau 4 giờ không dùng và tối đa 24 giờ, người khác là 7 và 30 ngày. Hết phiên giữa bài thi có giờ thì đồng hồ vẫn chạy cho tới khi đăng nhập lại.
+
+Đã thử chèn lệnh với model thật ngày 05/11/2026 (`deepseek/deepseek-v4.1-flash`, 72 câu trả lời, trên bản thật). Lệnh giấu trong bài làm AI thêm một chuỗi vô hại vào câu trả lời ở 6/36 lượt, ở hai cách giấu: ghi chú trong phần giải thích quiz và lệnh nằm sâu trong bài dài. Ghép đúng hai cách đó với link lừa đảo, ảnh hoặc script thì 0/24 lượt lọt qua. Trình duyệt không chạy script nào và không tải gì từ địa chỉ được cài. AI không để lộ nội dung bài khác, khóa hay thông tin server. Kết quả chỉ đúng với model và bộ câu đã thử, không phải lời đảm bảo: đổi model thì thử lại, và người duyệt vẫn phải đọc hết nội dung trước khi bật ô Hỏi.
 
 ## Kiểm tra sau deploy
 

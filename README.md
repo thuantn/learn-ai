@@ -76,7 +76,7 @@ Caddy, nginx, Traefik and the like should work, but this has not been run end to
 
 ## Security
 
-Passwords are hashed with Argon2id, sessions are random tokens stored as SHA-256 in `__Host-` cookies, login is rate limited by IP, account and pair, and the CSP allows only same-origin scripts. Lesson pages are author code: they run in a sandboxed iframe with no origin and talk to the app only through a message bridge (`docs/design/02a-ket-qua-sandbox.md`). `cf-connecting-ip` is trusted only from the address in `TRUSTED_PROXY`. AI answers go through DOMPurify. Report problems through a private GitHub security advisory.
+Passwords are hashed with Argon2id, sessions are random tokens stored as SHA-256 in `__Host-` cookies and end sooner for admins (4 hours idle, 24 hours at most, against 7 and 30 days), login is rate limited by IP, account and pair, and the CSP allows only same-origin scripts. Lesson pages are author code: they run in a sandboxed iframe with no origin and talk to the app only through a message bridge (`docs/design/02a-ket-qua-sandbox.md`). `cf-connecting-ip` is trusted only from the address in `TRUSTED_PROXY`. AI answers go through DOMPurify. Report problems through a private GitHub security advisory.
 
 More in `docs/`: design, lesson and practice test formats, operations and how credentials are handled. 
 ## License

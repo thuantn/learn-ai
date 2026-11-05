@@ -1,6 +1,6 @@
 # learn-ai thành nền tảng tạo và chia sẻ bài học: thiết kế
 
-Trạng thái: **đã xây, đã deploy.** Phần 1 (contract, sandbox), phần 2 (thư viện, tải lên, share, góp ý) và phần 3 (trang quản trị, duyệt ô Hỏi, nhà cung cấp AI, skill) đã xong, ô Hỏi đã gọi AI thật. Chưa làm: công tắc Internet, thử chèn lệnh với mô hình thật, bài do người thật tạo, thử trên điện thoại thật. Chưa cấp cho team.
+Trạng thái: **đã xây, đã deploy.** Phần 1 (contract, sandbox), phần 2 (thư viện, tải lên, share, góp ý) và phần 3 (trang quản trị, duyệt ô Hỏi, nhà cung cấp AI, skill) đã xong, ô Hỏi đã gọi AI thật. Chưa làm: công tắc Internet, bài do người thật tạo, thử trên điện thoại thật. Chưa cấp cho team.
 
 Trong tài liệu, **[Chủ dự án]** là điều người dùng đã quyết định. **[Đề xuất]** là quyết định của người viết, chủ dự án có thể đổi.
 

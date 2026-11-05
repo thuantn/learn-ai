@@ -230,6 +230,37 @@ def test_session_expiry(ctx, capsys):
     db.close()
 
 
+def test_admin_sessions_expire_sooner(ctx, capsys):
+    main, cli, tmp = ctx
+    c = ready_user(main, cli, capsys)
+    with c:
+        db = sqlite3.connect(tmp / "data" / "learn.db")
+        db.execute("UPDATE sessions SET last_seen=?", (time.time() - 5 * 3600,))
+        db.commit()
+        assert c.get("/api/me").status_code == 200
+        db.execute("UPDATE sessions SET created_at=?, last_seen=?", (time.time() - 25 * 3600, time.time()))
+        db.commit()
+        assert c.get("/api/me").status_code == 200
+        cli.main(["set-admin", "an", "on"])
+        db.execute("UPDATE sessions SET last_seen=?", (time.time() - 5 * 3600,))
+        db.commit()
+        assert c.get("/api/me").status_code == 401
+    c = client(main)
+    with c:
+        assert login(c, "an", GOOD).status_code == 200
+        db.execute("UPDATE sessions SET created_at=?, last_seen=?", (time.time() - 25 * 3600, time.time()))
+        db.commit()
+        assert c.get("/api/me").status_code == 401
+    c = client(main)
+    with c:
+        assert login(c, "an", GOOD).status_code == 200
+        t = time.time() - 3 * 3600
+        db.execute("UPDATE sessions SET created_at=?, last_seen=?", (t, t))
+        db.commit()
+        assert c.get("/api/me").status_code == 200
+    db.close()
+
+
 def test_last_seen_written_at_most_hourly(ctx, capsys, tmp_path):
     main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
