@@ -5,6 +5,7 @@
 !skills
 !scripts/learnpkg.py
 !docs/lesson-format.md
+!docs/practice-test-format.md
 **/__pycache__
 packages
 content

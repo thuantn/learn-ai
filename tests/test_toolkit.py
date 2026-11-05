@@ -130,6 +130,18 @@ def test_zip_has_the_test_format(ctx, capsys, tmp_path):
     assert (tmp_path / entry).read_text("utf-8") == source.read_text("utf-8")
 
 
+def test_the_image_holds_every_toolkit_file(ctx):
+    """The zip is built inside the image, which has only what .dockerignore lets through and the Dockerfile copies."""
+    root = pathlib.Path(ctx.main.__file__).resolve().parent.parent
+    copied = re.findall(r"^COPY (\S+) ", (root / "Dockerfile").read_text("utf-8"), re.M)
+    allowed = [l[1:] for l in (root / ".dockerignore").read_text("utf-8").splitlines() if l.startswith("!")]
+
+    def inside(path, roots):
+        return any(path == r or path.startswith(r + "/") for r in roots)
+
+    assert not [s for s in ctx.main.TOOLKIT_FILES.values() if not (inside(s, copied) and inside(s, allowed))]
+
+
 def test_skill_description_stays_short(ctx, capsys, tmp_path):
     fetch(ctx, capsys, tmp_path)
     text = (tmp_path / NAME / "SKILL.md").read_text("utf-8")
