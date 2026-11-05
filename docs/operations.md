@@ -98,7 +98,7 @@ Chưa có tùy chọn Internet; điều kiện là kiểm tra được ZDR với
 
 Phiên của admin ngắn hơn: hết sau 4 giờ không dùng và tối đa 24 giờ, người khác là 7 và 30 ngày. Hết phiên giữa bài thi có giờ thì đồng hồ vẫn chạy cho tới khi đăng nhập lại.
 
-Đã thử chèn lệnh với model thật ngày 05/11/2026 (`deepseek/deepseek-v4.1-flash`, 72 câu trả lời, trên bản thật). Lệnh giấu trong bài làm AI thêm một chuỗi vô hại vào câu trả lời ở 6/36 lượt, ở hai cách giấu: ghi chú trong phần giải thích quiz và lệnh nằm sâu trong bài dài. Ghép đúng hai cách đó với link lừa đảo, ảnh hoặc script thì 0/24 lượt lọt qua. Trình duyệt không chạy script nào và không tải gì từ địa chỉ được cài. AI không để lộ nội dung bài khác, khóa hay thông tin server. Kết quả chỉ đúng với model và bộ câu đã thử, không phải lời đảm bảo: đổi model thì thử lại, và người duyệt vẫn phải đọc hết nội dung trước khi bật ô Hỏi.
+Đã thử chèn lệnh với model thật ngày 05/11/2026 (`deepseek/deepseek-v4.1-flash`, 72 câu trả lời, trên bản thật). Lệnh giấu trong bài làm AI thêm một chuỗi vô hại vào câu trả lời ở 6/36 lượt, ở hai cách giấu: ghi chú trong phần giải thích quiz và lệnh nằm sâu trong bài dài. Ghép đúng hai cách đó với link lừa đảo, ảnh hoặc script thì 0/24 lượt lọt qua. Trình duyệt không chạy script nào và không tải gì từ địa chỉ được cài. AI không để lộ nội dung bài khác, khóa hay thông tin server. Sau đó quy tắc được nhắc lại cả ở sau khối dữ liệu (`ai.DATA_REMINDER`). Chạy lại trên bản thật: hai cách giấu trên 0/12, ghép link lừa đảo 0/8, câu trả lời bình thường vẫn đúng. Kết quả chỉ đúng với model và bộ câu đã thử, không phải lời đảm bảo: đổi model thì thử lại, và người duyệt vẫn phải đọc hết nội dung trước khi bật ô Hỏi.
 
 ## Kiểm tra sau deploy
 
