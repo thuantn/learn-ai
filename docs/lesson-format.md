@@ -1,73 +1,84 @@
-# Định dạng bài học
+# Lesson format
 
-Contract v1 là định dạng duy nhất server nhận. Máy kiểm tra bằng `app/contract.py`. Với bộ đề trắc nghiệm luyện thi, xem [Định dạng bộ đề](practice-test-format.md).
+Contract v1 is the only format the server accepts. `app/contract.py` does the checking. For multiple-choice practice tests, see the [practice test format](practice-test-format.md).
 
-## Một package
+## A package
 
 ```
 package.json
 lessons/<lesson-id>/
   lesson.json
-  page/index.html      trang bài, kèm file phụ trong page/
-  content.md           toàn văn bài cho AI đọc, cần có nếu muốn xin ô Hỏi
-  audio/*.mp3          tùy chọn
+  page/index.html      the lesson page, with its other files in page/
+  content.md           the lesson's full text for the AI to read; needed to request the Ask box
+  audio/*.mp3          optional
 ```
 
-- `package.json`: `contract_version`, `slug`, `title`, `topic`, `description`, `lessons` là danh sách `lesson-id` theo thứ tự.
+- `package.json`: `contract_version`, `slug`, `title`, `topic`, `description`, and `lessons`, the list of `lesson-id` values in order.
 - `lesson.json`:
-  - `title`, tối đa 200 ký tự.
-  - `summary`: 3–8 ý, văn bản thuần.
-  - `cards`: 5–30 thẻ, mỗi thẻ `id`, `q`, `a`.
-  - `quiz`: có thể rỗng, mỗi câu `id`, `q`, `options`, `answer` (vị trí đáp án đúng, tính từ 0), `why`.
-  - `tracks`: có thể rỗng, tối đa `short` và `long`, mỗi bản `file` (trong `audio/`) và `label`.
-- Id giữ nguyên qua các phiên bản, vì tiến độ gắn theo id. Sửa nội dung thẻ không đổi id. Id biến mất thì tác giả phải xác nhận lúc tải lên.
-- Trong package chỉ dùng id trần. Server tự thêm tiền tố `p<12 hex>.` vào id trong các bảng tiến độ.
-- Bài không có `tracks` thì buổi học bỏ bước Nghe.
-- Bài được tính là Đã xong khi người học xong các bước và đã mở trang bài.
+  - `title`: at most 200 characters.
+  - `summary`: 3 to 8 points, plain text.
+  - `cards`: 5 to 30 cards, each with `id`, `q`, `a`.
+  - `quiz`: may be empty. Each question has `id`, `q`, `options`, `answer` (the position of the correct option, counting from 0), `why`.
+  - `tracks`: may be empty. At most `short` and `long`, each with `file` (in `audio/`) and `label`.
+- Keep ids the same across versions, because progress is tied to them. Editing a card's content does not change its id. If an id disappears, the author must confirm this when uploading.
+- Use bare ids in a package. The server adds a `p<12 hex>.` prefix to ids in the progress tables.
+- The app shows "Bài N:" (lesson N) before each title, so do not put a number in `title`.
+- A lesson with no `tracks` skips the listening step of the session.
+- A lesson counts as done once the learner has finished the steps and opened the lesson page.
 
-## Kiểm tra và đóng gói
+## Validating and packing
 
 ```
 python scripts/learnpkg.py validate DIR [--profile full]
 python scripts/learnpkg.py pack DIR OUT.zip [--profile full]
 ```
 
-Tải zip lên ở màn hình Thư viện. Server chạy lại đúng bộ kiểm tra này, rồi hiện cho tác giả xem thay đổi trước khi nhận.
+Upload the zip on the Library screen (Thư viện). The server runs this same check again, then shows the author the changes before accepting them.
 
-## Giới hạn
+## Limits
 
-Zip tối đa 300 MB, giải nén tối đa 600 MB và 2.000 file, tỉ lệ nén tối đa 100 lần. Mỗi package tối đa 50 bài. `page/index.html` tối đa 5 MB, `content.md` tối đa 1 MB. Mỗi tài khoản có hạn mức 1 GB tính trên dung lượng đã giải nén. Góp ý tối đa 2.000 ký tự.
+A zip can be up to 300 MB, and up to 600 MB and 2,000 files when unpacked, with a compression ratio of at most 100 times. A package holds at most 50 lessons. `page/index.html` can be up to 5 MB and `content.md` up to 1 MB. Each account has a quota of 1 GB, counted on unpacked size. Feedback can be up to 2,000 characters.
 
-## Trang bài
+## The lesson page
 
-Trang là mã không tin cậy, chạy trong iframe sandbox không có origin. Trang không có cookie, `localStorage`, mạng hay form. Script inline và thuộc tính `on*` không chạy; mọi script để trong file riêng ở `page/`. Thư viện chỉ dùng được bản app cấp ở `/static/` (`lesson-bridge.js`, `lesson-fonts.css`, `vendor/`), không tải từ ngoài.
+The page is untrusted code and runs in a sandboxed iframe with no origin. It has no cookies, `localStorage`, network or forms. Inline scripts and `on*` attributes do not run, so every script goes in its own file in `page/`. The only libraries available are those the app provides under `/static/` (`lesson-bridge.js`, `lesson-fonts.css`, `vendor/`); nothing loads from outside.
 
-Trang nói chuyện với app qua `window.LearnBridge`, có sẵn khi nạp `/static/lesson-bridge.js`:
+The page talks to the app through `window.LearnBridge`, which is available once `/static/lesson-bridge.js` is loaded:
 
-| Gọi | Kết quả |
+| Call | Result |
 |---|---|
-| `call("doc.get")` | Dữ liệu đã lưu của người này trong bài này, hoặc `null` |
-| `call("doc.set", {data})` | Lưu một object |
-| `call("quiz.answer", {id, option})` | `{correct}`. Server chấm theo `lesson.json`; câu sai thành thẻ ôn |
-| `askApp(text)` | Mở ô Hỏi của app với câu điền sẵn, người học tự bấm gửi |
-| `call("learner.id")` | Mã riêng của người học trong package, không phải email |
-| `call("link.open", {url})` | App hỏi người học trước khi mở; chỉ nhận `https` |
+| `call("doc.get")` | The data saved for this person in this lesson, or `null` |
+| `call("doc.set", {data})` | Saves one object |
+| `call("quiz.answer", {id, option})` | `{correct}`. The server grades against `lesson.json`; a wrong answer becomes a review card |
+| `askApp(text)` | Opens the app's Ask box with the question filled in; the learner presses send |
+| `call("learner.id")` | The learner's own code within the package, not their email |
+| `call("link.open", {url})` | The app asks the learner before opening; accepts only `https` |
 
-`id` truyền vào `quiz.answer` là `id` của câu trong `lesson.json`. Đáp án đúng chỉ nằm trong `lesson.json`, trang không cần biết; phần giải thích `why` có thể nằm trong trang. Khung bài mẫu trong skill dùng sẵn các lệnh này.
+The `id` passed to `quiz.answer` is the question's `id` in `lesson.json`. The correct answer lives only in `lesson.json` and the page does not need to know it; the `why` explanation may be in the page. The skill's lesson template already uses these calls.
 
-Link `<a href>` ra ngoài tự đi qua `link.open`. Link trong trang (`#muc`) chỉ cuộn tới mục đó, không đổi `location.hash` và không kích hoạt `:target`, vì WebKit nạp lại trang sandbox khi gặp loại link này. Trên màn hình dưới 1024 px, thanh của app và `nav.top` của trang ẩn khi cuộn xuống, hiện lại khi cuộn lên; menu của trang nên đặt trong `nav.top` để được hưởng việc này. Câu kiểm tra nhanh không cần ghi nhận có thể tự chấm trong trang; người học đọc mã nguồn sẽ thấy đáp án nên đừng dùng cách này cho quiz cuối bài. Công thức dùng `/static/vendor/tex-svg.min.js` (MathJax) cùng `/static/mathjax-config.js`.
+Outgoing `<a href>` links go through `link.open` automatically. Links within the page (`#section`) only scroll to that section. They do not change `location.hash` or trigger `:target`, because WebKit reloads a sandboxed page on that kind of link.
 
-Màu theo nền viết bằng `@media (prefers-color-scheme: dark)` như bình thường. Trong khung bài, truy vấn này theo nút Nền của app, không theo hệ điều hành: server đổi nó khi phục vụ file `.css`, `.html`, `.js` tới 2 MB, file lớn hơn thì vẫn theo hệ điều hành.
+On screens under 1024 px, the app's bar and the page's `nav.top` hide when scrolling down and come back when scrolling up, so a page's menu should go in `nav.top` to get this.
 
-## Khung nội dung đầy đủ
+Quick-check questions that need no record can be graded in the page. Learners who read the source will see the answers, so do not do this for the end-of-lesson quiz.
 
-1. **Khởi động:** 3 câu đoán trước. Khi quay lại thì thành ôn tập, ưu tiên câu làm sai, lấy cả câu của bài trước.
-2. **4–5 phần,** mỗi phần gồm:
-   - Giải thích dài vừa đủ.
-   - Công cụ tính thật, không đặt số tay, có bước "Dự đoán trước khi chạy".
-   - Kiểm tra nhanh 2 câu.
-   - Hộp "Áp dụng vào dự án".
-   - Mục gập "Đi sâu" có công thức và link bài báo gốc.
-   - Nút "Hỏi về phần này" và "Tự giải thích lại".
-3. **Quiz cuối bài** 8 câu, có câu phải tự tính.
-4. **Podcast ôn tập,** kịch bản bản ngắn và bản dài, audio do tác giả tự tạo.
+Formulas use `/static/vendor/tex-svg.min.js` (MathJax). Put `window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]] }, svg: { fontCache: "global" }, options: { enableMenu: false } };` in a `.js` file in `page/`, and load that file before `<script src="/static/vendor/tex-svg.min.js" async></script>`. Do not use `/static/mathjax-config.js`: it is meant for the app's own pages and turns off drawing formulas on page load.
+
+The page must set its own background and text colours for both themes. Without them, the text is black on the app's dark background and nearly unreadable. `color-scheme: light dark` is not enough, because it follows the operating system and not the app's theme button.
+
+Write theme colours with `@media (prefers-color-scheme: dark)` as usual. In the lesson frame this query follows the app's theme button and not the operating system: the server rewrites it when serving `.css`, `.html` and `.js` files of up to 2 MB. Larger files still follow the operating system.
+
+## Full content outline
+
+The labels below are in Vietnamese because the lessons so far are. `--profile full` requires the exact strings `Khởi động` and `Đi sâu` in the page, whatever language the lesson is in.
+
+1. **Warm-up ("Khởi động"):** 3 questions to guess at first. On a return visit this becomes a review, putting missed questions first and including questions from the previous lesson.
+2. **4 to 5 parts,** each with:
+   - An explanation that is as long as it needs to be.
+   - A tool that really calculates, with no hand-set numbers, and a "Dự đoán trước khi chạy" (predict before running) step.
+   - A 2-question quick check.
+   - An "Áp dụng vào dự án" (apply it to your project) box.
+   - A collapsible "Đi sâu" (go deeper) section with formulas and links to the original papers.
+   - "Hỏi về phần này" (ask about this part) and "Tự giải thích lại" (explain it back yourself) buttons.
+3. **End-of-lesson quiz:** 8 questions, including some the learner must calculate.
+4. **Review podcast:** scripts for a short and a long version, with audio the author creates.

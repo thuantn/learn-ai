@@ -61,7 +61,7 @@ Mỗi **Điểm dừng**: đưa cho tác giả xem, chờ tác giả trả lời
 ## Mức của bài
 
 - **Cơ bản:** trang theo khung, tóm tắt, thẻ. Quiz, công cụ tương tác, mục Đi sâu là tùy chọn.
-- **Đầy đủ:** theo mục "Khung nội dung đầy đủ" trong `references/lesson-format.md`, đúng 8 câu quiz do server chấm, có `content.md`, kiểm tra bằng `--profile full`. Máy chỉ kiểm tra được một phần khung, phần còn lại tự đối chiếu. Audio vẫn không bắt buộc. Câu khởi động và kiểm tra nhanh tự chấm trong trang được.
+- **Đầy đủ:** theo mục "Full content outline" trong `references/lesson-format.md`, đúng 8 câu quiz do server chấm, có `content.md`, kiểm tra bằng `--profile full`. Máy chỉ kiểm tra được một phần khung, phần còn lại tự đối chiếu. Audio vẫn không bắt buộc. Câu khởi động và kiểm tra nhanh tự chấm trong trang được.
 
 ## Trang chạy trong sandbox
 

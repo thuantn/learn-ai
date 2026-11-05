@@ -178,3 +178,13 @@ def test_format_doc_example_passes_the_checker(ctx, capsys, tmp_path):
     root = pathlib.Path(__file__).resolve().parent.parent
     doc = (root / "docs" / "practice-test-format.md").read_text("utf-8")
     assert_example_passes(json_block(doc, "## Single-File Example"), tmp_path, ctx, capsys)
+
+
+def test_starter_pages_set_their_own_colours():
+    """A page with no colours of its own is black text on the app's dark canvas."""
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for path in ("skills/creating-learn-packages/template/lessons/bai-mau/page/bai.css", "sample/package/lessons/sample/page/index.html"):
+        text = (root / path).read_text(encoding="utf-8")
+        assert "prefers-color-scheme: dark" in text, path
+        body = re.search(r"body\s*\{([^}]*)\}", text).group(1)
+        assert "background:" in body and re.search(r"(^|[;\s])color:", body), path

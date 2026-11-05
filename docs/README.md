@@ -1,16 +1,18 @@
-# Tài liệu
+# Documentation
 
-| Tài liệu | Nội dung | Trạng thái |
+The design documents and build plans are in Vietnamese; the rest is in English.
+
+| Document | Contents | Status |
 |---|---|---|
-| [lesson-format.md](lesson-format.md) | Định dạng bài đang chạy và khung nội dung đầy đủ. Cũng nằm trong skill | Đang dùng |
-| [practice-test-format.md](practice-test-format.md) | Định dạng bộ đề luyện thi. Cũng nằm trong skill | Đang dùng |
-| [operations.md](operations.md) | Credentials, deploy, cập nhật, tài khoản, xử lý sự cố | Đang dùng |
-| [design/01-app-ban-dau.md](design/01-app-ban-dau.md) | Thiết kế ban đầu: buổi học, bảo mật, dữ liệu | Đã xây, đã deploy. Một số phần do 02 thay |
-| [design/02-nen-tang-nhieu-tac-gia.md](design/02-nen-tang-nhieu-tac-gia.md) | Nhiều người tự tạo bài, package, share, góp ý, admin, skill | Đã xây, đã deploy. Việc còn mở ghi ở đầu tài liệu |
-| [design/02a-ket-qua-sandbox.md](design/02a-ket-qua-sandbox.md) | Kết quả chạy thử sandbox | Đã xong |
-| [design/03-bo-de-luyen-thi.md](design/03-bo-de-luyen-thi.md) | Bộ đề: thi thử, luyện tập, ôn câu sai | Đã xây, đã deploy |
-| [superpowers/plans/](superpowers/plans/) | Kế hoạch từng phần lúc xây | Lưu lại, không cập nhật, số liệu có thể đã cũ |
+| [lesson-format.md](lesson-format.md) | The lesson format in use and the full content outline. Also in the skill | In use |
+| [practice-test-format.md](practice-test-format.md) | The practice test format. Also in the skill | In use |
+| [operations.md](operations.md) | Credentials, deploys, updates, accounts, troubleshooting | In use |
+| [design/01-app-ban-dau.md](design/01-app-ban-dau.md) | The original design: study sessions, security, data | Built and deployed. Parts replaced by 02 |
+| [design/02-nen-tang-nhieu-tac-gia.md](design/02-nen-tang-nhieu-tac-gia.md) | Authors creating their own lessons, packages, sharing, feedback, admin, the skill | Built and deployed. Open items are at the top of the document |
+| [design/02a-ket-qua-sandbox.md](design/02a-ket-qua-sandbox.md) | Results of the sandbox trial | Done |
+| [design/03-bo-de-luyen-thi.md](design/03-bo-de-luyen-thi.md) | Practice tests: exams, practice, review of missed questions | Built and deployed |
+| [superpowers/plans/](superpowers/plans/) | The plan for each part as it was built | Kept as a record and not updated, so numbers may be out of date |
 
-Hướng dẫn chạy nhanh ở `README.md` gốc. Bài học rút ra khi làm ở `LESSONS_LEARNED.md`.
+The quick start is in the root `README.md`. Lessons learned while building are in `LESSONS_LEARNED.md`.
 
-Tài liệu trong repo không chứa tên miền, tên máy chủ, email hay nội dung bài, để repo có thể đổi sang public.
+The docs here hold no domain names, host names, email addresses or lesson content.

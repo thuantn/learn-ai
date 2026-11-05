@@ -1,5 +1,6 @@
-:root { color-scheme: light dark; --line: #8884; --good: #0d9488; --bad: #e11d48; }
-body { margin: 0; font-family: 'Be Vietnam Pro', system-ui, sans-serif; line-height: 1.6; }
+:root { color-scheme: light; --bg: #fff; --text: #1c1f24; --line: #8a8f98; --good: #0f766e; --bad: #be123c; }
+@media (prefers-color-scheme: dark) { :root { color-scheme: dark; --bg: #14171c; --text: #e8eaee; --line: #6b7280; --good: #2dd4bf; --bad: #fb7185; } }
+body { background: var(--bg); color: var(--text); margin: 0; font-family: 'Be Vietnam Pro', system-ui, sans-serif; line-height: 1.6; }
 main { max-width: 720px; margin: 0 auto; padding: 1.25rem 1rem 4rem; }
 .lead { font-size: 1.15rem; }
 section { margin-top: 2rem; }
