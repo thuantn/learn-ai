@@ -330,6 +330,12 @@ def run(br, base, temp, sample, hai):
     ph.wait_for_selector("#navDrawer.open")
     ph.wait_for_timeout(350)  # it slides in
     check("menu có Đăng xuất", ph.locator("#navDrawer [data-act=logout]").is_visible())
+    sheet = ph.evaluate("""() => { const d = document.getElementById('navDrawer').getBoundingClientRect();
+      const rows = [...document.querySelectorAll('#navDrawer .drawer-action-btn')].filter(e => e.offsetParent);
+      return { bottom: d.bottom, height: d.height, top: d.top, vh: innerHeight, rows: rows.map(e => e.getBoundingClientRect().height),
+        lefts: rows.map(e => e.getBoundingClientRect().left), icons: rows.map(e => getComputedStyle(e, '::before').maskImage !== 'none' || getComputedStyle(e, '::before').webkitMaskImage !== 'none') }; }""")
+    check("menu là tấm sát đáy, cao vừa nội dung", abs(sheet["bottom"] - sheet["vh"]) < 2 and sheet["height"] < sheet["vh"] * 0.6, sheet)
+    check("các hàng trong menu đủ lớn, thẳng hàng, có icon", min(sheet["rows"]) >= 44 and len(set(sheet["lefts"])) == 1 and all(sheet["icons"]), sheet)
     ph.click(".drawer-close-btn")
     for w in (360, 390):
         ph.set_viewport_size({"width": w, "height": 740})
