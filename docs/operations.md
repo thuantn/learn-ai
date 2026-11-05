@@ -1,6 +1,6 @@
 # Vận hành
 
-App chạy bằng Docker Compose trên một VM, đi ra Internet qua Cloudflare Tunnel, không mở cổng trên host. Tên miền và địa chỉ VM giữ ngoài repo.
+App chạy bằng Docker Compose trên một VM, đi ra Internet qua Cloudflare Tunnel, không mở cổng trên host. Tên miền và địa chỉ VM giữ ngoài repo. Đây là cách bản thật đang chạy; dùng proxy khác thì xem `README.md`.
 
 ## Credentials
 

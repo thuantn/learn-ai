@@ -41,14 +41,16 @@ Practice tests can be included in a package or uploaded directly as a single `.j
 
 ## Deploy
 
-Runs with Docker Compose behind a Cloudflare Tunnel; no host port is opened. Create `.env` (mode 600):
+The app needs HTTPS in front of it, because session cookies are `Secure` and it sends HSTS, and lasting storage for `./data`, `./backups` and `./packages`. The included `compose.yml` runs it with Docker Compose behind a Cloudflare Tunnel, so no host port is opened. That is the only setup run in production so far; for anything else see [Other reverse proxies](#other-reverse-proxies).
+
+Create `.env` (mode 600):
 
 ```
 APP_UID=            # id -u of the deploy user
 APP_GID=
 PUBLIC_ORIGIN=https://your.host
 ALLOWED_HOSTS=your.host
-TUNNEL_TOKEN=
+TUNNEL_TOKEN=       # from your Cloudflare Tunnel
 LINK_SECRET=        # required, random 32+ byte string. Signs sandbox URLs and share links; changing it kills every share link.
 KEY_ENCRYPTION_KEY= # base64url of 32 random bytes. Encrypts the AI key saved on the admin page; without it no key can be saved there.
 AI_API_KEY=         # optional default until a key is saved on the admin page. Use a key with a spending cap.
@@ -65,8 +67,18 @@ Give yourself the admin page with `docker compose exec app python -m app.cli set
 
 Set `MTU` in `.env` if the host network is below 1500.
 
+### Other reverse proxies
+
+Caddy, nginx, Traefik and the like should work, but this has not been run end to end. In `compose.yml`, remove the `tunnel` service, add `ports: ["127.0.0.1:8000:8000"]` to `app` if the proxy runs on the host, and set `TRUSTED_PROXY` to the proxy's container name or its address as the app sees it. `TUNNEL_TOKEN` is then not needed. The proxy must:
+
+- Set `cf-connecting-ip` to the client's address, replacing any value the client sent. The login limit reads the address from this header, whose name comes from Cloudflare. Without it every visitor counts as the proxy, so one person's failed logins can block everyone for a while. If a client's own value gets through, it can dodge the limit.
+- Accept request bodies of at least 2 MB, because uploads go in 2 MB parts. nginx allows 1 MB by default.
+
 ## Security
 
-Passwords are hashed with Argon2id, sessions are random tokens stored as SHA-256 in `__Host-` cookies, login is rate limited by IP, account and pair, and the CSP allows only same-origin scripts. Lesson pages are author code: they run in a sandboxed iframe with no origin and talk to the app only through a message bridge (`docs/design/02a-ket-qua-sandbox.md`). `cf-connecting-ip` is trusted only from the tunnel container. AI answers go through DOMPurify. Report problems through a private GitHub security advisory.
+Passwords are hashed with Argon2id, sessions are random tokens stored as SHA-256 in `__Host-` cookies, login is rate limited by IP, account and pair, and the CSP allows only same-origin scripts. Lesson pages are author code: they run in a sandboxed iframe with no origin and talk to the app only through a message bridge (`docs/design/02a-ket-qua-sandbox.md`). `cf-connecting-ip` is trusted only from the address in `TRUSTED_PROXY`. AI answers go through DOMPurify. Report problems through a private GitHub security advisory.
 
-More in `docs/`: design, lesson and practice test formats, operations and how credentials are handled. Third-party files: see `THIRD_PARTY.md`.
+More in `docs/`: design, lesson and practice test formats, operations and how credentials are handled. 
+## License
+
+MIT, see `LICENSE`. It covers the code here; lessons and practice tests that people upload stay theirs. Third-party licenses are in `THIRD_PARTY.md`, including `mutagen`, which is GPL and is installed with the app.
