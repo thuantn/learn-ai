@@ -344,6 +344,18 @@ def run(br, base, temp, sample, hai, chin):
     check("chọn package không tràn ngang ở 360 px", a.evaluate("document.documentElement.scrollWidth - innerWidth") <= 0)
     a.set_viewport_size({"width": 1280, "height": 900})
 
+    # The finish screen gives the next review time of the package just reviewed. Only Gói Vỏ App has a card rated above.
+    a.evaluate("finish()")
+    a.wait_for_selector("#screen-finish.active")
+    check("kết thúc: có lần ôn tiếp theo của package vừa ôn", "Lần ôn tiếp theo" in a.inner_text("#finishNote"), a.inner_text("#finishNote"))
+    a.evaluate("go('flashcard')")
+    a.wait_for_selector("#screen-flashcard.active")
+    a.select_option("#fcPkg", chin)
+    poll(lambda: a.inner_text("#fcBadge").startswith("Gói Chín Bài"))
+    a.evaluate("finish()")
+    a.wait_for_selector("#screen-finish.active")
+    check("kết thúc: package chưa có thẻ hẹn ôn thì không mượn giờ của package khác", "Lần ôn tiếp theo" not in a.inner_text("#finishNote"), a.inner_text("#finishNote"))
+
     # A person with nothing yet: the way forward is the library.
     b = new_page(br, errs)
     login_first(b, base, "binh@example.com", temp["binh@example.com"])

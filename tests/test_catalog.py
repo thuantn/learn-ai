@@ -432,6 +432,10 @@ def test_due_cards_carry_package_and_filter_by_it(ctx, capsys):
         # the home screen counts due cards per lesson, which the client sums per package
         due = {l["package_id"]: l["due"] for l in c.get("/api/lessons").json()["lessons"]}
         assert due == {pid_a: 3, pid_b: 3}
+        # the next review time is kept per package: only B has a card scheduled after now
+        assert c.post(f"/api/cards/{only_b[0]['id']}/review", json={"rating": 3}).status_code == 200
+        got = c.get("/api/lessons").json()
+        assert list(got["next_due_by_package"]) == [pid_b] and got["next_due"] == got["next_due_by_package"][pid_b] > time.time()
 
 
 def test_corrected_quiz_shows_new_text_on_wrong_card(ctx, capsys):

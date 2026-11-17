@@ -4,7 +4,7 @@ const $$ = sel => [...document.querySelectorAll(sel)];
 const SPEEDS = [1, 1.25, 1.5, 2, 0.75];
 const SCREENS = ["home", "library", "review", "listen", "flashcard", "finish", "tests", "test-detail", "test-run", "test-result"];
 const SCREEN_TITLES = { home: "Trang đầu", library: "Thư viện", tests: "Bộ đề", "test-detail": "Bộ đề", "test-run": "Làm bài", "test-result": "Kết quả", review: "Ôn lại", listen: "Nghe", flashcard: "Flashcard", finish: "Kết thúc buổi học" };
-const state = { me: null, lessons: [], lesson: null, track: "long", fcPick: null, nextDue: null, cards: [], idx: 0, reviewed: 0, tests: [] };
+const state = { me: null, lessons: [], lesson: null, track: "long", fcPick: null, nextDue: {}, cards: [], idx: 0, reviewed: 0, tests: [] };
 function currentTrack() { return state.lesson && state.lesson.tracks[state.track]; }
 const audio = new Audio();
 audio.preload = "none";
@@ -218,15 +218,6 @@ function renderLesson() {
   });
   renderTrackButtons();
   renderTime();
-}
-
-// Tests come ordered by package; each package gets its title above its tests so "Đề 1" says whose it is.
-function testGroupHeading(t, last) {
-  if (t.package_id === last) return null;
-  const h = document.createElement("h3");
-  h.className = "test-group-title";
-  h.textContent = t.package_title || "Bộ đề";
-  return h;
 }
 
 function renderHomeTests() {
@@ -636,7 +627,8 @@ async function finish() {
   const l = state.lesson;
   const parts = [];
   if (state.reviewed) parts.push(`Bạn đã ôn ${state.reviewed} thẻ.`);
-  if (state.nextDue) parts.push(`Lần ôn tiếp theo: ${new Date(state.nextDue * 1000).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}.`);
+  const nextDue = state.nextDue[fcPackage()];  // the package whose cards were just reviewed
+  if (nextDue) parts.push(`Lần ôn tiếp theo: ${new Date(nextDue * 1000).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}.`);
 
   const done = !!l && l.status === "done";
   const prefix = l ? l.id.split(".")[0] : "";
@@ -925,7 +917,7 @@ async function refresh() {
   const current = state.lesson && state.lesson.id;
   const heard = state.lesson ? state.lesson.tracks : null;
   state.lessons = d.lessons;
-  state.nextDue = d.next_due;
+  state.nextDue = d.next_due_by_package || {};
   const again = d.lessons.find(x => x.id === current);
   if (current && !again) {  // deleted, or access was taken away
     audio.pause();

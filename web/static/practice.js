@@ -122,6 +122,17 @@ function shouldShowItemsPill(title, items) {
   return !re.test(title || "");
 }
 
+// Without a package filter, each package is a group that folds; folded ones are remembered on this device only.
+const CLOSED_GROUPS_KEY = "testsClosed";
+function closedTestGroups() {
+  try { return new Set(JSON.parse(localStorage.getItem(CLOSED_GROUPS_KEY) || "[]")); } catch (e) { return new Set(); }
+}
+function saveTestGroup(id, open) {
+  const closed = closedTestGroups();
+  if (open) closed.delete(id); else closed.add(id);
+  try { localStorage.setItem(CLOSED_GROUPS_KEY, JSON.stringify([...closed])); } catch (e) { /* storage blocked */ }
+}
+
 async function showTestsScreen(pkgFilter) {
   const hash = pkgFilter ? "#tests=" + encodeURIComponent(pkgFilter) : "#tests";
   go("tests", true, hash);
@@ -153,10 +164,22 @@ async function showTestsScreen(pkgFilter) {
       return;
     }
     if (empty) empty.hidden = true;
-    let last = null;
+    const closed = closedTestGroups();
+    let box = list, last = null;
     tests.forEach(t => {
-      const group = pkgFilter ? null : testGroupHeading(t, last);
-      if (group) list.append(group);
+      if (!pkgFilter && t.package_id !== last) {
+        const pkg = t.package_id;
+        const group = el("details", "test-group");
+        group.dataset.package = pkg;
+        group.open = !closed.has(pkg);
+        const summary = el("summary", "test-group-summary");
+        summary.append(el("h2", "test-group-name", t.package_title || "Bộ đề"),
+          el("span", "test-group-count", `${tests.filter(x => x.package_id === pkg).length} đề`));
+        group.append(summary);
+        group.addEventListener("toggle", () => saveTestGroup(pkg, group.open));
+        list.append(group);
+        box = group;
+      }
       last = t.package_id;
       const row = el("article", "stream-row");
       const info = el("div", "lib-info");
@@ -183,7 +206,7 @@ async function showTestsScreen(pkgFilter) {
       const btn = actionButton("Xem đề", "test-open", t.key, "btn-studio-secondary");
       act.append(btn);
       row.append(info, act);
-      list.append(row);
+      box.append(row);
     });
   } catch (err) {
     if (err.message !== "login" && err.message !== "password") {

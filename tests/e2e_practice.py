@@ -245,6 +245,24 @@ def run(br, base, temp, work):
     new_hash = an.evaluate("location.hash")
     check("bấm bộ đề vào thẳng danh sách đề của package", new_hash.startswith("#tests="), f"hash={new_hash}")
 
+    # 7b. màn Bộ đề: mỗi package là một nhóm thu gọn được, tên package to hơn tên đề, máy nhớ nhóm đã thu gọn
+    an.goto(base + "/#tests")
+    an.wait_for_selector("#testsList .test-group .stream-row")
+    names = an.locator("#testsList .test-group-name").all_inner_texts()
+    check("màn Bộ đề có một nhóm cho mỗi package", names == want, f"names={names}, want={want}")
+    sizes = an.evaluate("[parseFloat(getComputedStyle(document.querySelector('#testsList .test-group-name')).fontSize), parseFloat(getComputedStyle(document.querySelector('#testsList .stream-title')).fontSize)]")
+    check("tên package to hơn tên đề", sizes[0] > sizes[1], sizes)
+    first = an.locator("#testsList .test-group").first
+    n_rows = first.locator(".stream-row").count()
+    first.locator("summary").click()
+    check("bấm tên package thì thu gọn", first.locator(".stream-row:visible").count() == 0 and n_rows > 0, n_rows)
+    an.reload()
+    an.wait_for_selector("#testsList .test-group")
+    first = an.locator("#testsList .test-group").first
+    check("tải lại vẫn nhớ nhóm đã thu gọn", first.get_attribute("open") is None and an.locator("#testsList .test-group").nth(1).get_attribute("open") is not None)
+    first.locator("summary").click()
+    check("bấm lại thì mở ra", first.locator(".stream-row:visible").count() == n_rows)
+
     # 8. không tràn ngang ở 360 px
     an.set_viewport_size({"width": 360, "height": 740})
     widths = []
@@ -476,7 +494,9 @@ def run(br, base, temp, work):
     s_idx = an.evaluate("() => _currentAttempt.items.findIndex(it => it.type === 'single')")
     an.click(f"#testGrid [data-act=test-jump][data-idx='{s_idx}']")
     an.wait_for_timeout(100)
-    an.locator(".test-option-btn").first.click()
+    # Options come shuffled, so the first one is sometimes right; D is wrong in both single questions,
+    # which step 11 needs for its "Sai" filter.
+    an.click("#testQuestionBox [data-act=test-choose][data-option=D]")
     an.click("#btnTestCheck")
     an.wait_for_selector("#testQuestionBox .test-checked-banner")
     box_text = an.inner_text("#testQuestionBox")

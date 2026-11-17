@@ -345,18 +345,17 @@ async def lessons(request: Request):
         due = {}
         for r in due_rows:
             due[r["lesson"]] = due.get(r["lesson"], 0) + 1
-        next_due = None
+        next_due = {}  # package id -> earliest future due of a card that still exists
         for r in c.execute(
             "SELECT card_id, lesson, due FROM card_state WHERE user=? AND due>? ORDER BY due",
             (user, now),
         ).fetchall():
             lesson = lesson_map.get(r["lesson"])
-            if not lesson:
+            if not lesson or lesson["package_id"] in next_due:
                 continue
             bare_id = r["card_id"].split(".", 1)[1]
             if _find_card(lesson, bare_id):
-                next_due = r["due"]
-                break
+                next_due[lesson["package_id"]] = r["due"]
     out = []
     for x in lessons:
         p = progress.get(x["id"])
@@ -389,7 +388,8 @@ async def lessons(request: Request):
             "mine": x["mine"],
             "ask": ai_on and x["ask_status"] == "approved",
         })
-    return {"lessons": out, "due_total": sum(due.values()), "next_due": next_due}
+    return {"lessons": out, "due_total": sum(due.values()), "next_due": min(next_due.values(), default=None),
+            "next_due_by_package": next_due}
 
 
 @app.post("/api/lessons/{lesson_id}/start")
