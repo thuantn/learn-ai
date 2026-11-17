@@ -591,13 +591,14 @@ def _find_card(lesson, bare_id):
 @app.get("/api/cards/due")
 async def due_cards(request: Request):
     user, now = request.state.user, time.time()
+    package = request.query_params.get("package")
     with db.connect() as c:
         rows, lesson_map = _due_rows(c, user, now)
         wrong = {r["card_id"] for r in c.execute("SELECT card_id FROM wrong_card WHERE user=?", (user,))}
     out = []
     for r in rows:
         lesson = lesson_map.get(r["lesson"])
-        if not lesson:
+        if not lesson or (package and lesson["package_id"] != package):
             continue
         bare_id = r["card_id"].split(".", 1)[1]
         pair = _find_card(lesson, bare_id)
@@ -608,6 +609,8 @@ async def due_cards(request: Request):
             "id": r["card_id"],
             "lesson": r["lesson"],
             "lesson_order": lesson["ord"] + 1,
+            "package_id": lesson["package_id"],
+            "package_title": lesson["package_title"],
             "q": q,
             "a": a,
             "wrong": r["card_id"] in wrong,

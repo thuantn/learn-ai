@@ -4,7 +4,7 @@ const $$ = sel => [...document.querySelectorAll(sel)];
 const SPEEDS = [1, 1.25, 1.5, 2, 0.75];
 const SCREENS = ["home", "library", "review", "listen", "flashcard", "finish", "tests", "test-detail", "test-run", "test-result"];
 const SCREEN_TITLES = { home: "Trang đầu", library: "Thư viện", tests: "Bộ đề", "test-detail": "Bộ đề", "test-run": "Làm bài", "test-result": "Kết quả", review: "Ôn lại", listen: "Nghe", flashcard: "Flashcard", finish: "Kết thúc buổi học" };
-const state = { me: null, lessons: [], lesson: null, track: "long", due: 0, nextDue: null, cards: [], idx: 0, reviewed: 0, tests: [] };
+const state = { me: null, lessons: [], lesson: null, track: "long", fcPick: null, nextDue: null, cards: [], idx: 0, reviewed: 0, tests: [] };
 function currentTrack() { return state.lesson && state.lesson.tracks[state.track]; }
 const audio = new Audio();
 audio.preload = "none";
@@ -287,74 +287,99 @@ function renderHomeTests() {
   });
 }
 
+// Lessons come ordered by package; each package is a group with its title and its own "Xem tất cả" past 8 lessons.
 function renderList() {
   const box = $("lessonList");
   box.textContent = "";
-  const total = state.lessons.length;
-  state.lessons.forEach((l, i) => {
-    const row = document.createElement("div");
-    row.className = "stream-row lesson-row";
-    const isCurrent = state.lesson && l.id === state.lesson.id;
-    if (isCurrent) row.classList.add("is-current");
-    if (total > 8 && i >= 8 && !isCurrent) {
-      row.hidden = true;
+  const groups = new Map();
+  state.lessons.forEach(l => {
+    if (!groups.has(l.package_id)) groups.set(l.package_id, []);
+    groups.get(l.package_id).push(l);
+  });
+  groups.forEach((lessons, pkgId) => {
+    const group = document.createElement("div");
+    group.className = "lesson-group";
+    group.dataset.package = pkgId;
+    const heading = document.createElement("h3");
+    heading.className = "test-group-title";
+    heading.textContent = lessons[0].package_title || "Bài học";
+    group.append(heading);
+    const total = lessons.length;
+    lessons.forEach((l, i) => {
+      const row = document.createElement("div");
+      row.className = "stream-row lesson-row";
+      const isCurrent = state.lesson && l.id === state.lesson.id;
+      if (isCurrent) row.classList.add("is-current");
+      if (total > 8 && i >= 8 && !isCurrent) {
+        row.hidden = true;
+      }
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "lesson-row-main";
+      btn.dataset.act = "start";
+      btn.dataset.lesson = l.id;
+
+      const idx = document.createElement("span");
+      idx.className = "stream-index lesson-row-idx";
+      idx.textContent = String(l.order).padStart(2, "0");
+
+      const text = document.createElement("div");
+      text.className = "lesson-row-text";
+
+      const title = document.createElement("span");
+      title.className = "lesson-row-title";
+      title.textContent = `${lessonNo(l)}: ${l.title}`;
+
+      const status = document.createElement("span");
+      status.className = "lesson-row-status" + (l.status === "done" ? " is-done" : "");
+      status.textContent = l.mine ? statusText(l) : `${statusText(l)}. Tác giả: ${l.author}`;
+
+      text.append(title, status);
+
+      const chev = document.createElement("span");
+      chev.className = "lesson-row-chevron";
+      chev.setAttribute("aria-hidden", "true");
+      chev.textContent = "›";
+
+      btn.append(idx, text, chev);
+
+      const read = document.createElement("a");
+      read.className = "lesson-row-read";
+      read.href = l.page;
+      read.textContent = "Đọc bài";
+
+      row.append(btn, read);
+      group.append(row);
+    });
+
+    if (total > 8) {
+      const moreBtn = document.createElement("button");
+      moreBtn.type = "button";
+      moreBtn.className = "btn-link-quiet lesson-expand-btn";
+      moreBtn.textContent = `Xem tất cả ${total} bài`;
+      moreBtn.addEventListener("click", () => {
+        group.querySelectorAll(".lesson-row[hidden]").forEach(r => r.removeAttribute("hidden"));
+        moreBtn.remove();
+      });
+      group.append(moreBtn);
     }
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "lesson-row-main";
-    btn.dataset.act = "start";
-    btn.dataset.lesson = l.id;
-
-    const idx = document.createElement("span");
-    idx.className = "stream-index lesson-row-idx";
-    idx.textContent = String(l.order).padStart(2, "0");
-
-    const text = document.createElement("div");
-    text.className = "lesson-row-text";
-
-    const title = document.createElement("span");
-    title.className = "lesson-row-title";
-    title.textContent = `${lessonNo(l)}: ${l.title}`;
-
-    const status = document.createElement("span");
-    status.className = "lesson-row-status" + (l.status === "done" ? " is-done" : "");
-    status.textContent = l.mine ? statusText(l) : `${statusText(l)}. Tác giả: ${l.author}`;
-
-    text.append(title, status);
-
-    const chev = document.createElement("span");
-    chev.className = "lesson-row-chevron";
-    chev.setAttribute("aria-hidden", "true");
-    chev.textContent = "›";
-
-    btn.append(idx, text, chev);
-
-    const read = document.createElement("a");
-    read.className = "lesson-row-read";
-    read.href = l.page;
-    read.textContent = "Đọc bài";
-
-    row.append(btn, read);
-    box.append(row);
+    box.append(group);
   });
 
-  if (total > 8) {
-    const moreBtn = document.createElement("button");
-    moreBtn.type = "button";
-    moreBtn.className = "btn-link-quiet lesson-expand-btn";
-    moreBtn.textContent = `Xem tất cả ${total} bài`;
-    moreBtn.addEventListener("click", () => {
-      box.querySelectorAll(".lesson-row[hidden]").forEach(r => r.removeAttribute("hidden"));
-      moreBtn.remove();
-    });
-    box.append(moreBtn);
-  }
-
   renderHomeTests();
-  const dueText = state.due ? `Còn ${state.due} thẻ cần ôn` : "Không có thẻ cần ôn";
+  renderDue();
+}
+
+// Due counts are per package: the one the Flashcard screen shows.
+function packageDue(pkg) {
+  return state.lessons.reduce((n, l) => n + (l.package_id === pkg ? l.due : 0), 0);
+}
+function renderDue() {
+  const due = packageDue(fcPackage());
+  const dueText = due ? `Còn ${due} thẻ cần ôn` : "Không có thẻ cần ôn";
   $$("[data-due-text]").forEach(e => { e.textContent = dueText; });
-  $$("[data-due-short]").forEach(e => { e.textContent = state.due ? `${state.due} thẻ` : ""; });
+  $$("[data-due-short]").forEach(e => { e.textContent = due ? `${due} thẻ` : ""; });
 }
 
 function renderTrackButtons() {
@@ -528,15 +553,43 @@ function setupMediaSession() {
 }
 
 // ---------- Flashcards ----------
+// One package at a time: the current lesson's, unless the learner picked another while on this lesson.
+function fcPackage() {
+  const pick = state.fcPick;
+  if (pick && state.lesson && pick.lesson === state.lesson.id) return pick.pkg;
+  return state.lesson ? state.lesson.package_id : null;
+}
+function renderFcPicker() {
+  const sel = $("fcPkg");
+  const titles = new Map();
+  state.lessons.forEach(l => { if (!titles.has(l.package_id)) titles.set(l.package_id, l.package_title || "Bài học"); });
+  sel.textContent = "";
+  titles.forEach((title, id) => {
+    const due = packageDue(id);
+    sel.append(new Option(due ? `${title} (${due} thẻ)` : title, id));
+  });
+  sel.value = fcPackage();
+  $("fcPkgBox").hidden = titles.size < 2;
+}
+$("fcPkg").addEventListener("change", e => {
+  if (!state.lesson) return;
+  state.fcPick = { lesson: state.lesson.id, pkg: e.target.value };
+  renderDue();
+  loadCards();
+});
 async function loadCards() {
   $("fcCard").hidden = true;
   $("fcEmpty").hidden = true;
+  renderFcPicker();
+  const pkg = fcPackage();
+  let cards = [];
   try {
-    state.cards = (await api("/api/cards/due")).cards;
+    cards = (await api("/api/cards/due?package=" + encodeURIComponent(pkg || ""))).cards;
   } catch (e) {
     if (e.message === "login" || e.message === "password") return;
-    state.cards = [];
   }
+  if (pkg !== fcPackage()) return;  // the learner switched package while this was loading
+  state.cards = cards;
   state.idx = 0;
   renderCard();
 }
@@ -546,7 +599,8 @@ function renderCard() {
   $("fcCard").hidden = !c;
   $("fcIndex").textContent = c ? `Thẻ ${state.idx + 1} / ${state.cards.length}` : "";
   if (!c) return;
-  $("fcBadge").textContent = c.wrong ? `Câu từng làm sai, Bài ${c.lesson_order}` : `Bài ${c.lesson_order}`;
+  const where = (c.package_title ? c.package_title + " · " : "") + `Bài ${c.lesson_order}`;
+  $("fcBadge").textContent = c.wrong ? `Câu từng làm sai, ${where}` : where;
   $("fcQuestion").textContent = c.q;
   $("fcAnswer").textContent = c.a;
   $("fcAnswerPane").hidden = true;
@@ -838,7 +892,7 @@ document.addEventListener("click", e => {
 $("navDrawer") && $("navDrawer").addEventListener("click", e => { if (e.target.closest("a")) closeNav(); });
 
 document.addEventListener("keydown", e => {
-  if (e.target.matches("input:not([type=range]),textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.matches("input:not([type=range]),textarea,select") || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "Escape") {
     closeNav();
     openAsk(false);
@@ -871,7 +925,6 @@ async function refresh() {
   const current = state.lesson && state.lesson.id;
   const heard = state.lesson ? state.lesson.tracks : null;
   state.lessons = d.lessons;
-  state.due = d.due_total;
   state.nextDue = d.next_due;
   const again = d.lessons.find(x => x.id === current);
   if (current && !again) {  // deleted, or access was taken away

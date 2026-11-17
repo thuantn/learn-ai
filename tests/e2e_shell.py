@@ -49,15 +49,16 @@ def poll(fn, timeout=10, step=0.1):
     return fn()
 
 
-def make_package(dest):
-    """Two lessons in one package. The second has the page's own Ask button, and both have dark rules."""
+def make_package(dest, slug="vo-app", title="Gói Vỏ App", lessons=(("sample", "Bài Một"), ("hai", "Bài Hai"))):
+    """By default two lessons in one package. The one named hai has the page's own Ask button, and all have dark rules."""
     root = pathlib.Path(tempfile.mkdtemp()) / "p"
     shutil.copytree(ROOT / "sample" / "package", root)
-    shutil.copytree(root / "lessons" / "sample", root / "lessons" / "hai")
+    for name, _ in lessons[1:]:
+        shutil.copytree(root / "lessons" / "sample", root / "lessons" / name)
     pkg = json.loads((root / "package.json").read_text("utf-8"))
-    pkg.update(slug="vo-app", title="Gói Vỏ App", lessons=["sample", "hai"])
+    pkg.update(slug=slug, title=title, lessons=[n for n, _ in lessons])
     (root / "package.json").write_text(json.dumps(pkg), "utf-8")
-    for name, title in (("sample", "Bài Một"), ("hai", "Bài Hai")):
+    for name, title in lessons:
         folder = root / "lessons" / name
         lesson = json.loads((folder / "lesson.json").read_text("utf-8"))
         cards = [{"id": f"{name}-c{i}", "q": f"Thẻ {name} {i}?", "a": f"Đáp {i}"} for i in range(5)]
@@ -128,7 +129,7 @@ def open_lesson(br, base, key, state, scheme, theme, errs):
     return pg, frame
 
 
-def run(br, base, temp, sample, hai):
+def run(br, base, temp, sample, hai, chin):
     errs = []
     a = new_page(br, errs)
     login_first(a, base, "an@example.com", temp["an@example.com"])
@@ -312,6 +313,37 @@ def run(br, base, temp, sample, hai):
     check("ghi chú mới không bị bản cũ lỗi đè", saved and saved.get("v") == 2, saved)
     pg.context.close()
 
+    # Home and Flashcard keep each package apart. Gói Chín Bài has 9 lessons, so only it gets "Xem tất cả".
+    vo = sample.split(".")[0]
+    a.goto(base + "/#home")
+    a.wait_for_selector("#lessonList .stream-row")
+    groups = a.evaluate("[...document.querySelectorAll('#lessonList .lesson-group')].map(g => [g.dataset.package, g.querySelector('.test-group-title').textContent, [...g.querySelectorAll('.lesson-row')].filter(r => r.offsetParent).length, g.querySelectorAll('.lesson-row').length])")
+    check("trang đầu chia bài theo package, có tên package", sorted(groups) == sorted([[vo, "Gói Vỏ App", 2, 2], [chin, "Gói Chín Bài", 8, 9]]), groups)
+    more = a.locator("#lessonList .lesson-expand-btn")
+    check("nút Xem tất cả chỉ ở package quá 8 bài, đếm bài của package đó",
+          more.count() == 1 and more.inner_text() == "Xem tất cả 9 bài" and a.locator(f'.lesson-group[data-package="{chin}"] .lesson-expand-btn').count() == 1, more.all_inner_texts())
+    a.locator(".lesson-group", has=a.locator(f'[data-lesson="{chin}.c9"]')).locator(".lesson-expand-btn").click()
+    check("bấm Xem tất cả thì hiện đủ 9 bài", a.locator(f'.lesson-group[data-package="{chin}"] .lesson-row:visible').count() == 9)
+    a.locator(f'[data-lesson="{chin}.c9"]').click()
+    a.wait_for_selector("#screen-review.active")
+    a.evaluate("go('flashcard')")
+    a.wait_for_selector("#fcCard:not([hidden])")
+    lessons_now = a.evaluate("async () => (await (await fetch('/api/lessons')).json()).lessons")
+    due_of = lambda pkg: sum(x["due"] for x in lessons_now if x["package_id"] == pkg)
+    check("thẻ ghi tên package và số bài", a.inner_text("#fcBadge") == "Gói Chín Bài · Bài 9", a.inner_text("#fcBadge"))
+    check("mặc định chỉ thẻ của package đang học", a.inner_text("#fcIndex") == f"Thẻ 1 / {due_of(chin)}" and due_of(chin) == 5, [a.inner_text("#fcIndex"), due_of(chin)])
+    check("số thẻ cần ôn tính theo package", a.evaluate("document.querySelector('[data-due-text]').textContent") == f"Còn {due_of(chin)} thẻ cần ôn", a.evaluate("document.querySelector('[data-due-text]').textContent"))
+    check("có chỗ đổi package", a.locator("#fcPkg").is_visible() and a.locator("#fcPkg option").count() == 2)
+    a.select_option("#fcPkg", vo)
+    poll(lambda: a.inner_text("#fcBadge").startswith("Gói Vỏ App · Bài "))
+    check("đổi package thì thẻ đổi theo", a.inner_text("#fcBadge").startswith("Gói Vỏ App · Bài ") and a.inner_text("#fcIndex").endswith(f"/ {due_of(vo)}"), [a.inner_text("#fcBadge"), a.inner_text("#fcIndex"), due_of(vo)])
+    check("số thẻ cần ôn theo package vừa chọn", a.evaluate("document.querySelector('[data-due-text]').textContent") == f"Còn {due_of(vo)} thẻ cần ôn", a.evaluate("document.querySelector('[data-due-text]').textContent"))
+    a.set_viewport_size({"width": 360, "height": 740})
+    a.wait_for_timeout(150)
+    a.screenshot(path=str(pathlib.Path(tempfile.gettempdir()) / "fc-package-360.png"))
+    check("chọn package không tràn ngang ở 360 px", a.evaluate("document.documentElement.scrollWidth - innerWidth") <= 0)
+    a.set_viewport_size({"width": 1280, "height": 900})
+
     # A person with nothing yet: the way forward is the library.
     b = new_page(br, errs)
     login_first(b, base, "binh@example.com", temp["binh@example.com"])
@@ -363,6 +395,8 @@ def main():
 
     temp = {n: cli("add-user", n).stdout.rsplit(": ", 1)[1].strip() for n in ("an@example.com", "binh@example.com")}
     pid = cli("import-package", str(make_package(work / "shell.zip")), "an@example.com").stdout.strip().splitlines()[-1].strip()
+    nine = (("sample", "Chín 1"),) + tuple((f"c{i}", f"Chín {i}") for i in range(2, 10))
+    chin = cli("import-package", str(make_package(work / "chin.zip", "chin-bai", "Gói Chín Bài", nine)), "an@example.com").stdout.strip().splitlines()[-1].strip()
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port), "--log-level", "warning"], cwd=ROOT, env=env)
     try:
         for _ in range(60):
@@ -373,7 +407,7 @@ def main():
                 time.sleep(0.25)
         with sync_playwright() as p:
             br = p.webkit.launch() if args.browser == "webkit" else p.chromium.launch(channel="chrome")
-            run(br, base, temp, f"{pid}.sample", f"{pid}.hai")
+            run(br, base, temp, f"{pid}.sample", f"{pid}.hai", chin)
             br.close()
     finally:
         srv.terminate()

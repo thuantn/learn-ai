@@ -28,3 +28,6 @@
 - 03/11/2026 — Claude app and web limit a skill description to 200 characters and need the skill folder at the zip root, per the help center. `tests/test_toolkit.py` pins both, and runs the checker with `python -S` so a new dependency shows up. Upload to claude.ai itself is not covered by any test.
 
 - 03/11/2026 — iOS ignores an SVG icon when adding to the home screen, so `apple-touch-icon.png` is needed beside `icon.svg`. The PNGs are screenshots of the SVG; redraw them if the SVG changes.
+- 17/11/2026 — On Windows, run pytest with `PYTHONUTF8=1`. Without it the two CLI tests in `tests/test_bundle.py` read the script's UTF-8 output as cp1252 and fail on main too.
+- 17/11/2026 — `tests/e2e_browser.py` pins the long podcast of lesson 2 at 22:59. The current package has 15:22, so that one check fails until the number follows the content.
+- 17/11/2026 — Home lessons and flashcards are grouped by package. Each `.lesson-group` has its own "Xem tất cả", so a test must click the button inside the group that holds its lesson.

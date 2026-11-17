@@ -3434,6 +3434,9 @@ body.in-test .stage-body {
   }
 }
 
+.lesson-group { display: flex; flex-direction: column; }
+.fc-pkg { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.75rem; font-size: 0.875rem; color: var(--text-sub); }
+.fc-pkg select { min-height: 44px; max-width: 100%; font: inherit; color: var(--text-main); background: var(--bg-canvas); border: 1px solid var(--hairline); border-radius: 10px; padding: 0 0.625rem; }
 .lesson-expand-btn {
   margin-top: 0.5rem;
   align-self: flex-start;

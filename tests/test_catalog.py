@@ -412,6 +412,28 @@ def test_two_packages_same_bare_ids_do_not_collide(ctx, capsys):
         assert wrong == {key_a: "Câu của an?", key_b: "Câu của binh?"}
 
 
+def test_due_cards_carry_package_and_filter_by_it(ctx, capsys):
+    c = _ready_client(ctx, capsys, "an")
+    cards = [{"id": f"c{i}", "q": f"q{i}", "a": f"a{i}"} for i in range(1, 4)]
+    pid_a = ctx.catalog.install_version("an", _make_package(ctx.tmp / "a", slug="pkg-a", lesson_id="demo", cards=cards))["id"]
+    pid_b = ctx.catalog.install_version("an", _make_package(ctx.tmp / "b", slug="pkg-b", lesson_id="demo", cards=cards))["id"]
+    with ctx.db.connect() as db:
+        db.execute("UPDATE packages SET title='Gói A' WHERE id=?", (pid_a,))
+        db.execute("UPDATE packages SET title='Gói B' WHERE id=?", (pid_b,))
+    with c:
+        lessons = c.get("/api/lessons").json()["lessons"]
+        for l in lessons:
+            c.post(f"/api/lessons/{l['id']}/start")
+        every = c.get("/api/cards/due").json()["cards"]
+        assert {(x["package_id"], x["package_title"]) for x in every} == {(pid_a, "Gói A"), (pid_b, "Gói B")}
+        only_b = c.get(f"/api/cards/due?package={pid_b}").json()["cards"]
+        assert len(only_b) == 3 and {x["package_id"] for x in only_b} == {pid_b}
+        assert c.get("/api/cards/due?package=nope").json()["cards"] == []
+        # the home screen counts due cards per lesson, which the client sums per package
+        due = {l["package_id"]: l["due"] for l in c.get("/api/lessons").json()["lessons"]}
+        assert due == {pid_a: 3, pid_b: 3}
+
+
 def test_corrected_quiz_shows_new_text_on_wrong_card(ctx, capsys):
     c = _ready_client(ctx, capsys, "an")
     quiz = [{"id": "q1", "q": "Câu cũ?", "options": ["a", "b"], "answer": 0, "why": "vì cũ"}]
