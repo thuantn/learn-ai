@@ -30,4 +30,6 @@
 - 03/11/2026 — iOS ignores an SVG icon when adding to the home screen, so `apple-touch-icon.png` is needed beside `icon.svg`. The PNGs are screenshots of the SVG; redraw them if the SVG changes.
 - 17/11/2026 — On Windows, run pytest with `PYTHONUTF8=1`. Without it the two CLI tests in `tests/test_bundle.py` read the script's UTF-8 output as cp1252 and fail on main too.
 - 17/11/2026 — `tests/e2e_browser.py` pins the long podcast of lesson 2 at 22:59. The current package has 15:22, so that one check fails until the number follows the content.
+- 21/11/2026 — iOS zooms the page when a field with text under 16px is tapped. The last rule in `app.css` sets fields to 16px under `(pointer: coarse)`; a new field styled by an id or compound selector can beat it, so run `tests/e2e_touch_inputs.py`, which measures every field on login, password, app and admin.
+- 21/11/2026 — Font sizes in `app.css` use the `--fs-*` steps in `:root`. A new size should pick a step; buttons are `--fs-ui` (14px), and the review screen's two buttons only just fit one row at 390px.
 - 17/11/2026 — Home lessons and flashcards are grouped by package. Each `.lesson-group` has its own "Xem tất cả", so a test must click the button inside the group that holds its lesson.
