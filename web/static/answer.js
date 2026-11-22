@@ -7,6 +7,15 @@ function renderAnswer(text) {
   return DOMPurify.sanitize(marked.parse(src), { FORBID_TAGS: ["style", "img", "form", "input", "button", "textarea", "select"], FORBID_ATTR: ["style"] }).replace(/@@M(\d+)@@/g, (_, i) => escape(keep[+i] || ""));
 }
 
+// Ask states reuse the app's alert look: a limit or a busy queue is a wait, anything else an error.
+const ASK_PENDING = "Đang trả lời…";
+function askFailed(el, e) {
+  const wait = e.code === "rate_limited" || e.code === "busy";
+  el.className = "ask-bubble studio-alert " + (wait ? "wait" : "error");
+  el.setAttribute("role", "alert");
+  el.textContent = e.message || "Có lỗi khi gửi câu hỏi.";
+}
+
 // The learner's thread for one lesson, the same one on the app page and the lesson page.
 const AskThread = {
   lesson: null,

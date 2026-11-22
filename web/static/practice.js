@@ -334,6 +334,9 @@ async function showTestDetail(key) {
           actions.append(start);
         }
       }
+      // One primary per group: an unfinished attempt wins, else "Thi thử".
+      const main = actions.querySelector('[data-act="attempt-open"]') || actions.querySelector(".btn-studio-primary");
+      actions.querySelectorAll(".btn-studio-primary").forEach(b => { if (b !== main) b.className = "btn-studio-secondary"; });
     }
 
     if (historyList) {
@@ -799,6 +802,7 @@ function updateSaveIndicator() {
       if (q.status === "failed") hasFailed = true;
     }
   }
+  el.classList.toggle("is-failed", !hasSending && hasFailed);
   if (hasSending) {
     el.textContent = "Đang lưu";
   } else if (hasFailed) {
@@ -1048,7 +1052,10 @@ function renderCurrentQuestion() {
     if (item.checked) btn.disabled = true;
 
     btn.append(el("span", "test-opt-badge", letter));
-    btn.append(el("span", "test-opt-text", opt.text));
+    const text = el("span", "test-opt-text", opt.text);
+    if (item.checked && isChosen) text.append(el("span", "meta-pill", " Bạn chọn"));
+    if (item.checked && isCorrect) text.append(el("span", "meta-pill", " Đáp án đúng"));
+    btn.append(text);
     optsList.append(btn);
 
     if (item.checked && opt.why) {
@@ -1134,6 +1141,9 @@ function renderCurrentQuestion() {
   if (btnCheck) {
     const isPracticeOrReview = _currentAttempt.mode === "practice" || _currentAttempt.mode === "review";
     btnCheck.hidden = !isPracticeOrReview || !!item.checked;
+    // Practice checks one question at a time, so "Kiểm tra" is the main action and submit steps back.
+    const btnSubmit = $("btnTestSubmit");
+    if (btnSubmit) btnSubmit.className = isPracticeOrReview ? "btn-studio-secondary" : "btn-studio-primary";
   }
 }
 
@@ -1153,6 +1163,7 @@ function renderGrid() {
     }
 
     const b = el("button", cls, String(idx + 1));
+    if (it.checked) b.setAttribute("aria-label", `Câu ${idx + 1}, ${it.is_correct ? "đúng" : "sai"}`);
     b.type = "button";
     b.dataset.act = "test-jump";
     b.dataset.idx = String(idx);
@@ -1810,7 +1821,7 @@ async function sendItemAsk() {
   thread.append(userBubble);
   input.value = "";
 
-  const botBubble = el("div", "ask-bubble md-answer is-pending", "Đang trả lời...");
+  const botBubble = el("div", "ask-bubble md-answer is-pending", ASK_PENDING);
   thread.append(botBubble);
   thread.scrollTop += userBubble.getBoundingClientRect().top - thread.getBoundingClientRect().top;
 
@@ -1829,9 +1840,7 @@ async function sendItemAsk() {
     }
     if (clearBtn) clearBtn.hidden = false;
   } catch (e) {
-    botBubble.classList.remove("is-pending");
-    botBubble.textContent = e.message || "Có lỗi khi gửi câu hỏi.";
-    botBubble.classList.add("is-error");
+    askFailed(botBubble, e);
     if (!input.value) input.value = q;
   } finally {
     _askSending = false;

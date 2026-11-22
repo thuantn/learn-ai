@@ -397,7 +397,7 @@
     qEl.textContent = question;
     $("askInput").value = "";
     const out = askBubble("md-answer is-pending");
-    out.textContent = "Đang trả lời…";
+    out.textContent = ASK_PENDING;
     $("askSend").disabled = true;
     AskThread.sending = true;
     AskThread.scrollTo(qEl);
@@ -411,8 +411,7 @@
       AskThread.sending = false;
       out.classList.remove("is-pending");
       if (e.status === 404) { lostAccess(); return; }
-      out.textContent = e.message;
-      out.classList.add("is-error");
+      askFailed(out, e);
       // It was not kept, so the learner should not have to type it again.
       if (!$("askInput").value) $("askInput").value = question;
     }
@@ -443,7 +442,7 @@
     else if (act === "ask-clear") {
       AskThread.clear(api).catch(e => {
         if (e.status === 404) lostAccess();
-        else askBubble("is-error").textContent = e.message;
+        else askFailed(askBubble(""), e);
       });
     }
     else if (act === "ask-expand") {

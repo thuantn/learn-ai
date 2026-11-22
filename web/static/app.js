@@ -713,7 +713,7 @@ async function sendAsk(question) {
   qEl.textContent = question;
   $("askInput").value = "";
   const out = askBubble("md-answer is-pending");
-  out.textContent = "Đang trả lời...";
+  out.textContent = ASK_PENDING;
   $("askSend").disabled = true;
   AskThread.sending = true;
   $("askLessonPick").disabled = true;
@@ -725,9 +725,7 @@ async function sendAsk(question) {
     out.innerHTML = renderAnswer(d.text);
     if (window.MathJax && MathJax.typesetPromise) await MathJax.typesetPromise([out]).catch(() => {});
   } catch (e) {
-    out.classList.remove("is-pending");
-    out.textContent = e.message;
-    out.classList.add("is-error");
+    askFailed(out, e);
     // It was not kept, so the learner should not have to type it again.
     if (!$("askInput").value) $("askInput").value = question;
   }
@@ -827,7 +825,7 @@ const ACTIONS = {
   "nav-close": closeNav,
   "ask-open": () => openAsk(true),
   "ask-close": () => openAsk(false),
-  "ask-clear": () => AskThread.clear(api).catch(e => { askBubble("is-error").textContent = e.message; }),
+  "ask-clear": () => AskThread.clear(api).catch(e => askFailed(askBubble(""), e)),
   "ask-chip": el => { openAsk(true); sendAsk(el.textContent); },
   "ask-expand": el => {
     const on = !$("workbenchGrid").classList.contains("ask-expanded");

@@ -104,7 +104,7 @@
             <div class="auth-label"><span>Dung lượng đã dùng</span><strong id="libUsed"></strong></div>
             <div class="meter-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Dung lượng đã dùng"><div class="meter-fill" id="libMeter"></div></div>
           </div>
-          <button data-icon="upload" type="button" class="btn-studio-primary" data-act="lib-upload">Tải lên</button>
+          <button data-icon="upload" type="button" class="btn-studio-secondary" data-act="lib-upload">Tải lên</button>
           <a class="btn-studio-secondary" id="libAdmin" href="/admin" hidden>Quản trị</a>
         </div>
         <h2 class="list-heading">Bài của tôi</h2>
@@ -153,7 +153,7 @@
             <p class="key-hint">Phím Space để phát hoặc dừng, phím mũi tên để tua 15 giây.</p>
           </div>
           <div class="cta-cluster">
-            <button type="button" class="btn-studio-primary" data-act="go" data-to="flashcard">Tiếp tục: Flashcard</button>
+            <button type="button" class="btn-studio-secondary" data-act="go" data-to="flashcard">Tiếp tục: Flashcard</button>
           </div>
         </div>
       </section>
@@ -301,6 +301,8 @@
             <div class="test-grid" id="testGrid"></div>
             <div class="test-grid-legend">
               <span class="legend-item"><span class="legend-dot is-answered"></span> Đã làm</span>
+              <span class="legend-item"><span class="legend-mark is-correct">✓</span> Đúng</span>
+              <span class="legend-item"><span class="legend-mark is-wrong">✕</span> Sai</span>
               <span class="legend-item"><span class="legend-dot is-flagged"></span> Gắn cờ</span>
               <span class="legend-item"><span class="legend-dot is-current"></span> Đang xem</span>
             </div>
@@ -389,7 +391,7 @@
     <form id="askForm">
       <label class="sr-only" for="askInput">Nhập câu hỏi</label>
       <textarea id="askInput" class="ask-dock-textarea" maxlength="2000" placeholder="Hỏi về bài này"></textarea>
-      <button data-icon="send" type="submit" class="btn-studio-primary fc-wide" id="askSend">Gửi câu hỏi</button>
+      <button data-icon="send" type="submit" class="btn-studio-secondary fc-wide" id="askSend">Gửi câu hỏi</button>
     </form>
   </aside>
 </div>

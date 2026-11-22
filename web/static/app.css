@@ -199,7 +199,8 @@
       --amber-soft: rgba(245, 158, 11, 0.16);
       --hairline: rgba(255, 255, 255, 0.08);
       --control-line: rgba(255, 255, 255, 0.36);
-      --shadow-float: 0 14px 36px rgba(0, 0, 0, 0.55);
+      --shadow-float: none;
+      --float-line: var(--hairline);
     }
 
     [data-theme="light"] {
@@ -225,6 +226,7 @@
       --hairline: rgba(9, 9, 11, 0.09);
       --control-line: rgba(9, 9, 11, 0.5);
       --shadow-float: 0 12px 32px rgba(17, 19, 26, 0.15);
+      --float-line: transparent;
     }
 
     * {
@@ -366,7 +368,7 @@
         height: 100vh;
         height: 100dvh;
         background: var(--bg-panel);
-        border-left: 1px solid var(--hairline);
+        border-left: 1px solid var(--float-line);
         padding: 1.5rem 1.25rem;
         box-shadow: var(--shadow-float);
         z-index: 80;
@@ -535,8 +537,13 @@
     }
 
     .track-pill[aria-pressed="true"] {
-      background: var(--accent);
-      color: var(--accent-contrast);
+      background: var(--bg-active);
+      color: var(--text-main);
+    }
+
+    .track-pill[aria-pressed="true"]:not(.track-big)::before,
+    .track-big[aria-pressed="true"] .track-name::before {
+      content: "✓ ";
     }
 
     .spectrum-bars {
@@ -819,7 +826,7 @@
       right: 0;
       min-width: 180px;
       background: var(--bg-panel);
-      border: 1px solid var(--hairline);
+      border: 1px solid var(--float-line);
       border-radius: 16px;
       box-shadow: var(--shadow-float);
       padding: 0.375rem;
@@ -946,7 +953,7 @@
         bottom: 0.625rem;
         max-height: 78vh;
         background: var(--bg-panel);
-        border: 1px solid var(--hairline);
+        border: 1px solid var(--float-line);
         border-radius: 24px;
         padding: 1.25rem;
         z-index: 80;
@@ -989,7 +996,7 @@
       background: var(--bg-well);
       font-size: var(--fs-xs);
       font-weight: 700;
-      color: var(--accent-bright);
+      color: var(--text-main);
       display: inline-flex;
       align-items: center;
       gap: 0.3rem;
@@ -1057,7 +1064,7 @@
     }
 
     .prompt-chip:hover {
-      border-color: var(--accent);
+      border-color: var(--control-line);
       color: var(--text-main);
       background: transparent;
     }
@@ -1109,12 +1116,6 @@
       margin-bottom: 0.25rem;
     }
 
-    .ask-thread .md-answer.is-error::before,
-    #testAskThread .md-answer.is-error::before {
-      content: none;
-      display: none;
-    }
-
     .ask-bubble.is-pending {
       color: var(--text-dim);
       animation: ask-pending-pulse 1.5s ease-in-out infinite;
@@ -1130,13 +1131,6 @@
         animation: none;
         opacity: 0.7;
       }
-    }
-
-    .ask-bubble.is-error {
-      background: var(--rose-soft) !important;
-      color: var(--rose) !important;
-      padding: 0.875rem 1rem !important;
-      border-radius: 16px !important;
     }
 
     /* Rich Markdown Prose inside Ask Answers */
@@ -1476,8 +1470,7 @@
     }
 
     .btn-rate:hover {
-      background: var(--accent);
-      color: var(--accent-contrast);
+      background: var(--bg-active);
     }
 
     .framework-section {
@@ -1598,6 +1591,24 @@
       font-weight: 600;
     }
 
+    .studio-alert::before {
+      content: "";
+      display: inline-block;
+      width: 1.15em;
+      height: 1.15em;
+      margin-right: 0.45em;
+      vertical-align: -0.2em;
+      background: currentColor;
+      -webkit-mask: var(--icon) center / contain no-repeat;
+      mask: var(--icon) center / contain no-repeat;
+    }
+
+    .studio-alert.error { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5.5'/%3E%3Cpath d='M12 16.5v.01'/%3E%3C/svg%3E"); }
+    .studio-alert.wait { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E"); }
+    .studio-alert.ok { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M8 12.5l2.5 2.5L16 9.5'/%3E%3C/svg%3E"); }
+
+    .ask-bubble.studio-alert { margin: 0; }
+
     .studio-alert.error {
       display: block;
       background: var(--rose-soft);
@@ -1657,7 +1668,7 @@
       right: 12px;
       height: 64px;
       background: var(--bg-panel);
-      border: 1px solid var(--hairline);
+      border: 1px solid var(--float-line);
       border-radius: 22px;
       padding: 4px 6px;
       box-shadow: var(--shadow-float);
@@ -1738,7 +1749,7 @@
       bottom: calc(84px + env(safe-area-inset-bottom, 0px));
       height: 48px;
       background: var(--bg-panel);
-      border: 1px solid var(--hairline);
+      border: 1px solid var(--float-line);
       border-radius: 16px;
       padding: 0 0.5rem;
       box-shadow: var(--shadow-float);
@@ -1885,7 +1896,7 @@
       max-height: 85dvh;
       margin-inline: auto;
       background: var(--bg-panel);
-      border-top: 1px solid var(--hairline);
+      border-top: 1px solid var(--float-line);
       border-radius: 18px 18px 0 0;
       box-shadow: var(--shadow-float);
       z-index: 90;
@@ -2021,6 +2032,7 @@ a.drawer-nav-item { display: flex; align-items: center; text-decoration: none; c
 .main-tracks { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.625rem; margin-bottom: 1.25rem; }
 .track-big { padding: 0.875rem; border-radius: 14px; text-align: left; min-height: 64px; }
 .track-big[aria-pressed="false"] { background: var(--bg-canvas); color: var(--text-main); }
+.track-big[aria-pressed="true"] { border: 1px solid var(--control-line); }
 .track-name { font-size: var(--fs-md); font-weight: 700; }
 .track-saved { font-size: var(--fs-sm); opacity: 0.85; margin-top: 0.2rem; }
 .main-player { background: var(--bg-canvas); padding: 1.125rem; border-radius: 16px; }
@@ -2400,7 +2412,7 @@ a.drawer-nav-item { display: flex; align-items: center; text-decoration: none; c
     bottom: 0.625rem;
     max-height: 70vh;
     background: var(--bg-panel);
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--float-line);
     border-radius: 24px;
     padding: 1.25rem;
     z-index: 80;
@@ -2631,6 +2643,13 @@ body.in-test .stage-body {
   background: var(--bg-well);
 }
 
+.test-save-indicator.is-failed {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.test-save-indicator.is-failed::before { content: "! "; }
+
 .test-timer-box {
   display: flex;
   align-items: center;
@@ -2709,7 +2728,7 @@ body.in-test .stage-body {
 }
 
 .btn-tool-sm:hover {
-  background: var(--bg-hover);
+  background: var(--bg-active);
 }
 
 #testAutoSubmitError {
@@ -2798,14 +2817,19 @@ body.in-test .stage-body {
 }
 
 .test-option-btn:hover:not([disabled]) {
-  background: var(--bg-hover);
-  border-color: var(--border-hover);
+  background: var(--bg-active);
+  border-color: var(--control-line);
 }
 
 .test-option-btn.is-selected {
   background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent-bright);
+  border-color: var(--control-line);
+}
+
+/* The chosen letter is filled, so the choice does not depend on a colored border. */
+.test-option-btn.is-selected .test-opt-badge {
+  background: var(--text-main);
+  color: var(--bg-canvas);
 }
 
 .test-option-btn.is-correct {
@@ -2946,15 +2970,8 @@ body.in-test .stage-body {
 }
 
 .test-grid-btn:hover {
-  border-color: var(--border-hover);
+  border-color: var(--control-line);
   color: var(--text-main);
-}
-
-.test-grid-btn.is-current {
-  border-color: var(--accent);
-  color: var(--accent-bright);
-  font-weight: 700;
-  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .test-grid-btn.is-answered {
@@ -2970,6 +2987,21 @@ body.in-test .stage-body {
 .test-grid-btn.is-wrong {
   background: var(--rose-soft);
   color: var(--rose);
+}
+
+.test-grid-btn.is-correct::before,
+.legend-mark.is-correct::before { content: "✓"; }
+.test-grid-btn.is-wrong::before,
+.legend-mark.is-wrong::before { content: "✕"; }
+.test-grid-btn.is-correct::before,
+.test-grid-btn.is-wrong::before { font-size: var(--fs-xs); margin-right: 1px; }
+
+/* Filled, not ringed: a ring here looked like the keyboard focus ring. */
+.test-grid-btn.is-current {
+  background: var(--text-main);
+  border-color: var(--text-main);
+  color: var(--bg-canvas);
+  font-weight: 700;
 }
 
 .test-grid-btn.is-flagged::after {
@@ -3008,7 +3040,11 @@ body.in-test .stage-body {
 
 .legend-dot.is-answered { background: var(--accent); }
 .legend-dot.is-flagged { background: var(--amber); }
-.legend-dot.is-current { border: 2px solid var(--accent-bright); }
+.legend-dot.is-current { background: var(--text-main); }
+.legend-mark { font-size: 0; font-weight: 700; }
+.legend-mark::before { font-size: var(--fs-xs); }
+.legend-mark.is-correct { color: var(--mint); }
+.legend-mark.is-wrong { color: var(--rose); }
 
 .test-btn-grid-toggle {
   display: none;
@@ -3030,8 +3066,8 @@ body.in-test .stage-body {
     z-index: 100;
     max-height: 70vh;
     border-radius: 20px 20px 0 0;
-    box-shadow: 0 -8px 30px rgba(0,0,0,0.6);
-    border: 1px solid var(--hairline);
+    box-shadow: var(--shadow-float);
+    border: 1px solid var(--float-line);
   }
   .test-grid-close {
     display: inline-flex;
@@ -3150,7 +3186,6 @@ body.in-test .stage-body {
 .filter-tab.active {
   background: var(--bg-panel);
   color: var(--text-main);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
 .result-items-list {
@@ -3573,4 +3608,15 @@ a.test-package-row:focus-visible {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
   textarea, select, .ask-dock-textarea, .auth-input, .test-voice-select,
   #testAskDialog .ask-dock-textarea, .ask-lesson-pick, .fc-pkg select, #upJsonText { font-size: 16px; }
+
+  /* Small-looking controls still get a 44px tap target. */
+  .btn-tool-sm, .test-voice-select, .filter-tab, .prompt-chip, .submit-num-link,
+  .capsule-skip-btn, .capsule-play-btn { min-height: 44px; }
+  .btn-tool-sm, .submit-num-link, .capsule-skip-btn { min-width: 44px; }
+  .test-grid-btn, .submit-num-link { height: 44px; }
+  /* The lesson bar is 44px tall, so its 40px buttons extend their hit area instead of growing. */
+  .lesson-top-bar .btn-studio-secondary, .lesson-top-bar .btn-studio-primary { position: relative; }
+  .lesson-top-bar .btn-studio-secondary::after, .lesson-top-bar .btn-studio-primary::after {
+    content: ""; position: absolute; inset: -2px 0;
+  }
 }
