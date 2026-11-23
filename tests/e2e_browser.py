@@ -128,8 +128,10 @@ try:
         pg.wait_for_url(BASE + "/")
         pg.wait_for_selector("#screen-home.active")
         n_lessons = len(json.loads((PACKAGE / "package.json").read_text(encoding="utf-8-sig"))["lessons"])
-        check("every lesson listed", pg.locator("#lessonList .stream-row").count() == n_lessons)
         check("no due cards before starting", "Không có thẻ" in pg.inner_text(".dock-foot"), pg.inner_text(".dock-foot"))
+        pg.click(".stage-tab[data-nav=lessons]")
+        pg.wait_for_selector("#lessonList .stream-row")
+        check("every lesson listed", pg.locator("#lessonList .stream-row").count() == n_lessons)
 
         pg.locator(f'#lessonList [data-lesson="{L2_KEY}"]').click()
         pg.wait_for_selector("#screen-review.active")

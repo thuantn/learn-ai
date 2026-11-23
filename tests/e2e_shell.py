@@ -134,12 +134,12 @@ def run(br, base, temp, sample, hai, chin):
     a = new_page(br, errs)
     login_first(a, base, "an@example.com", temp["an@example.com"])
     state = a.context.storage_state()
-    a.wait_for_selector("#lessonList .stream-row")
+    a.wait_for_selector("#homeNext .stream-row")
 
     # Skip link, titles, focus after moving between screens.
     fresh = new_page(br, errs, state=state)
     fresh.goto(base + "/#home")
-    fresh.wait_for_selector("#lessonList .stream-row")
+    fresh.wait_for_selector("#homeNext .stream-row")
     fresh.keyboard.press("Tab")
     check("phím Tab đầu tiên tới link bỏ qua", fresh.evaluate("document.activeElement.classList.contains('skip-link')"), fresh.evaluate("document.activeElement.className"))
     if fresh.locator(".skip-link").count():
@@ -167,10 +167,13 @@ def run(br, base, temp, sample, hai, chin):
 
     # Top bar at the widths where it was clipped, inside a lesson.
     a.click(".stage-tab[data-nav=home]")
-    a.wait_for_selector("#lessonList .stream-row")
+    a.wait_for_selector("#homeNext .stream-row")
     # This server has no AI key, which hides Ask everywhere; take that away so the layout rules are what is measured.
     a.evaluate("document.body.classList.remove('no-ask')")
     check("ngoài bài vẫn có nút Hỏi ở thanh trên", a.evaluate(NAV).get("ask") is True, a.evaluate(NAV))
+    a.click(".stage-tab[data-nav=lessons]")
+    a.wait_for_selector("#screen-lessons.active")
+    check("tiêu đề tab Bài học", a.title() == "Bài học | Học AI", a.title())
     a.locator("#lessonList .stream-row", has_text="Bài Một").locator("[data-act=start]").click()
     a.wait_for_selector("#screen-review.active")
     a.evaluate("document.body.classList.remove('no-ask')")
@@ -233,7 +236,7 @@ def run(br, base, temp, sample, hai, chin):
     a.evaluate("() => { audio.removeAttribute('src'); }")
 
     # Second lesson: finish the steps without reading it. Not done yet, and the screen says what is left.
-    a.goto(base + "/#home")
+    a.goto(base + "/#lessons")
     a.wait_for_selector("#lessonList .stream-row")
     a.locator("#lessonList .stream-row", has_text="Bài Hai").locator("[data-act=start]").click()
     a.wait_for_selector("#screen-review.active")
@@ -245,11 +248,11 @@ def run(br, base, temp, sample, hai, chin):
     check("nút chính là đọc bài", main_btn.count() == 1 and main_btn.get_attribute("data-article") is not None, main_btn.count())
     api_lesson = lambda key: next(x for x in a.evaluate("async () => (await (await fetch('/api/lessons')).json()).lessons") if x["id"] == key)
     check("server vẫn ghi đang học", api_lesson(hai)["status"] == "in_progress", api_lesson(hai)["status"])
-    a.goto(base + "/#home")
+    a.goto(base + "/#lessons")
     a.wait_for_selector("#lessonList .stream-row")
     row_text = a.locator("#lessonList .stream-row", has_text="Bài Hai").inner_text()
     check("danh sách ghi rõ còn đọc bài", "chưa đọc bài" in row_text, row_text)
-    check("không còn chữ thẻ đến hạn", "đến hạn" not in a.inner_text("#screen-home"), a.inner_text("#screen-home"))
+    check("không còn chữ thẻ đến hạn", "đến hạn" not in a.inner_text("#screen-lessons"), a.inner_text("#screen-lessons"))
 
     # Reading it completes the lesson, and coming back from there lands on the finish screen.
     a.locator("#lessonList .stream-row", has_text="Bài Hai").locator("[data-act=start]").click()
@@ -267,8 +270,9 @@ def run(br, base, temp, sample, hai, chin):
     check("bài cuối thì không có nút bài tiếp theo", a.locator("#screen-finish [data-act=start]:visible").count() == 0)
 
     # The lesson before it offers the next one once read. Bài Một was opened above.
-    a.goto(base + "/#home")
+    a.goto(base + "/#lessons")
     a.wait_for_selector("#lessonList .stream-row")
+    a.click("#lessonFilter [data-filter=all]")
     a.locator("#lessonList .stream-row", has_text="Bài Một").locator("[data-act=start]").click()
     a.wait_for_selector("#screen-review.active")
     a.evaluate("() => finish()")
@@ -313,18 +317,58 @@ def run(br, base, temp, sample, hai, chin):
     check("ghi chú mới không bị bản cũ lỗi đè", saved and saved.get("v") == 2, saved)
     pg.context.close()
 
-    # Home and Flashcard keep each package apart. Gói Chín Bài has 9 lessons, so only it gets "Xem tất cả".
+    # The Bài học page keeps each package apart and shows every lesson: no "Xem tất cả" cut any more.
     vo = sample.split(".")[0]
-    a.goto(base + "/#home")
+    prefs = lambda: a.evaluate("async () => (await (await fetch('/api/prefs')).json())")
+    a.goto(base + "/#lessons")
     a.wait_for_selector("#lessonList .stream-row")
-    groups = a.evaluate("[...document.querySelectorAll('#lessonList .lesson-group')].map(g => [g.dataset.package, g.querySelector('.test-group-title').textContent, [...g.querySelectorAll('.lesson-row')].filter(r => r.offsetParent).length, g.querySelectorAll('.lesson-row').length])")
-    check("trang đầu chia bài theo package, có tên package", sorted(groups) == sorted([[vo, "Gói Vỏ App", 2, 2], [chin, "Gói Chín Bài", 8, 9]]), groups)
-    more = a.locator("#lessonList .lesson-expand-btn")
-    check("nút Xem tất cả chỉ ở package quá 8 bài, đếm bài của package đó",
-          more.count() == 1 and more.inner_text() == "Xem tất cả 9 bài" and a.locator(f'.lesson-group[data-package="{chin}"] .lesson-expand-btn').count() == 1, more.all_inner_texts())
-    a.locator(".lesson-group", has=a.locator(f'[data-lesson="{chin}.c9"]')).locator(".lesson-expand-btn").click()
-    check("bấm Xem tất cả thì hiện đủ 9 bài", a.locator(f'.lesson-group[data-package="{chin}"] .lesson-row:visible').count() == 9)
-    a.locator(f'[data-lesson="{chin}.c9"]').click()
+    rows_of = lambda: a.evaluate("[...document.querySelectorAll('#lessonList .lesson-group')].map(g => [g.dataset.package, g.querySelector('.test-group-title').textContent, [...g.querySelectorAll('.lesson-row')].filter(r => r.offsetParent).length, g.querySelectorAll('.lesson-row').length])")
+    check("Tất cả vẫn được nhớ sau khi tải lại", a.get_attribute("#lessonFilter [data-filter=all]", "aria-pressed") == "true" and prefs()["filter"] == "all", prefs())
+    check("trang Bài học chia bài theo package, đủ mọi bài", sorted(rows_of()) == sorted([[vo, "Gói Vỏ App", 2, 2], [chin, "Gói Chín Bài", 9, 9]]), rows_of())
+    check("không còn nút Xem tất cả", a.locator("#lessonList .lesson-expand-btn").count() == 0)
+    progress = a.inner_text(f'.lesson-group[data-package="{vo}"] .lesson-group-progress')
+    check("tên package kèm số bài đã xong", progress == "2/2 bài đã xong", progress)
+    counts = [a.inner_text(f"#lessonFilter [data-filter-count={k}]") for k in ("todo", "done", "all")]
+    check("bộ lọc có số bài", counts == ["9", "2", "11"], counts)
+
+    # Chưa xong hides finished lessons and says so; Đã xong shows only them.
+    a.click("#lessonFilter [data-filter=todo]")
+    check("Chưa xong ẩn bài đã xong", a.locator(f'#lessonList [data-lesson="{hai}"]').count() == 0 and a.locator(f'#lessonList [data-lesson="{sample}"]').count() == 1)
+    note = a.inner_text(f'.lesson-group[data-package="{vo}"] .lesson-group-note')
+    check("ghi rõ số bài đang ẩn", "1 bài đã xong đang ẩn" in note, note)
+    a.click("#lessonFilter [data-filter=done]")
+    check("Đã xong chỉ còn bài đã xong, bỏ package chưa có bài xong", rows_of() == [[vo, "Gói Vỏ App", 2, 2]], rows_of())
+    a.click("#lessonFilter [data-filter=todo]")
+    a.locator(f'.lesson-group[data-package="{vo}"] .lesson-group-note button').click()
+    check("Hiện tất cả chuyển sang Tất cả, focus sang nút lọc", a.get_attribute("#lessonFilter [data-filter=all]", "aria-pressed") == "true"
+          and a.evaluate("document.activeElement.dataset.filter") == "all")
+    a.click("#lessonFilter [data-filter=todo]")
+
+    # A package folds from its name, and that is kept on the account too.
+    toggle = a.locator(f'.lesson-group[data-package="{chin}"] .lesson-group-toggle')
+    toggle.click()
+    check("bấm tên package thì gập lại", toggle.get_attribute("aria-expanded") == "false" and a.locator(f'.lesson-group[data-package="{chin}"] .lesson-row:visible').count() == 0
+          and a.evaluate("document.activeElement.classList.contains('lesson-group-toggle')"))
+    poll(lambda: prefs()["collapsed"] == [chin])
+    a.reload()
+    a.wait_for_selector("#lessonList .lesson-group")
+    check("tải lại vẫn gập và vẫn lọc Chưa xong", a.get_attribute(f'.lesson-group[data-package="{chin}"] .lesson-group-toggle', "aria-expanded") == "false"
+          and a.get_attribute("#lessonFilter [data-filter=todo]", "aria-pressed") == "true", prefs())
+    a.click(f'.lesson-group[data-package="{chin}"] .lesson-group-toggle')
+    check("bấm lần nữa thì mở ra", a.locator(f'.lesson-group[data-package="{chin}"] .lesson-row:visible').count() == 9)
+    poll(lambda: prefs()["collapsed"] == [])
+
+    # The home page keeps only what comes next, and points to the full list.
+    a.goto(base + "/#home")
+    a.wait_for_selector("#homeNext .stream-row")
+    nxt = a.evaluate("[...document.querySelectorAll('#homeNext [data-lesson]')].map(b => b.dataset.lesson)")
+    check("trang đầu chỉ còn tối đa 3 bài tiếp theo, không có bài đã xong", 0 < len(nxt) <= 3 and hai not in nxt, nxt)
+    check("trang đầu không còn cả danh sách", a.locator("#screen-home #lessonList").count() == 0)
+    check("trang đầu có link xem tất cả bài học", a.inner_text("#homeAllLink") == "Xem tất cả 11 bài học")
+    a.click("#homeAllLink")
+    a.wait_for_selector("#screen-lessons.active")
+    check("link đưa tới trang Bài học", a.evaluate("location.hash") == "#lessons" and a.get_attribute(".stage-tab[data-nav=lessons]", "aria-current") == "page")
+    a.locator(f'#lessonList [data-lesson="{chin}.c9"]').click()
     a.wait_for_selector("#screen-review.active")
     a.evaluate("go('flashcard')")
     a.wait_for_selector("#fcCard:not([hidden])")

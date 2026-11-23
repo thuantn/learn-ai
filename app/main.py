@@ -339,6 +339,46 @@ async def me(request: Request):
     return {"id": request.state.user, "admin": await asyncio.to_thread(admin.is_admin, request.state.user)}
 
 
+# How the lesson list is shown, kept per account so phone and computer agree and logout keeps it.
+PREF_FILTERS = ("all", "todo", "done")
+PREF_ID = re.compile(r"^[\w-]{1,64}$")
+
+
+def clean_prefs(data):
+    """Returns the prefs with only known keys and values, or None when anything is off."""
+    if not isinstance(data, dict) or set(data) - {"filter", "collapsed"}:
+        return None
+    out = {"filter": data.get("filter", "todo"), "collapsed": data.get("collapsed", [])}
+    if out["filter"] not in PREF_FILTERS:
+        return None
+    ids = out["collapsed"]
+    if not isinstance(ids, list) or len(ids) > 500 or not all(isinstance(x, str) and PREF_ID.match(x) for x in ids):
+        return None
+    out["collapsed"] = sorted(set(ids))
+    return out
+
+
+@app.get("/api/prefs")
+async def get_prefs(request: Request):
+    with db.connect() as c:
+        row = c.execute("SELECT body FROM user_pref WHERE user=?", (request.state.user,)).fetchone()
+    try:
+        stored = clean_prefs(json.loads(row["body"])) if row else None
+    except ValueError:  # a damaged row falls back to the defaults
+        stored = None
+    return stored or clean_prefs({})
+
+
+@app.put("/api/prefs")
+async def put_prefs(request: Request):
+    prefs = clean_prefs(await read_json(request, 64 * 1024))
+    if prefs is None:
+        return bad(400, "input", "Dữ liệu không hợp lệ.")
+    with db.connect() as c:
+        c.execute("INSERT OR REPLACE INTO user_pref VALUES(?,?,?)", (request.state.user, json.dumps(prefs), time.time()))
+    return prefs
+
+
 # ---------- Lessons ----------
 
 @app.get("/api/lessons")

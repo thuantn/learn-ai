@@ -2,9 +2,9 @@
 const $ = id => document.getElementById(id);
 const $$ = sel => [...document.querySelectorAll(sel)];
 const SPEEDS = [1, 1.25, 1.5, 2, 0.75];
-const SCREENS = ["home", "library", "review", "listen", "flashcard", "finish", "tests", "test-detail", "test-run", "test-result"];
-const SCREEN_TITLES = { home: "Trang đầu", library: "Thư viện", tests: "Bộ đề", "test-detail": "Bộ đề", "test-run": "Làm bài", "test-result": "Kết quả", review: "Ôn lại", listen: "Nghe", flashcard: "Flashcard", finish: "Kết thúc buổi học" };
-const state = { me: null, lessons: [], lesson: null, track: "long", fcPick: null, nextDue: {}, cards: [], idx: 0, reviewed: 0, tests: [] };
+const SCREENS = ["home", "lessons", "library", "review", "listen", "flashcard", "finish", "tests", "test-detail", "test-run", "test-result"];
+const SCREEN_TITLES = { home: "Trang đầu", lessons: "Bài học", library: "Thư viện", tests: "Bộ đề", "test-detail": "Bộ đề", "test-run": "Làm bài", "test-result": "Kết quả", review: "Ôn lại", listen: "Nghe", flashcard: "Flashcard", finish: "Kết thúc buổi học" };
+const state = { me: null, lessons: [], lesson: null, track: "long", fcPick: null, nextDue: {}, cards: [], idx: 0, reviewed: 0, tests: [], prefs: { filter: "todo", collapsed: [] } };
 function currentTrack() { return state.lesson && state.lesson.tracks[state.track]; }
 const audio = new Audio();
 audio.preload = "none";
@@ -153,10 +153,10 @@ function renderLesson() {
   document.body.classList.toggle("no-lesson", !l);
   document.body.classList.toggle("no-audio", !hasAudio());
   renderFlow();
+  renderHomeNext();
   document.querySelector('[data-nav="flashcard"] span').textContent = `${hasAudio() ? 3 : 2}. Flashcard`;
   $("homeCta").hidden = !l;
   $("homeEmptyCta").hidden = !!l || hasTests;
-  $("homeListHeading").hidden = !l;
   $$("[data-next-listen]").forEach(b => { b.textContent = hasAudio() ? "Tiếp tục: Nghe podcast" : "Tiếp tục: Flashcard"; });
   if (!l) {
     if (hasTests) {
@@ -278,8 +278,105 @@ function renderHomeTests() {
   });
 }
 
-// Lessons come ordered by package; each package is a group with its title and its own "Xem tất cả" past 8 lessons.
+// One lesson row, used on the home page and on the Bài học page.
+function lessonRow(l) {
+  const row = document.createElement("div");
+  row.className = "stream-row lesson-row";
+  if (state.lesson && l.id === state.lesson.id) row.classList.add("is-current");
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "lesson-row-main";
+  btn.dataset.act = "start";
+  btn.dataset.lesson = l.id;
+
+  const idx = document.createElement("span");
+  idx.className = "stream-index lesson-row-idx";
+  idx.textContent = String(l.order).padStart(2, "0");
+
+  const text = document.createElement("div");
+  text.className = "lesson-row-text";
+
+  const title = document.createElement("span");
+  title.className = "lesson-row-title";
+  title.textContent = `${lessonNo(l)}: ${l.title}`;
+
+  const status = document.createElement("span");
+  status.className = "lesson-row-status" + (l.status === "done" ? " is-done" : "");
+  status.textContent = l.mine ? statusText(l) : `${statusText(l)}. Tác giả: ${l.author}`;
+
+  text.append(title, status);
+
+  const chev = document.createElement("span");
+  chev.className = "lesson-row-chevron";
+  chev.setAttribute("aria-hidden", "true");
+  chev.textContent = "›";
+
+  btn.append(idx, text, chev);
+
+  const read = document.createElement("a");
+  read.className = "lesson-row-read";
+  read.href = l.page;
+  read.textContent = "Đọc bài";
+
+  row.append(btn, read);
+  return row;
+}
+
+const isDone = l => l.status === "done";
+
+// The home page shows only what comes next: unfinished lessons of the current package (those after the current one
+// first, then any skipped before it), then other packages.
+function renderHomeNext() {
+  const box = $("homeNext");
+  box.textContent = "";
+  const cur = state.lesson;
+  const rest = state.lessons.filter(l => l !== cur && !isDone(l));
+  const same = l => cur && l.package_id === cur.package_id;
+  const after = l => same(l) && l.order > cur.order;
+  const next = [...rest.filter(after), ...rest.filter(l => same(l) && !after(l)), ...rest.filter(l => !same(l))].slice(0, 3);
+  next.forEach(l => box.append(lessonRow(l)));
+  $("homeListHeading").hidden = next.length === 0;
+  $("homeAllLink").hidden = state.lessons.length === 0;
+  $("homeAllLink").textContent = `Xem tất cả ${state.lessons.length} bài học`;
+}
+
+// The filter and the folded packages are kept on the account. A failed save only loses the choice, not the view.
+// Saves go one after another, so an older one never lands after a newer one.
+let prefsSaving = Promise.resolve();
+function savePrefs() {
+  state.prefsTouched = true;
+  // Packages that are gone (deleted, left) drop out, so the list never grows past what the server accepts.
+  const have = new Set(state.lessons.map(l => l.package_id));
+  if (have.size) state.prefs.collapsed = state.prefs.collapsed.filter(id => have.has(id));
+  const body = { filter: state.prefs.filter, collapsed: [...state.prefs.collapsed] };
+  prefsSaving = prefsSaving.then(() => api("/api/prefs", send("PUT", body))).catch(() => {});
+}
+
+function setFilter(f, focusFilter) {
+  state.prefs.filter = f;
+  savePrefs();
+  renderList();
+  // "Hiện tất cả" lives in the list that was just redrawn: keep the keyboard on the filter that is now on.
+  if (focusFilter) document.querySelector(`#lessonFilter [data-filter="${f}"]`).focus();
+}
+
+function toggleGroup(pkgId) {
+  const c = new Set(state.prefs.collapsed);
+  if (c.has(pkgId)) c.delete(pkgId); else c.add(pkgId);
+  state.prefs.collapsed = [...c];
+  savePrefs();
+  renderList();
+  const head = document.querySelector(`.lesson-group[data-package="${CSS.escape(pkgId)}"] .lesson-group-toggle`);
+  if (head) head.focus();
+}
+
+// The Bài học page: lessons grouped by package. "Chưa xong" (the default) hides finished lessons, except the current one.
 function renderList() {
+  const f = state.prefs.filter;
+  const counts = { todo: state.lessons.filter(l => !isDone(l)).length, done: state.lessons.filter(isDone).length, all: state.lessons.length };
+  $$("#lessonFilter [data-filter]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.filter === f)));
+  $$("[data-filter-count]").forEach(s => { s.textContent = counts[s.dataset.filterCount]; });
   const box = $("lessonList");
   box.textContent = "";
   const groups = new Map();
@@ -287,76 +384,64 @@ function renderList() {
     if (!groups.has(l.package_id)) groups.set(l.package_id, []);
     groups.get(l.package_id).push(l);
   });
+  let shown = 0;
   groups.forEach((lessons, pkgId) => {
+    const isCurrent = l => state.lesson && l.id === state.lesson.id;
+    const visible = lessons.filter(l => f === "all" || (f === "done" ? isDone(l) : !isDone(l) || isCurrent(l)));
+    if (f === "done" && visible.length === 0) return;
+    const collapsed = state.prefs.collapsed.includes(pkgId);
+    const done = lessons.filter(isDone).length;
+
     const group = document.createElement("div");
-    group.className = "lesson-group";
+    group.className = "lesson-group" + (collapsed ? " is-collapsed" : "");
     group.dataset.package = pkgId;
-    const heading = document.createElement("h3");
-    heading.className = "test-group-title";
-    heading.textContent = lessons[0].package_title || "Bài học";
+
+    const heading = document.createElement("h2");
+    heading.className = "lesson-group-head";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "lesson-group-toggle";
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    toggle.setAttribute("aria-controls", "lg-" + pkgId);
+    const name = document.createElement("span");
+    name.className = "test-group-title";
+    name.textContent = lessons[0].package_title || "Bài học";
+    const progress = document.createElement("span");
+    progress.className = "lesson-group-progress";
+    progress.textContent = `${done}/${lessons.length} bài đã xong`;
+    const chev = document.createElement("span");
+    chev.className = "lesson-group-chevron";
+    chev.setAttribute("aria-hidden", "true");
+    toggle.append(name, progress, chev);
+    toggle.addEventListener("click", () => toggleGroup(pkgId));
+    heading.append(toggle);
     group.append(heading);
-    const total = lessons.length;
-    lessons.forEach((l, i) => {
-      const row = document.createElement("div");
-      row.className = "stream-row lesson-row";
-      const isCurrent = state.lesson && l.id === state.lesson.id;
-      if (isCurrent) row.classList.add("is-current");
-      if (total > 8 && i >= 8 && !isCurrent) {
-        row.hidden = true;
-      }
 
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "lesson-row-main";
-      btn.dataset.act = "start";
-      btn.dataset.lesson = l.id;
-
-      const idx = document.createElement("span");
-      idx.className = "stream-index lesson-row-idx";
-      idx.textContent = String(l.order).padStart(2, "0");
-
-      const text = document.createElement("div");
-      text.className = "lesson-row-text";
-
-      const title = document.createElement("span");
-      title.className = "lesson-row-title";
-      title.textContent = `${lessonNo(l)}: ${l.title}`;
-
-      const status = document.createElement("span");
-      status.className = "lesson-row-status" + (l.status === "done" ? " is-done" : "");
-      status.textContent = l.mine ? statusText(l) : `${statusText(l)}. Tác giả: ${l.author}`;
-
-      text.append(title, status);
-
-      const chev = document.createElement("span");
-      chev.className = "lesson-row-chevron";
-      chev.setAttribute("aria-hidden", "true");
-      chev.textContent = "›";
-
-      btn.append(idx, text, chev);
-
-      const read = document.createElement("a");
-      read.className = "lesson-row-read";
-      read.href = l.page;
-      read.textContent = "Đọc bài";
-
-      row.append(btn, read);
-      group.append(row);
-    });
-
-    if (total > 8) {
-      const moreBtn = document.createElement("button");
-      moreBtn.type = "button";
-      moreBtn.className = "btn-link-quiet lesson-expand-btn";
-      moreBtn.textContent = `Xem tất cả ${total} bài`;
-      moreBtn.addEventListener("click", () => {
-        group.querySelectorAll(".lesson-row[hidden]").forEach(r => r.removeAttribute("hidden"));
-        moreBtn.remove();
-      });
-      group.append(moreBtn);
+    const rows = document.createElement("div");
+    rows.className = "lesson-group-rows";
+    rows.id = "lg-" + pkgId;
+    rows.hidden = collapsed;
+    visible.forEach(l => rows.append(lessonRow(l)));
+    const hidden = lessons.length - visible.length;
+    if (hidden > 0) {
+      const note = document.createElement("p");
+      note.className = "lesson-group-note";
+      note.append(f === "done" ? `${hidden} bài chưa xong đang ẩn. ` : `${hidden} bài đã xong đang ẩn. `);
+      const all = document.createElement("button");
+      all.type = "button";
+      all.className = "btn-link-quiet";
+      all.textContent = "Hiện tất cả";
+      all.addEventListener("click", () => setFilter("all", true));
+      note.append(all);
+      rows.append(note);
     }
+    group.append(rows);
     box.append(group);
+    shown += visible.length;
   });
+  $("lessonsEmpty").hidden = state.lessons.length > 0;
+  $("lessonsNone").hidden = !(state.lessons.length > 0 && f === "done" && shown === 0);
+  $("lessonsNone").textContent = "Chưa có bài nào học xong.";
 
   renderHomeTests();
   renderDue();
@@ -808,6 +893,7 @@ async function logout(everywhere) {
 const ACTIONS = {
   go: el => go(el.dataset.to),
   start: el => startLesson(el.dataset.lesson),
+  "lesson-filter": el => setFilter(el.dataset.filter),
   finish: finish,
   play: togglePlay,
   seek: el => seekBy(+el.dataset.by),
@@ -1029,6 +1115,8 @@ document.addEventListener("DOMContentLoaded", () => (async function init() {
   renderSpeed();
   renderThemeLabel();
   joinFromLink();
+  const prefs = await api("/api/prefs").catch(() => null);
+  if (prefs && !state.prefsTouched) state.prefs = prefs;  // a click made while this loaded wins
   await refresh();
   let returnData = null;
   try {

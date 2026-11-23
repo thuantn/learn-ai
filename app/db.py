@@ -109,6 +109,9 @@ CREATE TABLE test_pool(
     """
 CREATE TABLE lesson_step(user TEXT NOT NULL REFERENCES users(name) ON DELETE CASCADE, lesson TEXT NOT NULL, read_at REAL, flow_at REAL, PRIMARY KEY(user, lesson));
 """,
+    """
+CREATE TABLE user_pref(user TEXT PRIMARY KEY REFERENCES users(name) ON DELETE CASCADE, body TEXT NOT NULL, updated_at REAL NOT NULL);
+""",
 ]
 
 log = logging.getLogger("learn")

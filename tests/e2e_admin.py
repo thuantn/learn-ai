@@ -271,7 +271,7 @@ def run(br, base, temp, work):
     check("follow-up carries the earlier turn", [m["role"] for m in sent] == ["system", "user", "assistant", "user"] and sent[1]["content"] == "Vì sao?", [m["role"] for m in sent])
 
     # The app page shows the same thread, and what is asked there shows on the lesson page.
-    binh.goto(f"{base}/#home", wait_until="networkidle")
+    binh.goto(f"{base}/#lessons", wait_until="networkidle")
     binh.locator("#lessonList .stream-row [data-act=start]").first.click()
     binh.wait_for_selector("#screen-review.active")
     binh.wait_for_selector("#askThread .is-question", state="attached")
@@ -309,7 +309,7 @@ def run(br, base, temp, work):
     check("question just asked visible near top of scroller", pos["qNearTop"], pos)
     # The dock is a grid column in a lesson at 1280 px: a chip must not open the backdrop over it.
     check("no backdrop over the docked Ask column", not binh.locator("#askBackdrop").is_visible())
-    binh.evaluate("go('home')")
+    binh.evaluate("go('lessons')")
     binh.locator("#lessonList .stream-row [data-act=start]").first.click()
     binh.wait_for_selector("#screen-review.active")
     check("used suggestion does not come back after leaving the lesson", chip_text not in binh.locator("#askChips").inner_text())

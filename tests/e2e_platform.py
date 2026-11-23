@@ -165,7 +165,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     check("new account sees guidance", a.locator("#homeEmptyCta").is_visible() and "Chưa có" in a.locator("#home-title").inner_text())
     check("no start button yet", not a.locator("#homeCta").is_visible())
     top_tabs = [t.strip() for t in a.locator(".stage-nav .stage-tab").all_inner_texts()]
-    check("no lesson tabs yet", top_tabs == ["Trang đầu", "Thư viện", "Bộ đề"] and not a.locator("#navDrawer [data-nav=review]").is_visible() and not a.locator("#navDrawer [data-article]").is_visible())
+    check("no lesson tabs yet", top_tabs == ["Trang đầu", "Bài học", "Bộ đề", "Thư viện"] and not a.locator("#navDrawer [data-nav=review]").is_visible() and not a.locator("#navDrawer [data-article]").is_visible())
     a.screenshot(path=str(SHOTS / "empty.png"))
     for screen in ("review", "listen", "flashcard"):
         a.goto(f"{base}/#{screen}")
@@ -213,9 +213,9 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.wait_for_selector("#libMine .stream-row")
     check("package appears in library", "Bài <img" in a.locator("#libMine").inner_text())
     a.screenshot(path=str(SHOTS / "library.png"))
-    a.goto(base + "/#home")
+    a.goto(base + "/#lessons")
     a.wait_for_selector("#lessonList .stream-row")
-    check("package appears on home", a.locator("#lessonList .stream-row").count() == 1)
+    check("package appears on the Bài học page", a.locator("#lessonList .stream-row").count() == 1)
     check("package title did not run as HTML", a.evaluate("window.__xss") is None)
     check("no Đọc bài đầy đủ inside #lessonList", a.locator("#lessonList").get_by_text("Đọc bài đầy đủ").count() == 0)
     row_height = a.locator("#lessonList .stream-row").first.bounding_box()["height"]
@@ -247,7 +247,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     v2_version = a.evaluate("async () => (await (await fetch('/api/packages')).json()).mine[0].version")  # newest update first
     check("after commit the package has the new version", v2_version == 2, v2_version)
     a.goto(base + "/#home")
-    a.wait_for_selector("#lessonList .stream-row")
+    a.wait_for_selector("#homeAllLink:not([hidden])")
 
     # No audio: the session has no Listen step, and no Ask box without approval.
     check("no Ask without approval", not a.locator("#askDock").is_visible() and not a.locator(".capsule-ask-btn").is_visible() and not a.locator(".topbar-ask-btn").is_visible())
@@ -409,7 +409,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.goto(f"{base}/#home")
     a.wait_for_selector("#screen-home.active")
     has_ask = a.locator(".capsule-ask-btn").is_visible()
-    want_tabs = ["Trang đầu", "Thư viện", "Bộ đề", "Hỏi", "Menu"] if has_ask else ["Trang đầu", "Thư viện", "Bộ đề", "Menu"]
+    want_tabs = ["Trang đầu", "Bài học", "Bộ đề", "Thư viện", "Hỏi", "Menu"] if has_ask else ["Trang đầu", "Bài học", "Bộ đề", "Thư viện", "Menu"]
     tab_items = [e.inner_text().strip() for e in a.locator(".mobile-floating-capsule > *").all() if e.is_visible()]
     check("tab bar shows exact items at 390px", tab_items == want_tabs, f"items={tab_items}, want={want_tabs}")
     a.locator(".mobile-floating-capsule [data-nav=library]").click()
@@ -419,7 +419,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     # Reading on a phone: the bars leave room for the content, and come back when scrolling up.
     a.set_viewport_size({"width": 390, "height": 240})
     a.goto(f"{base}/#home")
-    a.wait_for_selector("#lessonList .stream-row")
+    a.wait_for_selector("#homeAllLink:not([hidden])")
     a.wait_for_timeout(300)
     tab_top = lambda: a.evaluate("document.querySelector('.mobile-floating-capsule').getBoundingClientRect().top")
     check("tab bar is on screen before scrolling", tab_top() < 240, tab_top())

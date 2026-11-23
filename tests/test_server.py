@@ -225,6 +225,26 @@ def test_logout_all_ends_only_own_sessions(ctx, capsys):
         assert b.get("/api/me").status_code == 200
 
 
+def test_prefs_are_per_user_and_checked(ctx, capsys):
+    main, cli, tmp = ctx
+    a = ready_user(main, cli, capsys)
+    b = ready_user(main, cli, capsys, name="binh")
+    with a, b:
+        assert a.get("/api/prefs").json() == {"filter": "todo", "collapsed": []}
+        r = a.put("/api/prefs", json={"filter": "done", "collapsed": ["p1", "p1", "p2"]})
+        assert r.status_code == 200 and r.json() == {"filter": "done", "collapsed": ["p1", "p2"]}
+        assert a.get("/api/prefs").json()["filter"] == "done"
+        assert b.get("/api/prefs").json()["filter"] == "todo"
+        for bad_body in ({"filter": "x"}, {"other": 1}, {"collapsed": "p1"}, {"collapsed": ["../x"]}, {"collapsed": ["p"] * 501}, []):
+            assert a.put("/api/prefs", json=bad_body).status_code == 400, bad_body
+        assert a.get("/api/prefs").json()["filter"] == "done"
+        db = sqlite3.connect(tmp / "data" / "learn.db")
+        db.execute("UPDATE user_pref SET body='not json'")
+        db.commit()
+        db.close()
+        assert a.get("/api/prefs").json() == {"filter": "todo", "collapsed": []}
+
+
 def test_session_expiry(ctx, capsys):
     main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
