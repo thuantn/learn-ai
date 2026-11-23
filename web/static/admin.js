@@ -270,7 +270,9 @@ async function load() {
   if (!me) me = await api("/api/me");
   const d = await api("/api/admin/overview");
   const counts = { pending: d.pending.length, users: d.users.length, abuse: d.abuse.length, packages: d.packages.length };
-  document.querySelectorAll("[data-count]").forEach(s => { s.textContent = counts[s.dataset.count] ? `(${counts[s.dataset.count]})` : ""; });
+  document.querySelectorAll("[data-count]").forEach(s => { s.textContent = counts[s.dataset.count] || ""; });
+  // Work waiting for the admin stands out on its tab.
+  ["pending", "abuse"].forEach(k => $("tab-" + k).classList.toggle("has-work", counts[k] > 0));
   fill("pendingList", "pendingEmpty", d.pending, p => row(p.title, [pills([
     p.owner,
     p.lessons ? `${p.lessons} bài` : null,
@@ -328,6 +330,42 @@ async function load() {
     pills([LOG_ACTOR[x.actor] || x.actor, when(x.at)]),
     el("p", "fb-body", [x.target, LOG_DETAIL[x.detail] || x.detail].filter(Boolean).join(" · ")),
   ]));
+  return counts;
+}
+
+// One tab per section. The open tab is kept in the URL (#users, #log...) so a reload or a shared link opens it.
+const TABS = () => [...document.querySelectorAll(".admin-tab")];
+
+function showTab(name, focus) {
+  TABS().forEach(t => {
+    const on = t.dataset.tab === name;
+    t.setAttribute("aria-selected", String(on));
+    t.tabIndex = on ? 0 : -1;
+    $("panel-" + t.dataset.tab).hidden = !on;
+    if (on && focus) t.focus();
+    // On a phone the tab bar scrolls sideways: keep the open tab in view.
+    if (on) t.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
+  if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+}
+
+function tabFromHash() {
+  const name = location.hash.slice(1);
+  return TABS().some(t => t.dataset.tab === name) ? name : "";
+}
+
+function initTabs() {
+  const tabs = TABS();
+  tabs.forEach((t, i) => {
+    t.addEventListener("click", () => showTab(t.dataset.tab));
+    t.addEventListener("keydown", e => {
+      const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+      if (to === undefined) return;
+      e.preventDefault();
+      showTab(tabs[(to + tabs.length) % tabs.length].dataset.tab, true);
+    });
+  });
+  window.addEventListener("hashchange", () => { const n = tabFromHash(); if (n) showTab(n); });
 }
 
 // The review lists everything the AI will read. Each lesson or test folds, and starts open.
@@ -536,5 +574,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (credCurrent) { await copyText(credCurrent.invite); copied("credCopyInvite", "Chép lời mời"); }
   }));
 
-  load().catch(showError);
+  initTabs();
+  // Without a tab in the URL, open where work is waiting.
+  load().catch(e => { showError(e); return {}; }).then(c => {
+    showTab(tabFromHash() || (c.pending ? "pending" : c.abuse ? "abuse" : "users"));
+  });
 });

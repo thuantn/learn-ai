@@ -18,24 +18,22 @@
     <h1 class="hero-title small-title">Quản trị</h1>
     <a class="btn-studio-secondary" href="/">Về app</a>
   </header>
-  <nav class="admin-jump" aria-label="Các mục">
-    <a href="#pendingTitle">Chờ duyệt <span data-count="pending"></span></a>
-    <a href="#usersTitle">Tài khoản <span data-count="users"></span></a>
-    <a href="#aiTitle">Nhà cung cấp AI</a>
-    <a href="#abuseTitle">Báo vi phạm <span data-count="abuse"></span></a>
-    <a href="#packagesTitle">Gói bài <span data-count="packages"></span></a>
-    <a href="#logTitle">Nhật ký</a>
-  </nav>
+  <div class="admin-tabs" role="tablist" aria-label="Các mục quản trị">
+    <button type="button" class="admin-tab" role="tab" id="tab-pending" data-tab="pending" aria-controls="panel-pending" aria-selected="false" tabindex="-1">Chờ duyệt <span class="admin-count" data-count="pending"></span></button>
+    <button type="button" class="admin-tab" role="tab" id="tab-users" data-tab="users" aria-controls="panel-users" aria-selected="false" tabindex="-1">Tài khoản <span class="admin-count" data-count="users"></span></button>
+    <button type="button" class="admin-tab" role="tab" id="tab-ai" data-tab="ai" aria-controls="panel-ai" aria-selected="false" tabindex="-1">Nhà cung cấp AI</button>
+    <button type="button" class="admin-tab" role="tab" id="tab-abuse" data-tab="abuse" aria-controls="panel-abuse" aria-selected="false" tabindex="-1">Báo vi phạm <span class="admin-count" data-count="abuse"></span></button>
+    <button type="button" class="admin-tab" role="tab" id="tab-packages" data-tab="packages" aria-controls="panel-packages" aria-selected="false" tabindex="-1">Gói bài <span class="admin-count" data-count="packages"></span></button>
+    <button type="button" class="admin-tab" role="tab" id="tab-log" data-tab="log" aria-controls="panel-log" aria-selected="false" tabindex="-1">Nhật ký</button>
+  </div>
   <p class="studio-alert" id="adminMsg" role="status" hidden></p>
 
-  <section aria-labelledby="pendingTitle">
-    <h2 class="admin-section-title" id="pendingTitle">Chờ duyệt ô Hỏi <span class="admin-count" data-count="pending"></span></h2>
+  <section class="admin-panel" id="panel-pending" role="tabpanel" aria-labelledby="tab-pending" tabindex="0" hidden>
     <div class="lesson-stream" id="pendingList"></div>
     <p class="dock-note" id="pendingEmpty" hidden>Không có gói nào đang chờ.</p>
   </section>
 
-  <section aria-labelledby="usersTitle">
-    <h2 class="admin-section-title" id="usersTitle">Tài khoản <span class="admin-count" data-count="users"></span></h2>
+  <section class="admin-panel" id="panel-users" role="tabpanel" aria-labelledby="tab-users" tabindex="0" hidden>
     <form class="flow-strip admin-form" id="userAddForm">
       <label class="auth-label" for="userAddName"><span>Email người mới</span></label>
       <div class="share-add">
@@ -52,8 +50,7 @@
     <p class="dock-note" id="userNoMatch" hidden>Không có tài khoản nào khớp.</p>
   </section>
 
-  <section aria-labelledby="aiTitle">
-    <h2 class="admin-section-title" id="aiTitle">Nhà cung cấp AI</h2>
+  <section class="admin-panel" id="panel-ai" role="tabpanel" aria-labelledby="tab-ai" tabindex="0" hidden>
     <form class="flow-strip admin-form" id="aiForm">
       <p class="dock-note" id="aiCurrent"></p>
       <p class="studio-alert wait" id="aiWarn" hidden></p>
@@ -71,20 +68,17 @@
     </form>
   </section>
 
-  <section aria-labelledby="abuseTitle">
-    <h2 class="admin-section-title" id="abuseTitle">Báo vi phạm <span class="admin-count" data-count="abuse"></span></h2>
+  <section class="admin-panel" id="panel-abuse" role="tabpanel" aria-labelledby="tab-abuse" tabindex="0" hidden>
     <div class="lesson-stream" id="abuseList"></div>
     <p class="dock-note" id="abuseEmpty" hidden>Chưa có báo cáo nào.</p>
   </section>
 
-  <section aria-labelledby="packagesTitle">
-    <h2 class="admin-section-title" id="packagesTitle">Tất cả gói bài <span class="admin-count" data-count="packages"></span></h2>
+  <section class="admin-panel" id="panel-packages" role="tabpanel" aria-labelledby="tab-packages" tabindex="0" hidden>
     <div class="lesson-stream" id="packageList"></div>
     <p class="dock-note" id="packagesEmpty" hidden>Chưa có gói nào.</p>
   </section>
 
-  <section aria-labelledby="logTitle">
-    <h2 class="admin-section-title" id="logTitle">Nhật ký</h2>
+  <section class="admin-panel" id="panel-log" role="tabpanel" aria-labelledby="tab-log" tabindex="0" hidden>
     <div class="lesson-stream" id="logList"></div>
     <p class="dock-note" id="logEmpty" hidden>Chưa có gì.</p>
   </section>

@@ -96,21 +96,41 @@ def commit_upload(pg, path):
     pg.wait_for_selector("#uploadDialog", state="hidden")
 
 
+def tab(pg, name):
+    """Opens one admin tab and waits until its panel shows."""
+    pg.click(f"#tab-{name}")
+    pg.wait_for_selector(f"#panel-{name}:not([hidden])")
+
+
+ADMIN_TABS = ("pending", "users", "ai", "abuse", "packages", "log")
+
+
 def layout(pg, base):
     for width, height in ((360, 740), (390, 844), (1024, 768), (1440, 900)):
         pg.set_viewport_size({"width": width, "height": height})
         pg.goto(base + "/admin")
-        pg.wait_for_selector("#userList .stream-row")
-        over = pg.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
-        check(f"admin {width}px no horizontal scroll", over <= 0, over)
-        small = pg.evaluate("""() => [...document.querySelectorAll('.admin-page button, .admin-page a, .admin-page select, .admin-page input')]
-            .filter(e => e.offsetParent && e.getBoundingClientRect().height < 44).map(e => e.id || e.textContent.trim()).slice(0, 5)""")
-        check(f"admin {width}px touch targets", not small, small)
+        pg.wait_for_selector(".admin-panel:not([hidden])")
+        for name in ADMIN_TABS:
+            tab(pg, name)
+            pg.wait_for_timeout(50)
+            over = pg.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+            check(f"admin {width}px {name} no horizontal scroll", over <= 0, over)
+            small = pg.evaluate("""() => [...document.querySelectorAll('.admin-page button, .admin-page a, .admin-page select, .admin-page input')]
+                .filter(e => e.offsetParent && e.getBoundingClientRect().height < 44).map(e => e.id || e.textContent.trim()).slice(0, 5)""")
+            check(f"admin {width}px {name} touch targets", not small, small)
+            shown = pg.evaluate("[...document.querySelectorAll('.admin-panel')].filter(p => !p.hidden).map(p => p.id)")
+            check(f"admin {width}px {name} shows only its panel", shown == [f"panel-{name}"], shown)
+            narrow = pg.evaluate("[...document.querySelectorAll('.admin-page .lib-info')].filter(e => e.offsetParent && e.offsetWidth < 240).length")
+            check(f"admin {width}px {name} rows keep their width", narrow == 0, narrow)
+            if name == "users":
+                pg.screenshot(path=str(SHOTS / f"admin-{width}.png"), full_page=True)
+        pg.goto(base + "/admin#log")
+        pg.wait_for_selector("#panel-log:not([hidden])")
+        pg.wait_for_timeout(300)
+        box, bar = pg.locator("#tab-log").bounding_box(), pg.locator(".admin-tabs").bounding_box()
+        check(f"admin {width}px a linked tab is in view", box["x"] >= bar["x"] - 1 and box["x"] + box["width"] <= bar["x"] + bar["width"] + 1, (box, bar))
         colors = pg.evaluate("(() => { const s = getComputedStyle(document.getElementById('aiProvider')); return [s.color, s.backgroundColor]; })()")
         check(f"admin {width}px provider select is readable", colors[0] != colors[1] and colors[1] not in ("rgb(255, 255, 255)", "rgba(0, 0, 0, 0)"), colors)
-        narrow = pg.evaluate("[...document.querySelectorAll('.admin-page .lib-info')].filter(e => e.offsetWidth < 240).length")
-        check(f"admin {width}px rows keep their width", narrow == 0, narrow)
-        pg.screenshot(path=str(SHOTS / f"admin-{width}.png"), full_page=True)
 
 
 def run(br, base, temp, work):
@@ -156,6 +176,15 @@ def run(br, base, temp, work):
     boss.wait_for_selector("#pendingList .stream-row")
     check("pending package is listed", "Bài <img" in boss.locator("#pendingList").inner_text())
     check("package title stays text", boss.evaluate("window.__xss") is None)
+    check("opens on the tab with waiting work", boss.get_attribute("#tab-pending", "aria-selected") == "true" and boss.evaluate("location.hash") == "#pending")
+    check("waiting work stands out on its tab", "has-work" in (boss.get_attribute("#tab-pending", "class") or ""))
+    boss.focus("#tab-pending")
+    boss.keyboard.press("ArrowRight")
+    check("arrow key moves to the next tab", boss.evaluate("document.activeElement.id") == "tab-users" and boss.is_visible("#panel-users"))
+    tab(boss, "ai")
+    boss.reload()
+    boss.wait_for_selector("#panel-ai:not([hidden])")
+    check("reload keeps the open tab", not boss.is_visible("#panel-pending"))
     check("no key yet is stated", "Chưa có khóa" in boss.inner_text("#aiCurrent"))
     boss.screenshot(path=str(SHOTS / "admin-empty.png"), full_page=True)
 
@@ -183,6 +212,7 @@ def run(br, base, temp, work):
     calls = len(SEEN)
 
     # The admin reads, the author changes the text meanwhile: the approval must fail.
+    tab(boss, "pending")
     boss.click("#pendingList [type=button]")
     boss.wait_for_selector("#reviewDialog[open]")
     check("review shows what the AI will read", "Bản một" in boss.inner_text("#reviewBody"))
@@ -352,6 +382,7 @@ def run(br, base, temp, work):
         binh.click("#lessonAskBtn")
 
     # Turning it off works at once, for a page already open too.
+    tab(boss, "packages")
     boss.click("#packageList button:has-text('Tắt ô Hỏi')")
     confirm_ok(boss)
     boss.wait_for_selector("#packageList .meta-pill:has-text('đã tắt')")
@@ -366,6 +397,7 @@ def run(br, base, temp, work):
     # A new version with other text goes back to the queue.
     call(an, "POST", f"/api/packages/{pid}/ask-request")
     boss.reload()
+    tab(boss, "pending")
     boss.wait_for_selector("#pendingList .stream-row")
     boss.click("#pendingList [type=button]")
     boss.wait_for_selector("#reviewDialog[open]")
@@ -382,6 +414,7 @@ def run(br, base, temp, work):
     r = call(binh, "POST", f"/api/lessons/{key}/feedback", {"kind": "abuse", "target_type": "lesson", "text": f"Báo cáo {XSS}"})
     check("report accepted", r["status"] == 200, r)
     boss.reload()
+    tab(boss, "abuse")
     boss.wait_for_selector("#abuseList .stream-row")
     check("report reaches the admin as text", "Báo cáo <img" in boss.inner_text("#abuseList") and boss.evaluate("window.__xss") is None)
     layout(boss, base)
@@ -397,8 +430,10 @@ def run(br, base, temp, work):
     boss.set_viewport_size({"width": 1280, "height": 900})
 
     binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
+    tab(boss, "abuse")
     boss.click("#abuseList button:has-text('Gỡ gói bài')")
     confirm_ok(boss, "Nội dung vi phạm")
+    tab(boss, "packages")
     boss.wait_for_selector("#packagesEmpty:not([hidden])")
     check("package is removed", True)
     check("removal is logged with the reason", "Nội dung vi phạm" in boss.inner_text("#logList"))
@@ -409,7 +444,7 @@ def run(br, base, temp, work):
     # Account management and password flow
     dung = "dung@example.com"
     boss.set_viewport_size({"width": 1280, "height": 900})
-    boss.goto(base + "/admin")
+    boss.goto(base + "/admin#users")
     boss.wait_for_selector("#userAddForm")
     boss.fill("#userAddName", dung)
     boss.click("#userAddForm button[type=submit]")
@@ -480,7 +515,7 @@ def run(br, base, temp, work):
     dung_pg.screenshot(path=str(SHOTS / "password-360.png"), full_page=True)
 
     # Admin removes account through #userRemoveDialog and row is gone
-    boss.goto(base + "/admin")
+    boss.goto(base + "/admin#users")
     boss.wait_for_selector(f"#userList .stream-row:has-text('{dung}')")
     boss.click(f"#userList .stream-row:has-text('{dung}') button[data-user-act=remove]")
     boss.wait_for_selector("#userRemoveDialog[open]")
@@ -496,7 +531,7 @@ def run(br, base, temp, work):
     # Screenshots of the admin page and the password page at 360 px with a scrollWidth <= 360 check
 
     boss.set_viewport_size({"width": 360, "height": 740})
-    boss.goto(base + "/admin")
+    boss.goto(base + "/admin#users")
     boss.wait_for_selector("#userList .stream-row")
     sw_admin = boss.evaluate("document.documentElement.scrollWidth")
     check("admin scrollWidth <= 360", sw_admin <= 360, sw_admin)
