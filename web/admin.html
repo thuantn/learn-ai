@@ -9,6 +9,7 @@
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="stylesheet" href="/static/app.css">
 <script src="/static/theme.js"></script>
+<script src="/static/confirm.js" defer></script>
 <script src="/static/admin.js" defer></script>
 </head>
 <body class="admin-body">
@@ -17,38 +18,52 @@
     <h1 class="hero-title small-title">Quản trị</h1>
     <a class="btn-studio-secondary" href="/">Về app</a>
   </header>
-  <p class="is-error-text" id="adminError" role="alert" hidden></p>
+  <nav class="admin-jump" aria-label="Các mục">
+    <a href="#pendingTitle">Chờ duyệt <span data-count="pending"></span></a>
+    <a href="#usersTitle">Tài khoản <span data-count="users"></span></a>
+    <a href="#aiTitle">Nhà cung cấp AI</a>
+    <a href="#abuseTitle">Báo vi phạm <span data-count="abuse"></span></a>
+    <a href="#packagesTitle">Gói bài <span data-count="packages"></span></a>
+    <a href="#logTitle">Nhật ký</a>
+  </nav>
+  <p class="studio-alert" id="adminMsg" role="status" hidden></p>
 
   <section aria-labelledby="pendingTitle">
-    <h2 class="list-heading" id="pendingTitle">Chờ duyệt ô Hỏi</h2>
+    <h2 class="admin-section-title" id="pendingTitle">Chờ duyệt ô Hỏi <span class="admin-count" data-count="pending"></span></h2>
     <div class="lesson-stream" id="pendingList"></div>
-    <p class="dock-note" id="pendingEmpty" hidden>Không có package nào đang chờ.</p>
+    <p class="dock-note" id="pendingEmpty" hidden>Không có gói nào đang chờ.</p>
   </section>
 
   <section aria-labelledby="usersTitle">
-    <h2 class="list-heading lib-second" id="usersTitle">Tài khoản</h2>
+    <h2 class="admin-section-title" id="usersTitle">Tài khoản <span class="admin-count" data-count="users"></span></h2>
     <form class="flow-strip admin-form" id="userAddForm">
-      <label class="auth-label" for="userAddName"><span>Email</span></label>
-      <div class="auth-input-box"><input type="email" id="userAddName" class="auth-input" autocomplete="off" spellcheck="false" required></div>
-      <div class="stream-actions">
+      <label class="auth-label" for="userAddName"><span>Email người mới</span></label>
+      <div class="share-add">
+        <div class="auth-input-box"><input type="email" id="userAddName" class="auth-input" autocomplete="off" spellcheck="false" placeholder="ten@congty.vn" required></div>
         <button type="submit" class="btn-studio-primary">Tạo tài khoản</button>
       </div>
+      <p class="studio-alert" id="userAddMsg" role="status" hidden></p>
     </form>
+    <div class="admin-search" id="userSearchBox" hidden>
+      <label class="auth-label" for="userSearch"><span>Tìm tài khoản</span></label>
+      <div class="auth-input-box"><input type="search" id="userSearch" class="auth-input" autocomplete="off" spellcheck="false" placeholder="Gõ một phần email"></div>
+    </div>
     <div class="lesson-stream" id="userList"></div>
+    <p class="dock-note" id="userNoMatch" hidden>Không có tài khoản nào khớp.</p>
   </section>
 
   <section aria-labelledby="aiTitle">
-    <h2 class="list-heading lib-second" id="aiTitle">Nhà cung cấp AI</h2>
+    <h2 class="admin-section-title" id="aiTitle">Nhà cung cấp AI</h2>
     <form class="flow-strip admin-form" id="aiForm">
       <p class="dock-note" id="aiCurrent"></p>
-      <p class="is-warn-text admin-note" id="aiWarn" hidden></p>
+      <p class="studio-alert wait" id="aiWarn" hidden></p>
       <label class="auth-label" for="aiProvider"><span>Nhà cung cấp</span></label>
       <div class="auth-input-box"><select class="auth-input" id="aiProvider"></select></div>
       <label class="auth-label" for="aiModel"><span>Model</span></label>
       <div class="auth-input-box"><input class="auth-input" id="aiModel" autocomplete="off" spellcheck="false"></div>
       <label class="auth-label" for="aiKey"><span>Khóa API</span></label>
       <div class="auth-input-box"><input class="auth-input" id="aiKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="Để trống nếu giữ khóa cũ"></div>
-      <p class="dock-note admin-note" id="aiResult" role="status"></p>
+      <p class="studio-alert" id="aiResult" role="status" hidden></p>
       <div class="stream-actions">
         <button type="submit" class="btn-studio-primary">Lưu</button>
         <button type="button" class="btn-studio-secondary" id="aiTest">Thử kết nối</button>
@@ -57,19 +72,19 @@
   </section>
 
   <section aria-labelledby="abuseTitle">
-    <h2 class="list-heading lib-second" id="abuseTitle">Báo vi phạm</h2>
+    <h2 class="admin-section-title" id="abuseTitle">Báo vi phạm <span class="admin-count" data-count="abuse"></span></h2>
     <div class="lesson-stream" id="abuseList"></div>
     <p class="dock-note" id="abuseEmpty" hidden>Chưa có báo cáo nào.</p>
   </section>
 
   <section aria-labelledby="packagesTitle">
-    <h2 class="list-heading lib-second" id="packagesTitle">Package</h2>
+    <h2 class="admin-section-title" id="packagesTitle">Tất cả gói bài <span class="admin-count" data-count="packages"></span></h2>
     <div class="lesson-stream" id="packageList"></div>
-    <p class="dock-note" id="packagesEmpty" hidden>Chưa có package nào.</p>
+    <p class="dock-note" id="packagesEmpty" hidden>Chưa có gói nào.</p>
   </section>
 
   <section aria-labelledby="logTitle">
-    <h2 class="list-heading lib-second" id="logTitle">Nhật ký</h2>
+    <h2 class="admin-section-title" id="logTitle">Nhật ký</h2>
     <div class="lesson-stream" id="logList"></div>
     <p class="dock-note" id="logEmpty" hidden>Chưa có gì.</p>
   </section>
@@ -77,12 +92,12 @@
 
 <dialog class="lesson-dialog admin-review" id="reviewDialog" aria-labelledby="reviewTitle">
   <div class="lesson-dialog-form">
-    <h2 class="list-heading" id="reviewTitle"></h2>
+    <h2 class="fc-title" id="reviewTitle"></h2>
     <p class="dock-note" id="reviewAuthor"></p>
-    <p class="is-warn-text admin-note" id="reviewZdr" hidden>Nhà cung cấp đang chọn không xác nhận ZDR. Nội dung bài và câu hỏi có thể được lưu ở phía họ.</p>
-    <p class="dock-note admin-note">Chưa có tùy chọn Internet, cần kiểm tra ZDR với khóa thật.</p>
+    <p class="studio-alert wait" id="reviewZdr" hidden>Nhà cung cấp đang chọn không xác nhận ZDR. Nội dung bài và câu hỏi có thể được lưu ở phía họ.</p>
+    <p class="dock-note admin-note">Khi được duyệt, Ô Hỏi trả lời dựa trên nội dung bên dưới, không tra cứu Internet.</p>
     <div id="reviewBody" class="admin-review-body"></div>
-    <p class="is-error-text" id="reviewError" role="alert" hidden></p>
+    <p class="studio-alert error" id="reviewError" role="alert" hidden></p>
     <div class="lesson-dialog-buttons">
       <button type="button" class="btn-studio-secondary" id="reviewClose">Đóng</button>
       <button type="button" class="btn-studio-secondary btn-danger-soft" id="reviewReject">Từ chối</button>
@@ -93,25 +108,26 @@
 
 <dialog class="lesson-dialog" id="userRemoveDialog" aria-labelledby="userRemoveTitle">
   <div class="lesson-dialog-form">
-    <h2 class="list-heading" id="userRemoveTitle">Xóa tài khoản</h2>
-    <p class="lesson-dialog-text">Tài khoản này, các package và tiến độ học sẽ bị xóa vĩnh viễn.</p>
+    <h2 class="fc-title" id="userRemoveTitle">Xóa tài khoản</h2>
+    <p class="lesson-dialog-text">Tài khoản này, các gói bài và tiến độ học sẽ bị xóa vĩnh viễn.</p>
     <label class="auth-label" for="userRemoveConfirm"><span>Nhập lại email để xác nhận</span></label>
     <div class="auth-input-box">
       <input type="text" id="userRemoveConfirm" class="auth-input" autocomplete="off" spellcheck="false">
     </div>
     <div class="lesson-dialog-buttons">
-      <button type="button" class="btn-studio-secondary" id="userRemoveCancel">Huỷ</button>
-      <button type="button" class="btn-studio-primary btn-danger-soft" id="userRemoveGo" disabled>Xóa</button>
+      <button type="button" class="btn-studio-secondary" id="userRemoveCancel">Hủy</button>
+      <button type="button" class="btn-studio-primary btn-danger-soft" id="userRemoveGo" data-icon="trash" disabled>Xóa</button>
     </div>
   </div>
 </dialog>
 
 <dialog class="lesson-dialog" id="credDialog" aria-labelledby="credTitle">
   <div class="lesson-dialog-form">
-    <h2 class="list-heading" id="credTitle">Thông tin tài khoản</h2>
+    <h2 class="fc-title" id="credTitle">Thông tin tài khoản</h2>
     <p class="dock-note" id="credName"></p>
+    <label class="auth-label" for="credPass"><span>Mật khẩu tạm</span></label>
     <div class="auth-input-box">
-      <input id="credPass" class="auth-input" readonly aria-label="Mật khẩu tạm">
+      <input id="credPass" class="auth-input" readonly>
     </div>
     <div class="stream-actions">
       <button type="button" class="btn-studio-primary" id="credCopy">Chép mật khẩu</button>

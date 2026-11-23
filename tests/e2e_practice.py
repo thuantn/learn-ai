@@ -88,6 +88,16 @@ def login_first(pg, base, name, temp, path="/"):
     pg.wait_for_selector("#screen-home.active")
 
 
+def confirm_ok(pg, text=None):
+    """Answers the app's own confirm dialog (web/static/confirm.js); returns what it said."""
+    pg.wait_for_selector("#confirmDialog[open]")
+    said = pg.inner_text("#confirmDialog")
+    if text is not None:
+        pg.fill("#confirmInput", text)
+    pg.click("#confirmDialog [data-confirm=ok]")
+    return said
+
+
 def call(pg, method, url, body=None):
     return pg.evaluate("""async ([method, url, body]) => {
         const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -221,6 +231,7 @@ def run(br, base, temp, work):
     an.wait_for_selector("#shareDialog", state="hidden")
 
     binh.goto(f"{base}/#join={token}")
+    confirm_ok(binh)
     poll(lambda: binh.locator("#screen-tests.active").is_visible())
     poll(lambda: binh.locator("#testsList .stream-row").count() == 3)
     tests_count = binh.locator("#testsList .stream-row").count()

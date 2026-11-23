@@ -793,10 +793,10 @@ function renderThemeLabel() {
   const label = document.documentElement.getAttribute("data-theme") === "dark" ? "Nền Sáng" : "Nền Tối";
   $$("[data-theme-label]").forEach(b => { b.textContent = label; b.dataset.icon = document.documentElement.getAttribute("data-theme") === "dark" ? "sun" : "moon"; });
 }
-async function logout() {
+async function logout(everywhere) {
   audio.pause();
   savePosition();
-  await fetch("/logout", send("POST")).catch(() => {});
+  await fetch(everywhere === true ? "/api/logout-all" : "/logout", send("POST")).catch(() => {});
   try {
     const theme = localStorage.getItem("theme");
     localStorage.clear();  // lesson pages keep notes here, and the next person on this browser must not see them
@@ -816,7 +816,10 @@ const ACTIONS = {
   reveal: revealCard,
   rate: el => rateCard(+el.dataset.r),
   theme: toggleTheme,
-  logout: logout,
+  logout: () => logout(false),
+  "logout-all": async () => {
+    if (await askConfirm({ title: "Đăng xuất mọi nơi?", text: "Mọi thiết bị đang đăng nhập tài khoản này, kể cả máy này, sẽ phải đăng nhập lại.", ok: "Đăng xuất mọi nơi" })) logout(true);
+  },
   "fb-card": () => {
     const c = state.cards[state.idx];
     if (c) openFeedback({ lesson: c.lesson, targetType: c.target_type, targetId: c.target_id, kind: "wrong", label: c.q });
@@ -1005,7 +1008,7 @@ function joinFromLink() {
   if (!m) return false;
   history.replaceState(null, "", "#home");
   api("/api/join", send("POST", { token: m[1], preview: true })).then(async p => {
-    if (!p.mine && !confirm(`Tác giả ${p.author} chia sẻ bài này:\n${p.title.replace(/\s+/g, " ")}\n\nThêm vào thư viện?`)) return;
+    if (!p.mine && !await askConfirm({ title: "Thêm vào thư viện?", text: `${p.title.replace(/\s+/g, " ")}\nTác giả: ${p.author}`, ok: "Thêm vào thư viện" })) return;
     const d = await api("/api/join", send("POST", { token: m[1] }));
     if (d.first_lesson) location.replace("/lesson/" + d.first_lesson);
     else location.hash = "#tests=" + d.package_id;
@@ -1022,6 +1025,7 @@ document.addEventListener("DOMContentLoaded", () => (async function init() {
   state.me = await api("/api/me");
   const isAdmin = !!(state.me && state.me.admin);
   document.querySelectorAll("[data-admin-link]").forEach(a => a.hidden = !isAdmin);
+  document.querySelectorAll("[data-whoami]").forEach(p => { p.textContent = state.me ? state.me.id : ""; });
   renderSpeed();
   renderThemeLabel();
   joinFromLink();

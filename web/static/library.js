@@ -3,7 +3,7 @@
 const MAX_ZIP = 300 * 1024 * 1024;
 // Up to about 5 minutes of waiting per part: office and home networks drop for longer than a few seconds.
 const PART_TRIES = 12;
-let upload = { xhr: null, controller: null, session: null, id: null, removed: [] };
+let upload = { xhr: null, controller: null, session: null, id: null, removed: [], expect: null };
 let sharing = null;
 
 function el(tag, className, text) {
@@ -40,7 +40,6 @@ async function loadLibrary() {
 const ASK_LABEL = { pending: "Ô Hỏi: chờ admin duyệt", approved: "Ô Hỏi: đang bật", rejected: "Ô Hỏi: đã tắt hoặc bị từ chối" };
 
 function renderLibrary(d) {
-  $("libAdmin").hidden = !(state.me && state.me.admin);
   $("libUsed").textContent = `${size(d.used)} / ${size(d.quota)}`;
   const usedPercent = Math.min(100, Math.round(d.used / d.quota * 100));
   $("libMeter").style.width = usedPercent + "%";
@@ -57,7 +56,7 @@ function renderLibrary(d) {
       p.lessons && p.lessons.length ? `${p.lessons.length} bài` : null,
       p.tests && p.tests.length ? `${p.tests.length} đề` : null,
       size(p.size_bytes),
-      `${p.people} người được chia sẻ`,
+      p.people && `${p.people} người được chia sẻ`,
       p.link_on && "Link đang bật"
     ].filter(Boolean);
     pillList.forEach(t => pills.append(el("span", "meta-pill", t)));
@@ -76,8 +75,12 @@ function renderLibrary(d) {
     }
     act.append(actionButton("Chia sẻ", "lib-share", p.id));
     if (p.feedback > 0) act.append(actionButton(`Xem góp ý (${p.feedback})`, "lib-feedback", p.id));
-    act.append(actionButton("Tải bản mới", "lib-upload"), actionButton("Xóa", "lib-delete", p.id, "btn-studio-secondary btn-danger-soft"));
     if (p.has_content && (p.ask_status === "none" || p.ask_status === "rejected")) act.append(actionButton("Xin bật ô Hỏi", "lib-ask", p.id));
+    act.append(actionButton("Tải bản mới", "lib-upload", p.id));
+    // Deleting is irreversible, so it sits apart at the end of the row.
+    const del = actionButton("Xóa", "lib-delete", p.id, "btn-studio-secondary btn-danger-soft row-danger");
+    del.dataset.icon = "trash";
+    act.append(del);
     row.append(info, act);
     mine.append(row);
   });
@@ -110,7 +113,8 @@ function renderLibrary(d) {
 
 async function deletePackage(id) {
   const p = state.library.mine.find(x => x.id === id);
-  if (!p || !confirm(`Xóa "${p.title}"? Người học mất quyền ngay và tiến độ của mọi người với bài này bị xóa.`)) return;
+  if (!p || !await askConfirm({ title: `Xóa "${p.title}"?`, text: "Người được chia sẻ mất quyền ngay, tiến độ và góp ý của mọi người với gói này bị xóa. Không hoàn tác được.",
+    ok: "Xóa", danger: true, icon: "trash" })) return;
   await api(`/api/packages/${id}`, { method: "DELETE" });
   await refresh();
   await loadLibrary();
@@ -122,7 +126,12 @@ const MAX_TESTS_TOTAL = 16 * 1024 * 1024;
 function uploadStep(step) {
   ["upPick", "upBusy", "upError", "upConfirm"].forEach(id => { $(id).hidden = id !== step; });
 }
-function openUpload() {
+function openUpload(b) {
+  // "Tải bản mới" on a row remembers which package it is for; "Chọn file khác" keeps that.
+  if (!b || !b.dataset || b.dataset.act !== "up-again") {
+    upload.expect = b && b.dataset && b.dataset.id ? state.library.mine.find(x => x.id === b.dataset.id) || null : null;
+  }
+  $("upHeading").textContent = upload.expect ? `Tải bản mới: ${upload.expect.title}` : "Tải lên bài học";
   if (upload.xhr) upload.xhr.abort();
   upload.xhr = null;
   if (upload.controller) upload.controller.abort();
@@ -549,6 +558,9 @@ function showConfirm(d) {
   $("upRemovedBox").hidden = !d.removed || d.removed.length === 0;
   fill("upWarnings", (d.warnings || []).map(w => w.message || w));
   $("upWarningsBox").hidden = !d.warnings || d.warnings.length === 0;
+  const other = upload.expect && d.slug !== upload.expect.slug;
+  $("upTargetWarn").textContent = other ? `File này là gói "${d.title}", không phải bản mới của "${upload.expect.title}". Đăng tiếp sẽ ${d.is_update ? "cập nhật gói kia" : "tạo gói mới"}.` : "";
+  $("upTargetWarn").hidden = !other;
   $("upAttest").checked = false;
   $("upCommit").disabled = true;
   $("upConfirmError").hidden = true;
@@ -674,11 +686,12 @@ async function removePerson(button) {
   await renderPeople();
 }
 async function newLink() {
-  if ($("shareLink").value && !confirm("Link cũ sẽ hết tác dụng. Tạo link mới?")) return;
+  if ($("shareLink").value && !await askConfirm({ title: "Tạo link mới?", text: "Link cũ sẽ hết tác dụng. Ai chưa vào bằng link cũ sẽ cần link mới.", ok: "Tạo link mới" })) return;
   showLink((await api(`/api/packages/${sharing}/link`, send("POST"))).url);
   $("shareCopied").textContent = "";
 }
 async function linkOff() {
+  if (!await askConfirm({ title: "Tắt link chia sẻ?", text: "Link hiện tại hết tác dụng. Bật lại sẽ ra link khác. Người đã vào học vẫn giữ quyền.", ok: "Tắt link", danger: true })) return;
   await api(`/api/packages/${sharing}/link`, { method: "DELETE" });
   showLink(null);
   $("shareCopied").textContent = "";
@@ -686,10 +699,10 @@ async function linkOff() {
 async function copyLink() {
   try {
     await navigator.clipboard.writeText($("shareLink").value);
-    $("shareCopied").textContent = "Đã copy link.";
+    $("shareCopied").textContent = "Đã chép link.";
   } catch (e) {
     $("shareLink").select();
-    $("shareCopied").textContent = "Không copy tự động được. Hãy tự chép link đang chọn.";
+    $("shareCopied").textContent = "Không chép tự động được. Hãy tự chép link đang chọn.";
   }
 }
 async function closeShare() {
@@ -773,13 +786,13 @@ Object.assign(ACTIONS, {
   "test-stats-close": () => $("testStatsDialog").close(),
   "lib-delete": b => deletePackage(b.dataset.id),
   "lib-ask": async b => {
-    if (!confirm("Xin bật ô Hỏi? Admin sẽ đọc nội dung bài. Khi được duyệt, nội dung bài và câu hỏi của người học được gửi tới nhà cung cấp AI.")) return;
+    if (!await askConfirm({ title: "Xin bật ô Hỏi?", text: "Admin sẽ đọc nội dung bài. Khi được duyệt, nội dung bài và câu hỏi của người học được gửi tới nhà cung cấp AI.", ok: "Gửi yêu cầu" })) return;
     await api(`/api/packages/${b.dataset.id}/ask-request`, send("POST", {}));
     await refresh();
     go("library", true);
   },
   "lib-leave": async b => {
-    if (!confirm("Bỏ bài này khỏi thư viện? Muốn học lại, bạn cần nhờ tác giả chia sẻ lại.")) return;
+    if (!await askConfirm({ title: "Bỏ bài này khỏi thư viện?", text: "Muốn học lại, bạn cần nhờ tác giả chia sẻ lại.", ok: "Bỏ khỏi thư viện", danger: true })) return;
     await api(`/api/packages/${b.dataset.id}/leave`, send("POST", {}));
     await refresh();
     go("library", true);

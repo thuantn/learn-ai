@@ -19,7 +19,7 @@ import zipfile
 
 from playwright.sync_api import sync_playwright
 
-from e2e_platform import FAILS, ROOT, SHOTS, XSS, check, free_port, login_first, make_zip, upload
+from e2e_platform import FAILS, ROOT, SHOTS, XSS, check, confirm_ok, free_port, login_first, make_zip, upload
 
 KEY = "sk-test-abcd1234"
 SEEN = []
@@ -131,7 +131,7 @@ def run(br, base, temp, work):
     check("admin API looks like an unknown route", r.status == 404 and r.body() == unknown.body(), r.status)
     cuong.goto(base + "/#library")
     cuong.wait_for_selector("#screen-library.active")
-    check("no admin link for a normal account", not cuong.locator("#libAdmin").is_visible())
+    check("no admin link for a normal account", cuong.locator("#accountMenu [data-admin-link]").get_attribute("hidden") is not None)
 
     # The author asks for Ask.
     an.goto(base + "/#library")
@@ -143,6 +143,7 @@ def run(br, base, temp, work):
     key = f"{pid}.sample"
     call(an, "POST", f"/api/packages/{pid}/share", {"email": "binh@example.com"})
     an.click("#libMine [data-act=lib-ask]")
+    confirm_ok(an)
     an.wait_for_selector("#libMine .meta-pill:has-text('chờ admin duyệt')")
     check("author sees the request is waiting", True)
     check("request button is gone", an.locator("#libMine [data-act=lib-ask]").count() == 0)
@@ -150,7 +151,7 @@ def run(br, base, temp, work):
     # The admin page, before any key.
     boss.goto(base + "/#library")
     boss.wait_for_selector("#screen-library.active")
-    check("admin link for an admin", boss.locator("#libAdmin").is_visible())
+    check("admin link for an admin", boss.locator("#accountMenu [data-admin-link]").get_attribute("hidden") is None)
     boss.goto(base + "/admin")
     boss.wait_for_selector("#pendingList .stream-row")
     check("pending package is listed", "Bài <img" in boss.locator("#pendingList").inner_text())
@@ -352,6 +353,7 @@ def run(br, base, temp, work):
 
     # Turning it off works at once, for a page already open too.
     boss.click("#packageList button:has-text('Tắt ô Hỏi')")
+    confirm_ok(boss)
     boss.wait_for_selector("#packageList .meta-pill:has-text('đã tắt')")
     calls = len(SEEN)
     binh.fill("#askInput", "Câu sau khi tắt")
@@ -395,7 +397,8 @@ def run(br, base, temp, work):
     boss.set_viewport_size({"width": 1280, "height": 900})
 
     binh.goto(f"{base}/lesson/{key}", wait_until="networkidle")
-    boss.click("#abuseList button:has-text('Gỡ package')")
+    boss.click("#abuseList button:has-text('Gỡ gói bài')")
+    confirm_ok(boss, "Nội dung vi phạm")
     boss.wait_for_selector("#packagesEmpty:not([hidden])")
     check("package is removed", True)
     check("removal is logged with the reason", "Nội dung vi phạm" in boss.inner_text("#logList"))

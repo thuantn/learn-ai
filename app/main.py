@@ -224,6 +224,16 @@ async def logout(request: Request):
     return resp
 
 
+@app.post("/api/logout-all")
+async def logout_all(request: Request):
+    """Ends every session of this user, this one included."""
+    with db.connect() as c:
+        c.execute("DELETE FROM sessions WHERE user=?", (request.state.user,))
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.cookie_name(), path="/", secure=os.environ.get("COOKIE_SECURE", "1") == "1", httponly=True, samesite="strict")
+    return resp
+
+
 @app.post("/api/change-password")
 async def change_password(request: Request):
     data = await read_json(request)
@@ -741,7 +751,7 @@ async def list_packages(request: Request):
         mine = [{
             "id": r["id"], "title": r["title"], "topic": r["topic"], "description": r["description"],
             "version": r["version"], "size_bytes": r["size_bytes"], "lessons": titles[r["id"]], "first_lesson": first.get(r["id"]),
-            "tests": tests[r["id"]],
+            "tests": tests[r["id"]], "slug": r["slug"],
             "people": c.execute("SELECT count(*) n FROM package_access WHERE package_id=? AND revoked_at IS NULL", (r["id"],)).fetchone()["n"],
             "link_on": bool(r["link_nonce"]), "ask_status": r["ask_status"], "has_content": admin.has_content(c, r["id"]),
             "feedback": c.execute("SELECT count(*) n FROM feedback WHERE package_id=?", (r["id"],)).fetchone()["n"],

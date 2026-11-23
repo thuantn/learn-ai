@@ -139,6 +139,16 @@ def login_first(pg, base, name, temp, path="/"):
     pg.click("#submitBtn")
 
 
+def confirm_ok(pg, text=None):
+    """Answers the app's own confirm dialog (web/static/confirm.js); returns what it said."""
+    pg.wait_for_selector("#confirmDialog[open]")
+    said = pg.inner_text("#confirmDialog")
+    if text is not None:
+        pg.fill("#confirmInput", text)
+    pg.click("#confirmDialog [data-confirm=ok]")
+    return said
+
+
 def upload(pg, path):
     pg.locator("#screen-library [data-act=lib-upload]").first.click()
     pg.set_input_files("#upFile", str(path))
@@ -310,6 +320,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     link = a.input_value("#shareLink")
     c = new_page(br, errs)
     login_first(c, base, "cuong@example.com", temp["cuong@example.com"], link.replace(base, ""))
+    dialogs.append(confirm_ok(c))
     c.wait_for_url("**/lesson/**")
     check("link survives login and password change", "/lesson/p" in c.url, c.url)
     check("joining asked first", any("Thêm vào thư viện" in x for x in dialogs), dialogs[:2])
@@ -377,6 +388,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     a.goto(base + "/#library")
     a.wait_for_selector("#libMine .stream-row")
     a.locator("#libMine .stream-row", has_text="Bài có audio").locator("[data-act=lib-delete]").click()
+    check("delete asks first", "Không hoàn tác" in confirm_ok(a))
     a.wait_for_timeout(800)
     check("delete removes the row", a.locator("#libMine .stream-row").count() == 1)
 
@@ -464,6 +476,7 @@ def run(br, base, temp, good, audio, bad, good2=None):
     c.reload()
     c.wait_for_selector("#libShared .stream-row")
     c.click("#libShared [data-act=lib-leave]")
+    confirm_ok(c)
     c.wait_for_selector("#libSharedEmpty:not([hidden])")
     check("leaving removes it from the library", c.locator("#libShared .stream-row").count() == 0)
     check("no page errors or CSP blocks", not errs, errs[:4])

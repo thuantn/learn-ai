@@ -212,6 +212,19 @@ def test_logout_ends_session_on_server(ctx, capsys):
         assert c.get("/api/me").status_code == 401
 
 
+def test_logout_all_ends_only_own_sessions(ctx, capsys):
+    main, cli, tmp = ctx
+    a1 = ready_user(main, cli, capsys)
+    a2 = client(main)
+    assert login(a2, "an", GOOD).status_code == 200
+    b = ready_user(main, cli, capsys, name="binh")
+    with a1, a2, b:
+        assert a1.post("/api/logout-all").status_code == 200
+        assert a1.get("/api/me").status_code == 401
+        assert a2.get("/api/me").status_code == 401
+        assert b.get("/api/me").status_code == 200
+
+
 def test_session_expiry(ctx, capsys):
     main, cli, tmp = ctx
     c = ready_user(main, cli, capsys)
